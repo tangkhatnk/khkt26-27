@@ -55,19 +55,57 @@ function messageFor(status, format = '') {
       ? 'Đã giữ thông tin tệp; định dạng Office cũ này chưa được trích xuất nội dung.'
       : 'Đã giữ thông tin tệp; ứng dụng chưa trích xuất được nội dung của định dạng này.';
   }
-  if (status === 'empty') return 'Tệp không có văn bản có thể đọc. PDF dạng ảnh cần OCR để nhận nội dung.';
-  return 'Không đọc được nội dung tệp. Tệp có thể bị lỗi, được mã hóa hoặc sai định dạng.';
+  if (status === 'empty') {
+    return format === 'pdf'
+      ? 'Không tìm thấy văn bản trong PDF. Tệp có thể là ảnh quét; ứng dụng chưa hỗ trợ OCR.'
+      : 'Tệp không có văn bản có thể đọc.';
+  }
+  return 'Không đọc được nội dung tệp. Tệp có thể bị lỗi hoặc sai định dạng.';
 }
 
-function makeResult(file, status, text = '', format = '') {
+function makeResult(file, status, text = '', format = '', message) {
   return {
     name: String(file?.name || 'Tệp không tên'),
     size: Number.isFinite(Number(file?.size)) ? Number(file.size) : 0,
     type: String(file?.type || ''),
     text,
     status,
-    message: messageFor(status, format),
+    message: message ?? messageFor(status, format),
   };
+}
+
+export function materialExtractionErrorMessage(error) {
+  const code = error?.officeIssue?.code ?? error?.code;
+  const detail = [
+    error?.message,
+    error?.cause?.message,
+    error?.details?.originalError?.message,
+    error?.officeIssue?.details?.originalError?.message,
+  ].filter(Boolean).join(' ');
+
+  if (code === 'PDF_WORKER_MISSING' ||
+      /pdf(?:\.js)? worker|worker.{0,40}(?:failed|missing|load)|(?:failed|missing|load).{0,40}worker|workerSrc/i.test(detail)) {
+    return 'Không tải được bộ đọc PDF trên thiết bị. Hãy tải lại ứng dụng rồi thử lại.';
+  }
+
+  if (error?.materialExtractionIssue === 'parser-module' ||
+      error?.name === 'ChunkLoadError' ||
+      code === 'ERR_MODULE_NOT_FOUND' ||
+      /failed to fetch dynamically imported module|error loading dynamically imported module/i.test(detail)) {
+    return 'Không tải được thành phần đọc tài liệu. Hãy tải lại ứng dụng rồi thử lại.';
+  }
+
+  if (['PASSWORD_REQUIRED', 'PASSWORD_INCORRECT', 'DOCUMENT_DECRYPTION_FAILED'].includes(code) ||
+      /password-protected|password required|password incorrect|encrypted document|could not decrypt/i.test(detail)) {
+    return 'Tệp được bảo vệ bằng mật khẩu hoặc mã hóa; hãy gỡ bảo vệ rồi nhập lại.';
+  }
+
+  if (['FILE_CORRUPTED', 'IMPROPER_BUFFERS', 'INVALID_INPUT', 'ZIP_NO_ENTRIES_FOUND', 'ZIP_TRUNCATED', 'REQUIRED_PART_MISSING'].includes(code) ||
+      /corrupt|malformed|not a zip|invalid (?:pdf|xml|document|file)|pdf.{0,30}(?:corrupt|invalid)|missing its required/i.test(detail)) {
+    return 'Tệp bị hỏng, bị cắt hoặc nội dung không khớp với định dạng đã chọn.';
+  }
+
+  return messageFor('error');
 }
 
 function safeText(value) {
@@ -114,7 +152,14 @@ function pdfWorkerUrl(override) {
 
 async function extractOffice(bytes, format, options) {
   // Keep only OfficeParser's browser entry in the web bundle; this flow never runs OCR.
-  const parserModule = await import('officeparser/slim');
+  let parserModule;
+  try {
+    parserModule = await import('officeparser/slim');
+  } catch (cause) {
+    const error = new Error('Unable to load the browser document parser.', { cause });
+    error.materialExtractionIssue = 'parser-module';
+    throw error;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PARSE_TIMEOUT_MS);
   try {
@@ -228,7 +273,7 @@ export async function extractMaterialFile(file, options = {}) {
   const detected = formatFromFile(file);
   if (detected.kind === 'unsupported-legacy') return makeResult(file, 'metadata-only', '', 'legacy');
   if (detected.kind === 'unsupported') return makeResult(file, 'metadata-only');
-  if (Number.isFinite(size) && size === 0) return makeResult(file, 'empty');
+  if (Number.isFinite(size) && size === 0) return makeResult(file, 'empty', '', detected.format);
 
   const requested = Number.isFinite(Number(options.maxTextChars))
     ? Math.min(MAX_TEXT_CHARS, Math.max(0, Math.floor(Number(options.maxTextChars))))
@@ -237,7 +282,7 @@ export async function extractMaterialFile(file, options = {}) {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.byteLength > MAX_FILE_BYTES) return makeResult(file, 'too-large');
-    if (bytes.byteLength === 0) return makeResult(file, 'empty');
+    if (bytes.byteLength === 0) return makeResult(file, 'empty', '', detected.format);
 
     let extracted;
     if (detected.kind === 'text') {
@@ -250,9 +295,9 @@ export async function extractMaterialFile(file, options = {}) {
 
     const sourceText = safeText(extracted.text);
     const limited = limitText(sourceText, requested);
-    if (!sourceText) return makeResult(file, 'empty');
+    if (!sourceText) return makeResult(file, 'empty', '', detected.format);
     return makeResult(file, extracted.truncated || limited.truncated ? 'truncated' : 'extracted', limited.text);
-  } catch {
-    return makeResult(file, 'error');
+  } catch (error) {
+    return makeResult(file, 'error', '', '', materialExtractionErrorMessage(error));
   }
 }

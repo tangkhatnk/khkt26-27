@@ -1,69 +1,138 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as focus from '../src/adventure/focus.ts';
-const { tick, observe, classify, focused, pause, resume, restore } = focus;
-const trip = () => ({ id:'test', owner:'guest', goal:'Read biology', topic:'biology', document:'', target:600, groupId:null, started:1000, lastAt:1000, segments:[], state:'focus', reconnect:0 });
-test('unclassified background time does not earn progress until confirmed', () => {
-  const waiting = observe(trip(), 11000);
-  assert.equal(focused(tick(waiting, 61000)), 10);
-  assert.equal(focused(classify(waiting, 'material', 61000)), 60);
-  const distracted = classify(waiting, 'distraction', 61000);
-  assert.equal(focused(distracted), 10);
-  assert.equal(distracted.state, 'reconnecting');
+
+const { tick, depart, returnFromBackground, leaveFocusView, restore, focused, elapsedSeconds, sessionEndAt } = focus;
+const trip = (target = 600) => ({
+  id: 'test', owner: 'guest', goal: 'Read biology', topic: 'biology', document: '',
+  target, groupId: null, started: 1000, lastAt: 1000, segments: [], state: 'focus',
+  reconnect: 0, distractions: 0,
 });
-test('reconnection counts as learning, repeated distraction resets only recovery', () => {
-  let s = classify(observe(trip(), 11000), 'distraction', 31000);
-  s = tick(s, 91000);
-  assert.equal(focused(s), 70); assert.equal(s.reconnect, 60);
-  s = classify(observe(s, 101000), 'distraction', 111000);
-  assert.equal(focused(s), 80); assert.equal(s.reconnect, 120);
-  s = tick(s, 231000);
-  assert.equal(s.state, 'focus'); assert.equal(focused(s), 200);
-});
-test('pause preserves the goal and restart makes uncertain time pending', () => {
-  const paused = pause(trip(), 11000);
-  const continued = resume(paused, 111000);
-  assert.equal(focused(continued), 10);
-  assert.equal(focused(tick(continued, 121000)),20);
-  assert.equal(restore(continued).state, 'pending');
-  assert.equal(restore(paused).state, 'paused');
-});
-test('ticks clamp to target duration and never create overlap', () => {
-  const s = tick(trip(), 900000);
-  assert.equal(focused(s), 600);
-  assert.equal(s.segments.length, 1);
-  assert.equal(s.segments[0].end,601000);
-  assert.equal(focused(tick(s,950000)),600);
-});
-test('device clock rollback never awards negative or invented time', () => {
-  const s = tick(trip(), 11000);
-  const back = tick(s,5000);
-  assert.equal(back.state,'pending'); assert.equal(focused(back),10);
-  assert.equal(focused(classify(back,'material',6000)),10);
-});
-test('an intentional break clears recovery without losing earned study', () => {
-  const recovering = classify(observe(trip(), 11000), 'distraction', 31000);
-  const continued = resume(pause(recovering, 91000), 111000);
-  assert.equal(continued.state, 'focus');
-  assert.equal(continued.reconnect, 0);
-  assert.equal(focused(continued), 70);
-});
-test('a brief window switch is noise but a longer absence stays unclassified', () => {
-  const waiting = observe(trip(), 11000);
-  const brief = focus.returnFromBackground(waiting, 13000);
-  assert.equal(brief.state, 'focus');
-  assert.equal(focused(brief), 12);
-  const long = focus.returnFromBackground(waiting, 15000);
-  assert.equal(long.state, 'pending');
-  assert.equal(focused(long), 10);
-});
-test('restart uncertainty cannot be cleared as a brief window switch', () => {
-  const restarted = restore(observe(trip(), 11000));
-  assert.equal(focus.returnFromBackground(restarted, 12000).state, 'pending');
-});
-test('leaving the study view cannot use the brief-window grace to earn time', () => {
-  const away = focus.leaveFocusView(trip(), 11000);
-  const returned = focus.returnFromBackground(away, 12000);
-  assert.equal(returned.state, 'pending');
+
+test('blur, visibility, pagehide, and route departure record one distraction', () => {
+  const first = depart(trip(), 11000);
+  const duplicate = leaveFocusView(depart(first, 12000), 13000);
+
+  assert.equal(duplicate.state, 'away');
+  assert.equal(duplicate.distractions, 1);
+  assert.equal(focused(duplicate), 10);
+
+  const returned = returnFromBackground(duplicate, 31000);
+  assert.equal(returned.state, 'focus');
+  assert.equal(returned.distractions, 1);
   assert.equal(focused(returned), 10);
+  assert.deepEqual(returned.segments.map(({ kind, start, end }) => [kind, start, end]), [
+    ['focus', 1000, 11000],
+    ['distraction', 11000, 31000],
+  ]);
+});
+
+test('the wall clock continues while away while focused time remains separate', () => {
+  const away = depart(trip(), 11000);
+  const elapsed = tick(away, 61000);
+
+  assert.equal(elapsedSeconds(elapsed, 61000), 60);
+  assert.equal(elapsed.target - elapsedSeconds(elapsed, 61000), 540);
+  assert.equal(focused(elapsed), 10);
+  assert.equal(elapsed.state, 'away');
+
+  const returned = returnFromBackground(elapsed, 61000);
+  assert.equal(returned.state, 'focus');
+  assert.equal(returned.reconnect, 0);
+  assert.equal(focused(tick(returned, 71000)), 20);
+});
+
+test('a zero-duration departure at the deadline is counted without inventing a segment', () => {
+  const atDeadline = depart(trip(20), 21000);
+  const returned = returnFromBackground(atDeadline, 21000);
+
+  assert.equal(returned.distractions, 1);
+  assert.equal(returned.state, 'focus');
+  assert.equal(focused(returned), 20);
+  assert.deepEqual(returned.segments.map(({ kind, start, end }) => [kind, start, end]), [
+    ['focus', 1000, 21000],
+  ]);
+});
+
+test('return resumes immediately after a long absence without a recovery delay', () => {
+  const away = depart(trip(), 11000);
+  const returned = returnFromBackground(away, 151000);
+
+  assert.equal(returned.state, 'focus');
+  assert.equal(returned.reconnect, 0);
+  assert.equal(focused(returned), 10);
+  assert.equal(returned.distractions, 1);
+  assert.equal(focused(tick(returned, 161000)), 20);
+});
+
+test('reload catches up an existing departure and resumes the timer', () => {
+  const away = depart(trip(), 11000);
+  const restored = returnFromBackground(restore(tick(away, 21000), 61000), 61000);
+
+  assert.equal(restored.state, 'focus');
+  assert.equal(restored.distractions, 1);
+  assert.equal(elapsedSeconds(restored, 61000), 60);
+  assert.equal(focused(restored), 10);
+  assert.equal(focused(tick(restored, 71000)), 20);
+});
+
+test('reload after a missed pagehide treats the persisted gap as one departure', () => {
+  const restored = restore(trip(), 61000);
+
+  assert.equal(restored.state, 'away');
+  assert.equal(restored.distractions, 1);
+  assert.equal(focused(restored), 0);
+  assert.deepEqual(restored.segments.map(({ kind, start, end }) => [kind, start, end]), [
+    ['distraction', 1000, 61000],
+  ]);
+});
+
+test('legacy pending and paused states migrate to running without crediting away time', () => {
+  const pending = { ...trip(), state: 'pending', lastAt: 11000, observedAt: 11000,
+    segments: [{ start: 1000, end: 11000, kind: 'focus' }] };
+  const paused = { ...trip(), state: 'paused', lastAt: 11000,
+    segments: [{ start: 1000, end: 11000, kind: 'focus' }] };
+
+  for (const oldState of [pending, paused]) {
+    const restored = returnFromBackground(restore(oldState, 61000), 61000);
+    assert.equal(restored.state, 'focus');
+    assert.equal(restored.distractions, 1);
+    assert.equal(focused(restored), 10);
+    assert.equal(restored.lastAt, 61000);
+  }
+});
+
+test('restoring on another route keeps the same departure and does not credit background time', () => {
+  const saved = tick(depart(trip(), 11000), 21000);
+  const restored = restore(saved, 61000);
+  assert.equal(restored.state, 'away');
+  const stillAway = tick(leaveFocusView(restored, 61000), 71000);
+  assert.equal(stillAway.distractions, 1);
+  assert.equal(focused(stillAway), 10);
+  assert.equal(elapsedSeconds(stillAway, 71000), 70);
+  const visibleFocus = returnFromBackground(stillAway, 71000);
+  assert.equal(visibleFocus.state, 'focus');
+  assert.equal(focused(tick(visibleFocus, 81000)), 20);
+});
+
+test('timer deadline advances during absence and caps credited focus at the deadline', () => {
+  const away = depart(trip(20), 11000);
+  const deadline = tick(away, 41000);
+
+  assert.equal(elapsedSeconds(deadline, 41000), 20);
+  assert.equal(focused(deadline), 10);
+  assert.equal(deadline.segments.at(-1).kind, 'distraction');
+  assert.equal(deadline.segments.at(-1).end, 21000);
+  assert.equal(sessionEndAt(deadline, 41000), 21000);
+});
+
+test('clock rollback does not create negative time or clear an active departure', () => {
+  const away = depart(trip(), 11000);
+  const back = tick(away, 5000);
+
+  assert.equal(back.state, 'away');
+  assert.equal(back.lastAt, 11000);
+  assert.equal(back.distractions, 1);
+  assert.equal(focused(back), 10);
+  assert.equal(elapsedSeconds(back, 5000), 10);
 });

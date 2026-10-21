@@ -1,6 +1,6 @@
 import "../src/processErrors.js";
 import "dotenv/config";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import RedisMock from "ioredis-mock";
@@ -37,7 +37,10 @@ async function start() {
       END $$;
       CREATE TABLE IF NOT EXISTS local_runtime.local_migrations (name TEXT PRIMARY KEY)`,
     );
-    for (const migration of ["20261004000000_initial", "20261007000000_adventure"]) {
+    const migrations = (await readdir("prisma/migrations", { withFileTypes: true }))
+      .filter(entry => entry.isDirectory() && /^\d+_/.test(entry.name))
+      .map(entry => entry.name).sort();
+    for (const migration of migrations) {
     const applied = await pg.query(
       "SELECT name FROM local_runtime.local_migrations WHERE name=$1",
       [migration],

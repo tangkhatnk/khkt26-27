@@ -47,6 +47,8 @@ export type Session = {
   seconds: number;
   contribution: number;
   rules: string;
+  /** Distinct departures from focus, including departures shorter than one millisecond. */
+  distractions?: number;
   quiz?: { score: number; total: number };
 };
 export type World = {
@@ -170,6 +172,11 @@ export function settle(
     throw new Error(
       "Thời gian phiên không hợp lệ (đồng bộ trong 30 ngày từ lúc bắt đầu).",
     );
+  if (
+    input.distractions !== undefined &&
+    (!Number.isSafeInteger(input.distractions) || input.distractions < 0)
+  )
+    throw new Error("Số lần rời phiên không hợp lệ.");
   for (const s of Object.values(world.sessions)) {
     if (
       s.userId === input.userId &&
@@ -234,7 +241,15 @@ export function settle(
     );
   } else advance(p.journey, seconds, 1, now);
   p.seconds += seconds;
-  const session: Session = { ...input, seconds, contribution, rules: RULES };
+  const session: Session = {
+    ...input,
+    seconds,
+    contribution,
+    rules: RULES,
+    distractions:
+      input.distractions ??
+      input.segments.filter((segment) => segment.kind === "distraction").length,
+  };
   world.sessions[input.id] = session;
   return session;
 }

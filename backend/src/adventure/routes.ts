@@ -15,6 +15,7 @@ const sessionSchema = z.object({
   started: z.number().int().nonnegative(),
   ended: z.number().int().nonnegative(),
   target: z.number().int().min(60).max(14400),
+  distractions: z.number().int().min(0).max(10000).optional(),
   segments: z
     .array(
       z.object({

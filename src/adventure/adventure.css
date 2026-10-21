@@ -1721,3 +1721,10 @@ body {
   .travel-landscape, .travel-track { animation: none; }
   .travel-fog { transition: none; }
 }
+.experiment-table-wrap { overflow-x: auto; margin: 20px 0; border: 1px solid var(--line); border-radius: 12px; }
+.experiment-table { width: 100%; border-collapse: collapse; min-width: 780px; font-size: 13px; }
+.experiment-table caption { text-align: left; padding: 14px; font-weight: 600; }
+.experiment-table th, .experiment-table td { padding: 12px; text-align: left; border-top: 1px solid var(--line); }
+.experiment-table th { background: #eaf0e7; color: #30463f; }
+.experiment-export { display: inline-flex; align-items: center; padding: 12px 16px; border: 1px solid #d7e0d5; border-radius: 8px; color: #30463f; text-decoration: none; }
+.experiment-share { margin: 24px 0; }

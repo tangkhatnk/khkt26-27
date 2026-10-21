@@ -49,6 +49,26 @@ describe("adventure progress", () => {
       "sử dụng",
     );
   });
+  it("preserves the distinct distraction count even when a departure has no duration", () => {
+    const world = emptyWorld();
+    const result = settle(world, { ...input(), distractions: 2 }, now);
+
+    expect(result.distractions).toBe(2);
+    expect(snapshot(world, "u", now).sessions[0]?.distractions).toBe(2);
+    expect(() => settle(emptyWorld(), { ...input(), distractions: -1 }, now)).toThrow(
+      "Số lần rời phiên",
+    );
+
+    const legacy = {
+      ...input("legacy"),
+      segments: [
+        { start: now - 60000, end: now - 30000, kind: "focus" as const },
+        { start: now - 30000, end: now - 20000, kind: "distraction" as const },
+        { start: now - 20000, end: now, kind: "focus" as const },
+      ],
+    };
+    expect(settle(emptyWorld(), legacy, now).distractions).toBe(1);
+  });
   it("carries fractions between sessions instead of rounding each contribution", () => {
     const w = emptyWorld();
     settle(w, input("a", now - 60000, now - 30000), now);

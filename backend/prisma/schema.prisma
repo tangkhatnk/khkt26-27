@@ -19,6 +19,7 @@ model User {
   sessions        StudySession[]
   documents       Document[]
   questions       QuizQuestion[]
+  testerRuns      TesterRun[]
   @@unique([auth_provider, auth_provider_id])
   @@map("users")
 }
@@ -111,4 +112,26 @@ model AdventureState {
   id Int @id
   state Json
   @@map("adventure_state")
+}
+
+// Explicitly shared experiment metrics; private goals and documents stay in AdventureState.
+model TesterRun {
+  id                 String @id @default(uuid()) @db.Uuid
+  session_id         String @db.Uuid
+  user_id            String @db.Uuid
+  tester_code        String @db.VarChar(12)
+  topic              String @db.VarChar(100)
+  target_seconds     Int
+  elapsed_seconds    Float
+  focused_seconds    Float
+  distractions       Int
+  completion_percent Int?
+  completed          Boolean
+  recorded_at        DateTime
+  published_at       DateTime @default(now())
+  withdrawn_at       DateTime?
+  user               User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  @@unique([user_id, session_id])
+  @@index([recorded_at(sort: Desc)])
+  @@map("tester_runs")
 }

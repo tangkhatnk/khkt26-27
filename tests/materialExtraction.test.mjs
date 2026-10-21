@@ -4,8 +4,9 @@ import { deflateRawSync } from 'node:zlib';
 import path from 'node:path';
 import { test } from 'node:test';
 import { tmpdir } from 'node:os';
+import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
-import { extractMaterialFile, MAX_FILE_BYTES, MAX_TEXT_CHARS } from '../src/material/extractMaterialFile.mjs';
+import { extractMaterialFile, materialExtractionErrorMessage, MAX_FILE_BYTES, MAX_TEXT_CHARS } from '../src/material/extractMaterialFile.mjs';
 import { prepareMaterialWorker } from '../scripts/prepare-material-worker.mjs';
 
 const encoder = new TextEncoder();
@@ -118,6 +119,20 @@ function file(name, bytes, type = '') {
   return new File([bytes], name, { type });
 }
 
+function extractInBrowserLikeWorker(name, bytes) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./materialExtractionBrowserWorker.mjs', import.meta.url), {
+      type: 'module',
+      workerData: { name, bytes },
+    });
+    worker.once('message', resolve);
+    worker.once('error', reject);
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new Error(`Browser-like extraction worker exited with code ${code}.`));
+    });
+  });
+}
+
 test('extracts supported office formats, PDF, and safe text locally', async () => {
   const cases = [
     [file('lesson.docx', docxFixture()), 'Word attachment knowledge phrase'],
@@ -135,6 +150,12 @@ test('extracts supported office formats, PDF, and safe text locally', async () =
     assert.ok(result.text.includes(expected), `${input.name} should contain extracted text`);
     assert.ok(!result.text.includes('doNotSend'), 'script contents must not enter quiz material');
   }
+});
+
+test('parses DOCX through the browser OfficeParser bundle without Node Buffer or setImmediate globals', async () => {
+  const result = await extractInBrowserLikeWorker('lesson.docx', docxFixture());
+  assert.equal(result.status, 'extracted', result.message);
+  assert.match(result.text, /Word attachment knowledge phrase/);
 });
 
 test('extracts PDF text with the local PDF.js worker', async (t) => {
@@ -156,6 +177,16 @@ test('extracts PDF text with the local PDF.js worker', async (t) => {
     );
     assert.equal(result.status, 'extracted', result.message);
     assert.match(result.text, /PDF attachment knowledge phrase/);
+
+    const scan = await extractMaterialFile(file('scanned.pdf', pdfFixture('')),
+      { pdfWorkerSrc: pathToFileURL(worker).href });
+    assert.equal(scan.status, 'empty');
+    assert.match(scan.message, /PDF.*ảnh quét.*OCR/iu);
+
+    const invalidPdf = await extractMaterialFile(file('broken.pdf', encoder.encode('not a PDF')),
+      { pdfWorkerSrc: pathToFileURL(worker).href });
+    assert.equal(invalidPdf.status, 'error');
+    assert.match(invalidPdf.message, /tệp bị hỏng/iu);
   } finally {
     for (const key of ['DOMMatrix', 'ImageData', 'Path2D']) {
       if (previousGlobals[key] === undefined) delete globalThis[key];
@@ -194,6 +225,26 @@ test('preserves metadata and returns a clear status for unsupported, oversized, 
   const empty = await extractMaterialFile(file('blank.txt', new Uint8Array()));
   assert.equal(empty.status, 'empty');
   assert.equal(empty.text, '');
+  assert.match(empty.message, /không có văn bản có thể đọc/iu);
+  assert.doesNotMatch(empty.message, /PDF|OCR/iu);
+});
+
+test('distinguishes encrypted documents, corrupt files, and a missing browser parser', () => {
+  const encrypted = materialExtractionErrorMessage({ officeIssue: { code: 'PASSWORD_REQUIRED' } });
+  assert.match(encrypted, /mật khẩu|mã hóa/iu);
+
+  const corrupt = materialExtractionErrorMessage({ officeIssue: { code: 'ZIP_NO_ENTRIES_FOUND' } });
+  assert.match(corrupt, /hỏng|định dạng/iu);
+  assert.doesNotMatch(corrupt, /mật khẩu|mã hóa/iu);
+
+  const parserUnavailable = materialExtractionErrorMessage({ materialExtractionIssue: 'parser-module' });
+  assert.match(parserUnavailable, /không tải được.*đọc tài liệu/iu);
+  assert.doesNotMatch(parserUnavailable, /hỏng|mật khẩu/iu);
+
+  const workerUnavailable = materialExtractionErrorMessage(new TypeError(
+    'Setting up fake worker failed: "Failed to fetch dynamically imported module: /pdf.worker.min.mjs"',
+  ));
+  assert.match(workerUnavailable, /bộ đọc PDF/iu);
 });
 
 test('strictly rejects invalid text bytes and malformed supported documents', async () => {
@@ -204,6 +255,7 @@ test('strictly rejects invalid text bytes and malformed supported documents', as
   const malformed = await extractMaterialFile(file('broken.docx', encoder.encode('not a zip')));
   assert.equal(malformed.status, 'error');
   assert.equal(malformed.text, '');
+  assert.match(malformed.message, /tệp bị hỏng.*định dạng/iu);
 });
 
 test('caps extracted text at the requested remaining quiz budget', async () => {

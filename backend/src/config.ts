@@ -25,6 +25,7 @@ export const config = z
     OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
     GEMINI_API_KEY: z.string().optional(),
     GEMINI_MODEL: z.string().min(1).default("gemini-3.8-flash"),
+    GEMINI_FALLBACK_MODEL: z.string().trim().default("gemini-3.5-flash-lite"),
     GOOGLE_CLIENT_ID: z.string().optional(),
     APPLE_CLIENT_ID: z.string().optional(),
   })

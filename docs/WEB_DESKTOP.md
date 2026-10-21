@@ -32,7 +32,7 @@ npm --prefix backend run db:generate
 npm --prefix backend run dev:local
 ```
 
-Runtime local tự áp dụng migration ban đầu và migration hành trình vào PGlite; chỉ dành cho phát triển. Production dùng PostgreSQL/Redis và biến môi trường tại `backend/.env.example`:
+`npm start` từ thư mục gốc tự khởi động API, PGlite và web cùng nhau; không cần hai terminal. Runtime local tự áp dụng các migration theo thứ tự vào PGlite và giữ tài khoản/dữ liệu sau khi khởi động lại; chỉ dành cho phát triển. Production dùng PostgreSQL/Redis và biến môi trường tại `backend/.env.example`:
 
 ```bash
 npm --prefix backend run db:migrate
@@ -81,13 +81,14 @@ Electron dùng origin `viendu://app`, renderer sandbox, context isolation và CS
 - 12 chủ đề học, gồm khoa học, ngôn ngữ, lịch sử, nghệ thuật và kỹ năng học; mỗi chủ đề có 3 câu hỏi tĩnh sau khi chạy seed.
 - Cá nhân, toa với 4 màu/3 trang trí, 5 trạm, ngã rẽ có bình chọn 24 giờ.
 - Nhóm riêng tối đa 6 thành viên; tạo, mời, thu hồi, gia nhập, rời và chuyển quyền.
-- Phiên học không có nút tạm nghỉ. Rời cửa sổ hoặc đổi sang trang khác trong ứng dụng sẽ giữ thời gian chờ phân loại; đọc tài liệu được tính, xao nhãng bị loại. Nối lại 120 giây vẫn là thời gian học. Phiên cũ đã lưu ở trạng thái nghỉ có thể tiếp tục để không mất dữ liệu.
-- Phần học hợp lệ được lưu cả khi kết thúc sớm. Chuyển cửa sổ dưới 3 giây được coi là nhiễu; tải lại ứng dụng luôn chờ phân loại khoảng chưa rõ.
-- Sương khám phá xuất hiện ngay từ đầu phiên ở cả 2D/3D: vùng rõ quanh tàu lớn dần theo phần học được ghi nhận. Sương nối lại sau xao nhãng là lớp riêng; không xóa vùng đã khám phá. Góc 2D giữ tàu cố định và cho cảnh vật trôi quanh tàu.
+- Phiên học không có nút tạm nghỉ hoặc nút tự phân loại xao nhãng. Mỗi lần rời cửa sổ/ẩn tab/chuyển sang mục khác được tính một lần xao nhãng; các sự kiện cùng một lần rời không bị tính trùng. Đồng hồ vẫn chạy liên tục tới hạn, kể cả khi rời phiên hoặc tải lại. Quay lại tiếp tục ngay, không chờ 120 giây. Phiên cũ đang tạm nghỉ/chờ được chuyển sang cơ chế này và giữ phần học đã lưu.
+- Phần học hợp lệ loại trừ thời gian rời phiên, được lưu cả khi kết thúc sớm. Hạn kết thúc phiên dựa trên thời gian bắt đầu và thời lượng, kể cả khi trình duyệt bị treo ở nền.
+- Sương khám phá xuất hiện ngay từ đầu phiên ở cả 2D/3D: vùng rõ quanh tàu lớn dần theo phần học được ghi nhận; không xóa vùng đã khám phá. Góc 2D giữ tàu cố định và cho cảnh vật trôi quanh tàu.
 - Cho chọn mọi loại tệp, nhiều tệp cùng lúc. Word DOCX, PowerPoint PPTX, Excel XLSX/XLS, PDF, OpenDocument và các định dạng văn bản phổ biến được đọc ngay trên thiết bị. Giới hạn 20 MB/tệp, 10 tệp/chuyến và tổng 50.000 ký tự. Định dạng chưa có bộ đọc (ví dụ DOC/PPT cũ, ảnh, video) được ghi tên và báo chưa trích xuất; không đưa dữ liệu nhị phân vào quiz. PDF worker dùng file cùng origin, không tải từ CDN.
 - Hàng đợi offline có mã phiên cố định; retry không cấp trùng. Máy chủ kiểm tra thời gian, chồng phiên, quyền đoàn, cap 60 phút/ngày theo múi giờ đoàn, giữ phần lẻ và dư tại đích.
 - Đoàn chỉ thấy toa và tiến độ chung, không có mục tiêu, tài liệu, quiz hoặc log gián đoạn của người khác.
 - Quiz tĩnh/Gemini là tùy chọn; kết quả được chấm trên máy chủ và ghi một lần.
+- Mục Kết quả tester công khai chỉ chứa các phiên được tester chọn chia sẻ trong tổng kết: mã ẩn danh, chủ đề, thời lượng, số lần xao nhãng, điểm quiz và tỷ lệ hoàn thành tự đánh giá. Dữ liệu lấy từ phiên đã đồng bộ; không nhận thời gian/điểm do người dùng gửi để công khai. Có phân trang, CSV tối đa 10.000 phiên gần nhất và nút ẩn lại kết quả. Mục tiêu viết riêng, email, tài liệu và tên tài khoản vẫn riêng tư.
 - Web Locks ngăn hai cửa sổ cùng sửa trạng thái cá nhân. Có xuất bản sao dữ liệu riêng.
 - Cảnh 3D và bộ đọc tài liệu tải riêng; giới hạn pixel ratio, tự dừng khi ngoài viewport/ẩn cửa sổ, hỗ trợ reduced motion và ảnh SVG khi WebGL không khả dụng. Không có nút dừng hiệu ứng trong giao diện.
 - Danh tính tài khoản được giữ khi mở lại offline, yêu cầu đăng nhập lại trước khi đồng bộ nếu hết phiên. Đăng xuất dọn phiên đăng nhập kể cả khi mất mạng; dữ liệu hành trình vẫn tách theo chủ sở hữu. Dữ liệu lưu bị hỏng có màn hình xuất bản sao và khôi phục, không âm thầm ghi đè.

@@ -25,6 +25,9 @@ export interface MaterialExtractionOptions {
 export const MAX_FILE_BYTES: number;
 export const MAX_TEXT_CHARS: number;
 
+/** Returns a safe, user-facing explanation for a parser failure. */
+export function materialExtractionErrorMessage(error: unknown): string;
+
 /** Extracts supported text from a browser File without uploading its original bytes. */
 export function extractMaterialFile(
   file: File,

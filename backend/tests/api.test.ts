@@ -78,6 +78,7 @@ beforeAll(async () => {
     ),
   );
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261007000000_adventure/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261009000000_tester_runs/migration.sql", import.meta.url), "utf8"));
   await server.start();
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();
@@ -111,7 +112,43 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await redis.flushall();
+  await db.$executeRaw`DELETE FROM tester_runs`;
   await db.$executeRaw`UPDATE adventure_state SET state = '{"people":{},"groups":{},"sessions":{},"invites":{}}'::jsonb WHERE id = 1`;
+});
+
+it("publishes only confirmed own tester metrics, keeps private fields hidden, and refreshes quiz scores", async () => {
+  const id = randomUUID(), ended = Date.now(), started = ended - 60000;
+  const save = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers,
+    payload: { id, groupId: null, goal: "Private learning goal", topic: "biology", target: 60,
+      started, ended, distractions: 2, segments: [{ start: started, end: ended - 20000, kind: "focus" },
+        { start: ended - 20000, end: ended, kind: "distraction" }] } });
+  expect(save.statusCode).toBe(200);
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
+  expect((await app.inject({ method: "POST", url: "/api/v1/experiments", payload: { sessionId: id } })).statusCode).toBe(401);
+  expect((await app.inject({ method: "POST", url: "/api/v1/experiments", headers: stranger, payload: { sessionId: id } })).statusCode).toBe(404);
+  const publish = await app.inject({ method: "POST", url: "/api/v1/experiments", headers,
+    payload: { sessionId: id, completionPercent: 75, focusedSeconds: 9999, quizScore: 999 } });
+  expect(publish.statusCode).toBe(200);
+  const publicList = await app.inject({ url: "/api/v1/experiments" });
+  expect(publicList.json()).toMatchObject({ total: 1, runs: [{ focusedSeconds: 40, elapsedSeconds: 60,
+    distractions: 2, completionPercent: 75, quizScore: null }] });
+  for (const privateValue of ["owner@example.com", userId, "Private learning goal", id]) expect(publicList.body).not.toContain(privateValue);
+  const grade = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: questionId, selected: 1 }] } });
+  expect(grade.statusCode).toBe(200);
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().runs[0]).toMatchObject({ quizScore: 1, quizTotal: 1 });
+  const csv = await app.inject({ url: "/api/v1/experiments/export.csv" });
+  expect(csv.headers["content-type"]).toContain("text/csv");
+  expect(csv.body).toContain("self_reported_completion_percent");
+  expect(csv.body).not.toContain(userId);
+  await app.inject({ method: "DELETE", url: `/api/v1/experiments/${id}`, headers: stranger });
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(1);
+  await app.inject({ method: "DELETE", url: `/api/v1/experiments/${id}`, headers });
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
+  expect((await app.inject({ url: "/api/v1/experiments/mine", headers })).json()).toEqual([]);
+  for (let i = 0; i < 2; i++) await app.inject({ method: "POST", url: "/api/v1/experiments", headers, payload: { sessionId: id } });
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(1);
+  expect((await app.inject({ url: "/api/v1/experiments/mine", headers })).json()).toEqual([{ sessionId: id }]);
 });
 afterAll(async () => {
   await app?.close();

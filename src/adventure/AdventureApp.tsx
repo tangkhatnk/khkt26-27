@@ -5,15 +5,16 @@ import { post, request, REGISTRATION_PASSWORD_HINT } from "@/services/api";
 import { Scene } from "./Scene";
 import { JourneyView } from "./JourneyView";
 import { DurationPicker } from "./DurationPicker";
+import { ExperimentResults, ExperimentShare } from "./ExperimentResults";
 import { studyTopics } from "./topics";
 import {
-  classify,
+  depart,
+  elapsedSeconds,
   focused,
-  observe,
   leaveFocusView,
   restore,
-  resume,
   returnFromBackground,
+  sessionEndAt,
   tick,
   type ActiveTrip,
 } from "./focus";
@@ -51,6 +52,7 @@ const nav = [
   { id: "carriage", icon: "▣", label: "Toa của tôi" },
   { id: "group", icon: "♧", label: "Đoàn tàu" },
   { id: "journal", icon: "▤", label: "Nhật ký học tập" },
+  { id: "experiments", icon: "◎", label: "Kết quả tester" },
 ];
 const clock = (seconds: number) =>
   `${Math.floor(Math.max(0, seconds) / 60)
@@ -84,7 +86,7 @@ export default function AdventureApp() {
 }
 function AdventureWorkspace() {
   const [requestedView, setView] = useBrowserView();
-  const views = ["station", "map", "carriage", "group", "journal", "ticket", "focus", "summary", "account"];
+  const views = ["station", "map", "carriage", "group", "journal", "experiments", "ticket", "focus", "summary", "account"];
   const view = views.includes(requestedView) ? requestedView : "station";
   const { user, login, logout, offline: authOffline, needsLogin } = useAuthStore();
   const owner = user?.id ?? "guest";
@@ -174,7 +176,7 @@ function AdventureWorkspace() {
         }
         try {
           const value = readSaved(owner);
-          if (value.active) value.active = restore(value.active);
+          if (value.active) value.active = restore(value.active, Date.now());
           if (owner === "guest")
             value.snapshot = snapshot(value.local, owner, Date.now());
           if (commitRef.current(value)) {
@@ -225,11 +227,7 @@ function AdventureWorkspace() {
       interval = setInterval(() => {
         const at = refreshClock();
         const trip = current.current.active;
-        if (
-          trip &&
-          trip.state !== "pending" &&
-          focused(tick(trip, at)) >= trip.target
-        )
+        if (trip && elapsedSeconds(trip, at) >= trip.target)
           finishRef.current();
       }, 1000);
     }
@@ -253,14 +251,19 @@ function AdventureWorkspace() {
     if (!loaded || !exclusive) return;
     const checkpoint = () => {
       const s = current.current;
-      if (s.active)
-        commitRef.current({ ...s, active: tick(s.active, Date.now()) });
+      if (s.active) {
+        const at = Date.now();
+        const active = view === "focus" && !document.hidden && document.hasFocus()
+          ? returnFromBackground(s.active, at)
+          : tick(s.active, at);
+        commitRef.current({ ...s, active });
+      }
     };
     const away = () => {
       if (current.current.active)
         commitRef.current({
           ...current.current,
-          active: observe(current.current.active, Date.now()),
+          active: depart(current.current.active, Date.now()),
         });
     };
     const returned = () => {
@@ -421,9 +424,9 @@ function AdventureWorkspace() {
   }
   function finish() {
     const trip = current.current.active;
-    if (!trip || trip.state === "pending") return;
-    const at = Date.now(),
-      next = tick(trip, at);
+    const at = Date.now();
+    if (!trip || at < trip.lastAt) return;
+    const next = tick(trip, at);
     const s: Session = {
       id: next.id,
       userId: owner,
@@ -431,12 +434,13 @@ function AdventureWorkspace() {
       goal: next.goal,
       topic: next.topic,
       started: next.started,
-      ended: at,
+      ended: sessionEndAt(trip, at),
       target: next.target,
       segments: next.segments,
       seconds: focused(next),
       contribution: 0,
       rules: "train-v1",
+      distractions: next.distractions ?? 0,
     };
     const value = structuredClone(current.current);
     value.active = null;
@@ -465,10 +469,6 @@ function AdventureWorkspace() {
   useEffect(() => {
     finishRef.current = finish;
   });
-  function updateActive(action: (s: ActiveTrip) => ActiveTrip) {
-    if (current.current.active)
-      commit({ ...current.current, active: action(current.current.active) });
-  }
   async function customize(
     color = carriage?.color ?? "#398575",
     decor = carriage?.decor ?? "plant",
@@ -930,9 +930,9 @@ function AdventureWorkspace() {
                       <div className="info-box">
                         <h3>Hỗ trợ tập trung</h3>
                         <p>
-                          Khi bạn rời cửa sổ, thời gian chờ được giữ riêng. Khi
-                          quay lại, hãy cho biết bạn đọc tài liệu hay bị xao nhãng.
-                          Không có tạm nghỉ giữa phiên; bạn có thể kết thúc và lưu phần đã học.
+                          Khi bạn rời cửa sổ, đồng hồ vẫn tiếp tục nhưng khoảng đó được ghi là
+                          xao nhãng và không cộng vào thời gian học. Khi quay lại, phiên tiếp
+                          tục ngay. Bạn có thể kết thúc và lưu phần đã học bất cứ lúc nào.
                         </p>
                         <p>
                           Web và bản desktop này chỉ nhắc tập trung; không chặn
@@ -979,13 +979,9 @@ function AdventureWorkspace() {
                       </span>
                       <h1>{active.goal}</h1>
                       <p>
-                        {active.state === "pending"
-                          ? "Bạn đã quay lại. Hãy phân loại khoảng vừa rồi."
-                          : active.state === "paused"
-                            ? "Toa đang nghỉ. Thành quả của bạn vẫn được giữ."
-                            : active.state === "reconnecting"
-                              ? `Đang nối lại toa · còn ${Math.ceil(active.reconnect)} giây`
-                              : "Không vội vàng. Chỉ cần hiện diện ở đây."}
+                        {active.state === "away"
+                          ? "Đồng hồ vẫn chạy. Khoảng thời gian bạn rời đi không được cộng vào thời gian học."
+                          : "Không vội vàng. Chỉ cần hiện diện ở đây."}
                       </p>
                     </div>
                     <section className="focus-card">
@@ -994,12 +990,14 @@ function AdventureWorkspace() {
                         role="timer"
                         aria-label="Thời gian còn lại"
                       >
-                        {clock(active.target - focused(active))}
+                        {clock(active.target - elapsedSeconds(active, now))}
                       </div>
                       <div className="timer-label">
                         {Math.floor(focused(active) / 60)} PHÚT ĐÃ HỌC ·{" "}
                         {Math.round((focused(active) / active.target) * 100)}%
                         CHẶNG ĐƯỜNG
+                        <br />
+                        {active.distractions ?? 0} LẦN XAO NHÃNG
                       </div>
                       <JourneyView
                         initial="2d"
@@ -1021,7 +1019,7 @@ function AdventureWorkspace() {
                         }
                         ownId={owner}
                         decor={carriage?.decor}
-                        fog={active.state === "pending"}
+                        fog={active.state === "away"}
                         calm
                         draftSeconds={focused(active)}
                         targetSeconds={active.target}
@@ -1029,50 +1027,13 @@ function AdventureWorkspace() {
                         reconnect={active.reconnect}
                       />
                       <div className="focus-controls">
-                        {active.state === "pending" ? (
-                          <div className="classify">
-                            {now < active.lastAt && <div className="info-box"><p>Đồng hồ thiết bị đang chạy lùi. Hãy bật ngày giờ tự động hoặc đặt lại giờ đúng để tiếp tục; thời gian đã học vẫn được giữ.</p><button onClick={exportData}>Xuất bản sao phiên học</button></div>}
-                            <button
-                              className="primary"
-                              onClick={() =>
-                                updateActive((s) =>
-                                  classify(s, "material", Date.now()),
-                                )
-                              }
-                            >
-                              Tôi dùng tài liệu học
-                            </button>
-                            <button
-                              onClick={() =>
-                                updateActive((s) =>
-                                  classify(s, "distraction", Date.now()),
-                                )
-                              }
-                            >
-                              Tôi bị xao nhãng
-                            </button>
-                            <p>
-                              Chưa rõ nguyên nhân không có nghĩa là xao nhãng.
-                              Phần học đã đạt luôn được giữ.
-                            </p>
-                          </div>
-                        ) : (
-                          <>
-                            {active.state === "paused" && <button
-                              className="primary"
-                              onClick={() =>
-                                updateActive((s) =>
-                                  resume(s, Date.now()),
-                                )
-                              }
-                            >
-                              ▶ Tiếp tục phiên cũ
-                            </button>}
-                            <button onClick={() => setConfirm("finish")}>
-                              Kết thúc và lưu
-                            </button>
-                          </>
-                        )}
+                        {now < active.lastAt && <div className="info-box">
+                          <p>Đồng hồ thiết bị đang chạy lùi. Hãy đặt lại giờ đúng để tiếp tục; dữ liệu phiên vẫn được giữ.</p>
+                          <button onClick={exportData}>Xuất bản sao phiên học</button>
+                        </div>}
+                        <button disabled={now < active.lastAt} onClick={() => setConfirm("finish")}>
+                          Kết thúc và lưu
+                        </button>
                       </div>
                     </section>
                     {active.document && (
@@ -1601,6 +1562,7 @@ function AdventureWorkspace() {
                   </button>
                 </>
               )}
+              {view === "experiments" && <ExperimentResults />}
               {view === "summary" &&
                 (summary ? (
                   <>
@@ -1614,7 +1576,7 @@ function AdventureWorkspace() {
                         icon="◷"
                         label="THỜI GIAN HỢP LỆ"
                         value={clock(summary.seconds)}
-                        detail="Đã loại khoảng nghỉ và xao nhãng"
+                        detail="Đã loại thời gian rời phiên học"
                       />
                       <Stat
                         icon="✦"
@@ -1633,6 +1595,10 @@ function AdventureWorkspace() {
                         detail="Quiz không chặn lưu thành quả"
                       />
                     </div>
+                    <p className="muted">
+                      {summary.distractions ?? summary.segments.filter(segment => segment.kind === "distraction").length} lần xao nhãng ·
+                      Đồng hồ vẫn chạy khi rời phiên học.
+                    </p>
                     <section className="panel">
                       <h2>Mang kiến thức theo chuyến đi</h2>
                       {!!saved.materials?.[summary.id]?.length && <details className="material-history"><summary>Tài liệu của chuyến · {saved.materials[summary.id].length} tệp</summary><ul className="material-list">{saved.materials[summary.id].map((file, i) => <li key={`${i}:${file.name}`}><strong>{file.name}</strong><span>{file.message}</span></li>)}</ul></details>}
@@ -1713,6 +1679,7 @@ function AdventureWorkspace() {
                         </div>
                       )}
                     </section>
+                    <ExperimentShare key={summary.id} sessionId={summary.id} canPublish={Boolean(user) && !needsLogin} sync={sync} />
                     <button className="primary" onClick={() => go("station")}>
                       Trở về ga chính →
                     </button>
@@ -1875,7 +1842,7 @@ function AdventureWorkspace() {
       </div>
       {active && view !== "focus" && (
         <button className="active-trip" onClick={() => go("focus")}>
-          ▥ Chuyến đang chạy · {clock(active.target - focused(active))} →
+          ▥ Chuyến đang chạy · {clock(active.target - elapsedSeconds(active, now))} →
         </button>
       )}
       {confirm && (

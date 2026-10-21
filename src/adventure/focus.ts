@@ -1,4 +1,5 @@
 import type { Segment } from "../../backend/src/adventure/domain";
+
 export type ActiveTrip = {
   id: string;
   owner: string;
@@ -11,96 +12,99 @@ export type ActiveTrip = {
   started: number;
   lastAt: number;
   segments: Segment[];
-  state: "focus" | "reconnecting" | "paused" | "pending";
+  state: "focus" | "away" | "reconnecting" | "paused" | "pending";
   reconnect: number;
   observedAt?: number;
+  /** Number of distinct departures from the focus session, including zero-length ones. */
+  distractions?: number;
 };
-export const focused = (s: ActiveTrip) =>
-  s.segments.reduce(
-    (sum, v) =>
+
+export function focused(s: ActiveTrip): number {
+  return s.segments.reduce(
+    (sum, segment) =>
       sum +
-      (v.kind === "focus" || v.kind === "material"
-        ? (v.end - v.start) / 1000
+      (segment.kind === "focus" || segment.kind === "material"
+        ? (segment.end - segment.start) / 1000
         : 0),
     0,
   );
-function append(
-  s: ActiveTrip,
-  start: number,
-  end: number,
-  kind: Segment["kind"],
-) {
+}
+
+/** Wall-clock elapsed time drives the countdown, even while the trip is away. */
+export function elapsedSeconds(s: ActiveTrip, now: number): number {
+  return Math.min(
+    s.target,
+    Math.max(0, (Math.max(now, s.lastAt, s.started) - s.started) / 1000),
+  );
+}
+
+export function sessionEndAt(s: ActiveTrip, now: number): number {
+  return Math.min(now, s.started + s.target * 1000);
+}
+
+function append(s: ActiveTrip, start: number, end: number, kind: Segment["kind"]) {
   if (end <= start) return;
   const tail = s.segments.at(-1);
   if (tail?.kind === kind && tail.end === start) tail.end = end;
   else s.segments.push({ start, end, kind });
 }
+
+function legacyAway(state: ActiveTrip["state"]): boolean {
+  return state === "pending" || state === "paused";
+}
+
 export function tick(value: ActiveTrip, now: number): ActiveTrip {
   const s = structuredClone(value);
-  if (now < s.lastAt) return { ...s, state: "pending" };
-  if (s.state === "pending") return s;
-  const start = s.lastAt;
-  if (s.state === "paused") append(s, start, now, "break");
-  else {
-    const end = Math.min(
-      now,
-      start + Math.max(0, s.target - focused(s)) * 1000,
-    );
-    append(s, start, end, "focus");
-    if (s.state === "reconnecting") {
-      s.reconnect = Math.max(0, s.reconnect - (end - start) / 1000);
-      if (!s.reconnect) s.state = "focus";
-    }
+  if (now < s.lastAt) return s;
+
+  const wasLegacyAway = legacyAway(s.state);
+  const away = s.state === "away" || wasLegacyAway;
+  const end = Math.min(now, s.started + s.target * 1000);
+  append(s, s.lastAt, end, away ? "distraction" : "focus");
+  s.lastAt = now;
+  s.state = away ? "away" : "focus";
+  s.reconnect = 0;
+  if (!away) s.observedAt = undefined;
+  return s;
+}
+
+/** Mark the start of one away interval. Repeated browser events extend that interval. */
+export function depart(value: ActiveTrip, now: number): ActiveTrip {
+  const alreadyAway = value.state === "away" || legacyAway(value.state);
+  const next = tick(value, now);
+  if (alreadyAway || now < value.lastAt) return next;
+  return {
+    ...next,
+    state: "away",
+    observedAt: now,
+    reconnect: 0,
+    distractions: (next.distractions ?? 0) + 1,
+  };
+}
+
+// Kept as the event-facing name used by older browser lifecycle wiring.
+export const observe = depart;
+export const leaveFocusView = depart;
+
+export function returnFromBackground(value: ActiveTrip, now: number): ActiveTrip {
+  const next = tick(value, now);
+  if (now < value.lastAt || next.state !== "away") return next;
+  return { ...next, state: "focus", reconnect: 0, observedAt: undefined };
+}
+
+/** Catch up saved time as away; browser lifecycle resumes only visible focus views. */
+export function restore(value: ActiveTrip, now = Date.now()): ActiveTrip {
+  const next = structuredClone(value);
+  if (next.state === "away") {
+    next.distractions ??= 1;
+  } else if (legacyAway(next.state)) {
+    next.distractions = Math.max(next.distractions ?? 0, 1);
+  } else {
+    next.state = "away";
+    next.observedAt = next.lastAt;
+    next.distractions = (next.distractions ?? 0) + 1;
   }
-  s.lastAt = now;
-  return s;
-}
-export function observe(s: ActiveTrip, now: number): ActiveTrip {
-  const next = tick(s, now);
-  return next.state === "paused" || next.state === "pending"
-    ? next
-    : { ...next, state: "pending", observedAt: now };
-}
-export function returnFromBackground(s: ActiveTrip, now: number): ActiveTrip {
-  if (s.state !== "pending" || s.observedAt === undefined ||
-      now < s.lastAt || now - s.observedAt > 3000) return s;
-  return tick({ ...s, state: s.reconnect > 0 ? "reconnecting" : "focus", observedAt: undefined }, now);
-}
-export function leaveFocusView(s: ActiveTrip, now: number): ActiveTrip {
-  return { ...observe(s, now), observedAt: undefined };
-}
-export function classify(
-  value: ActiveTrip,
-  kind: "material" | "distraction" | "break",
-  now: number,
-): ActiveTrip {
-  const s = structuredClone(value);
-  if (s.state !== "pending" || now < s.lastAt) return s;
-  const end =
-    kind === "material"
-      ? Math.min(now, s.lastAt + Math.max(0, s.target - focused(s)) * 1000)
-      : now;
-  append(s, s.lastAt, end, kind);
-  s.lastAt = now;
-  s.observedAt = undefined;
-  s.state =
-    kind === "distraction"
-      ? "reconnecting"
-      : kind === "break"
-        ? "paused"
-        : s.reconnect > 0
-          ? "reconnecting"
-          : "focus";
-  if (kind === "distraction") s.reconnect = 120;
-  if (kind === "break") s.reconnect = 0;
-  return s;
-}
-export function pause(s: ActiveTrip, now: number): ActiveTrip {
-  return { ...tick(s, now), state: "paused", reconnect: 0 };
-}
-export function resume(s: ActiveTrip, now: number): ActiveTrip {
-  return { ...tick(s, now), state: s.reconnect > 0 ? "reconnecting" : "focus" };
-}
-export function restore(s: ActiveTrip): ActiveTrip {
-  return s.state === "paused" ? s : { ...s, state: "pending", observedAt: undefined };
+  next.state = "away";
+  next.reconnect = 0;
+  return tick(next, now);
 }

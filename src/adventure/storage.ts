@@ -24,6 +24,7 @@ export const emptySaved = (): Saved => ({
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const number = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+const count = (v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0;
 const texts = (v: unknown) => Array.isArray(v) && v.every((item) => typeof item === "string");
 const validMaterials = (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 10 &&
   v.every((file) => record(file) && number(file.size) &&
@@ -46,6 +47,7 @@ function validSegments(v: unknown) {
 function validSession(v: unknown) {
   return record(v) && typeof v.id === "string" && typeof v.userId === "string" &&
     typeof v.goal === "string" && typeof v.topic === "string" &&
+    (v.distractions === undefined || count(v.distractions)) &&
     [v.started, v.ended, v.target, v.seconds, v.contribution].every(number) && validSegments(v.segments);
 }
 function validSaved(v: unknown): v is Saved {
@@ -61,7 +63,9 @@ function validSaved(v: unknown): v is Saved {
     const a = v.active;
     if (!record(a) || ![a.started, a.lastAt, a.target, a.reconnect].every(number) ||
         Number(a.target) <= 0 || ![a.id, a.owner, a.goal, a.topic, a.document].every((s) => typeof s === "string") ||
-        !["focus", "reconnecting", "paused", "pending"].includes(String(a.state)) || !validSegments(a.segments) || !validMaterials(a.materials)) return false;
+        !["focus", "away", "reconnecting", "paused", "pending"].includes(String(a.state)) ||
+        (a.distractions !== undefined && !count(a.distractions)) ||
+        !validSegments(a.segments) || !validMaterials(a.materials)) return false;
   }
   if (v.snapshot !== null) {
     const s = v.snapshot;

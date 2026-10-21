@@ -11,3 +11,9 @@ export function resolveApiUrl(fromEnv?: string): string {
 
   return localhost;
 }
+
+export function apiConnectionFailure(timedOut: boolean) {
+  return timedOut
+    ? { status: 504, message: "Máy chủ phản hồi quá lâu. Hãy thử lại." }
+    : { status: 0, message: "Không kết nối được máy chủ Viễn Du. Hãy kiểm tra mạng và địa chỉ API." };
+}

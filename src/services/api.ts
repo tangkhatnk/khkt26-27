@@ -1,6 +1,6 @@
 import { tokenStorage } from "./tokenStorage";
 import type { Tokens } from "./contracts";
-import { resolveApiUrl } from "./apiUrl";
+import { apiConnectionFailure, resolveApiUrl } from "./apiUrl";
 
 export const API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
 export const REGISTRATION_PASSWORD_HINT =
@@ -96,10 +96,8 @@ async function fetchWithTimeout(path: string, init: RequestInit) {
       "| request URL:",
       url,
     );
-    throw new ApiError(
-      0,
-      "Không kết nối được máy chủ. Kiểm tra mạng và địa chỉ API.",
-    );
+    const failure = apiConnectionFailure(controller.signal.aborted);
+    throw new ApiError(failure.status, failure.message);
   } finally {
     clearTimeout(timeout);
   }
