@@ -32,40 +32,45 @@ test.after(async () => {
   await vite?.close();
 });
 
-function extractGroup(markup, marker) {
-  const start = markup.indexOf(marker);
-  assert.notEqual(start, -1, `expected SVG group ${marker}`);
-  const open = markup.indexOf("<g", start);
-  const tokens = /<g\b[^>]*>|<\/g>/gu;
-  tokens.lastIndex = open;
-  let depth = 0;
-  let match;
-  while ((match = tokens.exec(markup))) {
-    depth += match[0] === "</g>" ? -1 : 1;
-    if (depth === 0) return markup.slice(open, tokens.lastIndex);
-  }
-  assert.fail(`unclosed SVG group ${marker}`);
-}
-
 function intersects(interval, band) {
   return interval.minY < band.bottom && interval.maxY > band.top;
 }
 
-test("travel scenery is three static, identical 900px tiles for seamless camera wrapping", () => {
+test("travel scenery defines one static tile and reuses it at all three periodic offsets", () => {
   for (const coast of [false, true]) {
     const markup = renderToStaticMarkup(React.createElement(MapScenery, { kind: "travel", coast }));
-    const offsets = [...markup.matchAll(/transform="translate\((-?\d+) 0\)"/gu)].map((match) => Number(match[1]));
+    const source = markup.match(/<g id="([^"]+)" class="travel-tile-source">/u);
+    assert.ok(source, "one reusable tile definition is rendered");
+    const tileId = source[1];
+    const instances = [...markup.matchAll(/<g data-scenery-tile="(-?\d+)" transform="translate\((-?\d+) 0\)"><use href="#([^"]+)"><\/use><\/g>/gu)];
 
-    assert.deepEqual(offsets, layout.TRAVEL_TILE_OFFSETS);
-    assert.equal([...markup.matchAll(/class="travel-land-tile"/gu)].length, 3);
+    assert.deepEqual(instances.map((match) => [Number(match[1]), Number(match[2]), match[3]]), [
+      [-900, -900, tileId],
+      [0, 0, tileId],
+      [900, 900, tileId],
+    ]);
+    assert.equal([...markup.matchAll(/class="travel-tile-source"/gu)].length, 1);
+    assert.equal([...markup.matchAll(/class="travel-land-tile"/gu)].length, 1, "only one copy of the tile geometry is in the DOM");
     assert.match(markup, /class="map-scenery map-scenery--travel map-scenery--static"/u);
     assert.doesNotMatch(markup, /travel-(?:mid-layer|parallax-layer)/u);
-    const groups = offsets.map((offset) => extractGroup(markup, `transform="translate(${offset} 0)"`));
-    assert.equal(groups[0], groups[1], "left and center tiles share the same geometry and art");
-    assert.equal(groups[1], groups[2], "center and right tiles share the same geometry and art");
+    assert.equal(markup.includes('class="travel-coast-water"'), coast, "the reusable tile retains the selected coastline");
   }
   assert.equal(layout.TRAVEL_TILE_WIDTH, 900);
   assert.equal(layout.TRAVEL_TILE_HEIGHT, 420);
+});
+
+test("separate travel maps keep their reusable tile IDs unique and their uses linked", () => {
+  const markup = renderToStaticMarkup(React.createElement("svg", {},
+    React.createElement(MapScenery, { kind: "travel" }),
+    React.createElement(MapScenery, { kind: "travel", coast: true }),
+  ));
+  const ids = [...markup.matchAll(/<g id="([^"]+)" class="travel-tile-source">/gu)].map((match) => match[1]);
+  const references = [...markup.matchAll(/<use href="#([^"]+)"/gu)].map((match) => match[1]);
+
+  assert.equal(ids.length, 2, "each map has one tile source");
+  assert.notEqual(ids[0], ids[1], "different maps do not duplicate document IDs");
+  assert.equal(references.length, 6, "each map has three instances");
+  assert.ok(references.every((reference) => ids.includes(reference)), "every tile instance points to one of the local sources");
 });
 
 test("repeating river, road and coast edges meet with continuous tangents", () => {

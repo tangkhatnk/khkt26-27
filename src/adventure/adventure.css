@@ -1215,7 +1215,16 @@ body,
   margin: 8px 14px 8px 0;
   font-size: 13px;
 }
-.adventure .quiz-count-label input {
+.departure-settings label.quiz-count-label {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+.adventure .quiz-count-label input:not([type="radio"]):not([type="checkbox"]) {
   flex-shrink: 0;
   width: 90px;
   border: 1px solid var(--border);
@@ -1735,7 +1744,7 @@ body {
 
 .travel-scene { overflow: hidden; border: 1px solid #d8ddc6; border-radius: 20px; background: linear-gradient(150deg, #f5f2dc, #dce9cc); box-shadow: 0 12px 32px #455b4220; text-align: left; }
 .travel-toolbar, .travel-caption { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 12px 16px; font-size: 12px; color: #617565; }
-.travel-world { display: block; width: 100%; height: auto; min-height: 210px; background: #c8e3da; }
+.travel-world { position: relative; display: block; width: 100%; height: auto; min-height: 210px; aspect-ratio: 900 / 420; }
 .travel-parallax-layer { animation-timing-function: linear; animation-iteration-count: infinite; }
 .travel-far-layer { animation-name: travel-far; animation-duration: 86s; }
 .travel-mid-layer { animation-name: travel-mid; animation-duration: 54s; }

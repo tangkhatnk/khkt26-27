@@ -3,9 +3,16 @@
   background: var(--scene-ground);
 }
 
-.travel-ground-base { fill: var(--scene-ground); }
 .travel-meadow { shape-rendering: crispEdges; }
 html[data-theme="dark"] .adventure .travel-world { --scene-ground: #52694d; }
+
+.travel-scene .travel-world {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  aspect-ratio: 900 / 420;
+  background: var(--scene-ground);
+}
 
 .travel-scene .travel-rest-stop,
 .travel-scene .travel-arrival-stop,
@@ -14,14 +21,50 @@ html[data-theme="dark"] .adventure .travel-world { --scene-ground: #52694d; }
 }
 
 .travel-scene .travel-world-motion {
-  transform-box: view-box;
-  transform-origin: 0 0;
-  transform: translateX(var(--world-camera-offset, 0px));
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  transform: translate3d(var(--world-camera-offset, 0%), 0, 0);
+  animation: none;
   transition: none;
+  will-change: transform;
 }
 
-.travel-scene .travel-world-motion[data-world-interpolate="true"] {
-  transition: transform var(--world-transition-duration, 1000ms) linear;
+.travel-scene .travel-world-motion[data-world-motion="true"][data-world-interpolate="true"][data-world-animation-frame="a"] {
+  animation: travel-world-sample-a var(--world-animation-duration, 0ms) linear none;
+}
+
+.travel-scene .travel-world-motion[data-world-motion="true"][data-world-interpolate="true"][data-world-animation-frame="b"] {
+  animation: travel-world-sample-b var(--world-animation-duration, 0ms) linear none;
+}
+
+@keyframes travel-world-sample-a {
+  from { transform: translate3d(var(--world-animation-from, var(--world-camera-offset, 0%)), 0, 0); }
+  to { transform: translate3d(var(--world-camera-offset, 0%), 0, 0); }
+}
+
+@keyframes travel-world-sample-b {
+  from { transform: translate3d(var(--world-animation-from, var(--world-camera-offset, 0%)), 0, 0); }
+  to { transform: translate3d(var(--world-camera-offset, 0%), 0, 0); }
+}
+
+.travel-scene .travel-world-map {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  display: block;
+  width: 300%;
+  height: 100%;
+  overflow: visible;
+}
+
+.travel-scene .travel-train-overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent;
 }
 
 .travel-scene .travel-periodic-world,

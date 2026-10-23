@@ -3,6 +3,7 @@ export const SCENE_REST_STATION_X = SCENE_ENGINE_CENTER_X;
 export const SCENE_ARRIVAL_STATION_X = SCENE_ENGINE_CENTER_X;
 export const SCENE_TRAIN_ARRIVAL_X = SCENE_ENGINE_CENTER_X;
 export const SCENE_WORLD_TILE_WIDTH = 900;
+export const SCENE_WORLD_LAYER_VIEWPORTS = 3;
 export const SCENE_BASE_WORLD_SPEED = 50 / 3;
 export const SCENE_MIN_STATION_SPACING = 220;
 export const SCENE_MAX_INTERPOLATION_GAP_SECONDS = 2;
@@ -123,4 +124,31 @@ export function sceneMotionInterpolationDurationMs(
 ): number {
   const delta = currentStudyElapsedSeconds - previousStudyElapsedSeconds;
   return Number.isFinite(delta) && delta > 0 ? delta * 1000 : 0;
+}
+
+/** Keep a single sampled camera step shorter than one periodic world tile. */
+export function sceneMotionDistanceGapCanInterpolate(previousDistance: number, currentDistance: number): boolean {
+  const delta = currentDistance - previousDistance;
+  return Number.isFinite(delta) && delta >= 0 && delta < SCENE_WORLD_TILE_WIDTH;
+}
+
+/**
+ * Express both interpolation endpoints in the current periodic world's frame.
+ * At a tile wrap this keeps the old screen position while stations are rebased.
+ */
+export function sceneMotionInterpolationOffsets(
+  previousDistance: number,
+  currentDistance: number,
+  currentPeriodicOrigin: number,
+) {
+  return {
+    fromOffset: currentPeriodicOrigin - previousDistance,
+    toOffset: currentPeriodicOrigin - currentDistance,
+  };
+}
+
+/** Convert a world-unit camera offset to a percentage of the viewport-sized compositor layer. */
+export function sceneWorldLayerOffsetPercent(cameraOffset: number, viewportWorldWidth: number): number {
+  if (!Number.isFinite(cameraOffset) || !Number.isFinite(viewportWorldWidth) || viewportWorldWidth <= 0) return 0;
+  return cameraOffset / viewportWorldWidth * 100;
 }

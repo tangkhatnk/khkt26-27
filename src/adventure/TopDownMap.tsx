@@ -33,7 +33,7 @@ export const TopDownMap = memo(function TopDownMap({
   const [zoom, setZoom] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
   const viewport = useRef<HTMLDivElement>(null);
-  const { route, distances, total, path, position, clouds } = mapGeometry(
+  const { route, distances, total, path, position } = mapGeometry(
     journey?.branch,
   );
   const progress = explorationProgress(journey, draftSeconds, targetSeconds);
@@ -44,6 +44,11 @@ export const TopDownMap = memo(function TopDownMap({
     (stage < 4
       ? fraction * (distances[stops[stage + 1]] - distances[stops[stage]])
       : 0);
+  const futureStations = stops.slice(1).map((stop) => ({
+    x: route[stop][0],
+    y: route[stop][1],
+    distance: distances[stop],
+  }));
   const exploration = Math.min(
     1,
     Math.max(
@@ -257,7 +262,14 @@ export const TopDownMap = memo(function TopDownMap({
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          <MapFog id={id} clouds={clouds} progress={exploration} />
+          <MapFog
+            id={id}
+            path={path}
+            distance={distance}
+            total={total}
+            stations={futureStations}
+            progress={exploration}
+          />
           {stops.slice(0, stage + 1).map((stop, i) => {
             const [x, y] = route[stop];
             return (

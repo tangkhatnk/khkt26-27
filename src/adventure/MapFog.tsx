@@ -1,27 +1,33 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  mapFogApertureScale,
-  mapFogApertureTransform,
-  mapFogBlobPath,
   mapFogLayerOpacity,
   mapFogMotionShouldRun,
-  type MapFogNode,
+  mapFogRouteDashArray,
+  MAP_FOG_ROUTE_CLEARANCE_WIDTH,
+  MAP_FOG_STATION_GUARD_RADIUS,
 } from "./mapFogGeometry";
 
 export function MapFog({
   id,
-  clouds,
+  path,
+  distance,
+  total,
+  stations,
   progress,
 }: {
   id: string;
-  clouds: readonly MapFogNode[];
+  path: string;
+  distance: number;
+  total: number;
+  stations: readonly { x: number; y: number; distance: number }[];
   progress: number;
 }) {
   const layer = useRef<SVGGElement>(null);
   const [motionActive, setMotionActive] = useState(false);
-  const maskId = `${id}-apertures`;
+  const maskId = `${id}-route-mask`;
   const fogOpacity = mapFogLayerOpacity(progress);
   const shouldAnimate = motionActive && fogOpacity > 0;
+  const traveledRoute = mapFogRouteDashArray(distance, total);
 
   useEffect(() => {
     const element = layer.current;
@@ -87,12 +93,6 @@ export function MapFog({
           <stop offset="68%" stopColor="var(--fog-cover-start)" stopOpacity=".82" />
           <stop offset="100%" stopColor="var(--fog-cover-end)" stopOpacity=".88" />
         </linearGradient>
-        <radialGradient id={`${id}-aperture-feather`} cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#000" stopOpacity="1" />
-          <stop offset="38%" stopColor="#000" stopOpacity=".96" />
-          <stop offset="74%" stopColor="#000" stopOpacity=".6" />
-          <stop offset="100%" stopColor="#000" stopOpacity="0" />
-        </radialGradient>
         <filter
           id={`${id}-cloud-density`}
           x="0"
@@ -190,19 +190,66 @@ export function MapFog({
           style={{ maskType: "luminance" }}
         >
           <rect x="0" y="0" width="1100" height="650" rx="24" fill="#fff" />
-          {clouds.map((cloud) => {
-            const opening = mapFogApertureScale(progress, cloud.clearsAt);
-            if (opening <= 0) return null;
-            return (
-              <path
-                key={cloud.id}
-                className="map-fog-aperture"
-                d={mapFogBlobPath(cloud.id)}
-                transform={mapFogApertureTransform(cloud, opening)}
-                fill={`url(#${id}-aperture-feather)`}
+          {/* Graduated mask strokes soften the edge; the inner 84px stays clear for the full train. */}
+          <path
+            className="map-fog-route-feather map-fog-route-feather--wide"
+            d={path}
+            pathLength={total}
+            fill="none"
+            stroke="#000"
+            strokeOpacity=".18"
+            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH + 52}
+            strokeDasharray={traveledRoute}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            className="map-fog-route-feather map-fog-route-feather--mid"
+            d={path}
+            pathLength={total}
+            fill="none"
+            stroke="#000"
+            strokeOpacity=".3"
+            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH + 28}
+            strokeDasharray={traveledRoute}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            className="map-fog-route-feather map-fog-route-feather--inner"
+            d={path}
+            pathLength={total}
+            fill="none"
+            stroke="#000"
+            strokeOpacity=".45"
+            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH + 12}
+            strokeDasharray={traveledRoute}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {stations
+            .filter((station) => station.distance > distance)
+            .map((station) => (
+              <circle
+                key={`${station.x}-${station.y}`}
+                className="map-fog-hidden-station-guard"
+                cx={station.x}
+                cy={station.y}
+                r={MAP_FOG_STATION_GUARD_RADIUS}
+                fill="#fff"
               />
-            );
-          })}
+            ))}
+          <path
+            className="map-fog-route-clearance"
+            d={path}
+            pathLength={total}
+            fill="none"
+            stroke="#000"
+            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH}
+            strokeDasharray={traveledRoute}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </mask>
       </defs>
       <rect

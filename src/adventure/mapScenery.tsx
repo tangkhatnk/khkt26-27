@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useId } from "react";
 import {
   OVERVIEW_FARMSTEADS,
   OVERVIEW_TREE_CLUSTERS,
@@ -208,12 +208,19 @@ function TravelTile({ coast }: { coast: boolean }) {
 }
 
 export const MapScenery = memo(function MapScenery({ kind, coast = false }: { kind: SceneryKind; coast?: boolean }) {
+  // Encode React's opaque token losslessly so every SVG fragment ID stays unique.
+  const tileId = `travel-tile-${useId().split("").map((character) => character.charCodeAt(0).toString(16).padStart(4, "0")).join("")}`;
   if (kind === "travel") {
     return (
       <g className="map-scenery map-scenery--travel map-scenery--static" aria-hidden="true">
+        <defs>
+          <g id={tileId} className="travel-tile-source">
+            <TravelTile coast={coast} />
+          </g>
+        </defs>
         {TRAVEL_TILE_OFFSETS.map((offset) => (
           <g key={offset} data-scenery-tile={offset} transform={`translate(${offset} 0)`}>
-            <TravelTile coast={coast} />
+            <use href={`#${tileId}`} />
           </g>
         ))}
       </g>

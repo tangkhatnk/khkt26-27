@@ -2,8 +2,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   SCENE_ENGINE_CENTER_X,
+  SCENE_WORLD_LAYER_VIEWPORTS,
   SCENE_WORLD_TILE_WIDTH,
   sceneMotionCanInterpolate,
+  sceneMotionDistanceGapCanInterpolate,
+  sceneMotionInterpolationOffsets,
   sceneMotionInterpolationDurationMs,
   sceneMotionForStudyElapsed,
   sceneStationScreenX,
@@ -11,6 +14,7 @@ import {
   sceneTrainLayout,
   sceneTrainScale,
   sceneViewBoxForZoom,
+  sceneWorldLayerOffsetPercent,
   sceneWorldSpeedForSchedule,
 } from "./sceneMotion";
 import { MapScenery, OverheadStationFootprint } from "./mapScenery";
@@ -124,22 +128,6 @@ export function TopDownScene({
   const elapsedStudySeconds = Number.isFinite(sessionTiming?.elapsedStudySeconds)
     ? Math.max(0, sessionTiming?.elapsedStudySeconds ?? 0)
     : 0;
-  const cameraMotionAllowed = sceneMotionAllowed && running && !arrival;
-  const previousMotionSample = useRef<{ allowed: boolean; elapsedStudySeconds: number } | null>(null);
-  const previousSample = previousMotionSample.current;
-  const worldInterpolate = sceneMotionCanInterpolate(
-    cameraMotionAllowed,
-    previousSample?.allowed ?? false,
-    elapsedStudySeconds,
-    previousSample?.elapsedStudySeconds,
-  );
-  const worldTransitionDurationMs = worldInterpolate && previousSample
-    ? sceneMotionInterpolationDurationMs(elapsedStudySeconds, previousSample.elapsedStudySeconds)
-    : 0;
-  useEffect(() => {
-    previousMotionSample.current = { allowed: cameraMotionAllowed, elapsedStudySeconds };
-  }, [cameraMotionAllowed, elapsedStudySeconds]);
-
   const targetStudySeconds = Number.isFinite(sessionTiming?.targetStudySeconds)
     ? Math.max(0, sessionTiming?.targetStudySeconds ?? 0)
     : 0;
@@ -148,17 +136,95 @@ export function TopDownScene({
     targetStudySeconds,
     restAnchors.map((anchor) => anchor.elapsedStudySeconds),
   );
+  const viewBox = sceneViewBoxForZoom(zoom);
+  const [viewBoxLeft, viewBoxTop, viewBoxWidth, viewBoxHeight] = viewBox.split(" ").map(Number);
   const worldDistance = arrival
     ? 0
     : sceneMotionForStudyElapsed(elapsedStudySeconds, worldSpeed).distance;
   const periodicOrigin = Math.floor(worldDistance / SCENE_WORLD_TILE_WIDTH) * SCENE_WORLD_TILE_WIDTH;
+  const periodicOffset = arrival ? 0 : periodicOrigin - worldDistance;
   const cameraOffset = -worldDistance;
-  const worldMotion = Boolean(sceneMotionAllowed && running && !arrival && sessionTiming);
+  const cameraMotionAllowed = sceneMotionAllowed && running && !arrival && Boolean(sessionTiming);
+  const previousMotionSample = useRef<{
+    allowed: boolean;
+    elapsedStudySeconds: number;
+    worldDistance: number;
+    viewportWorldWidth: number;
+    animationFrame: "a" | "b";
+    animation: { active: boolean; fromOffset: number; toOffset: number; durationMs: number };
+  } | null>(null);
+  const previousSample = previousMotionSample.current;
+  const hasNewElapsedSample = Boolean(
+    previousSample && elapsedStudySeconds !== previousSample.elapsedStudySeconds,
+  );
+  const worldAnimationFrame = previousSample
+    ? hasNewElapsedSample
+      ? previousSample.animationFrame === "a" ? "b" : "a"
+      : previousSample.animationFrame
+    : "a";
+  const canStartWorldAnimation = Boolean(
+    previousSample &&
+    hasNewElapsedSample &&
+    previousSample.viewportWorldWidth === viewBoxWidth &&
+    sceneMotionCanInterpolate(
+      cameraMotionAllowed,
+      previousSample.allowed,
+      elapsedStudySeconds,
+      previousSample.elapsedStudySeconds,
+    ) &&
+    sceneMotionDistanceGapCanInterpolate(previousSample.worldDistance, worldDistance),
+  );
+  const canPreserveWorldAnimation = Boolean(
+    previousSample &&
+    !hasNewElapsedSample &&
+    cameraMotionAllowed &&
+    previousSample.allowed &&
+    previousSample.animation.active &&
+    previousSample.viewportWorldWidth === viewBoxWidth &&
+    previousSample.worldDistance === worldDistance,
+  );
+  const worldInterpolate = canStartWorldAnimation || canPreserveWorldAnimation;
+  const animationOffsets = canStartWorldAnimation && previousSample
+    ? sceneMotionInterpolationOffsets(previousSample.worldDistance, worldDistance, periodicOrigin)
+    : canPreserveWorldAnimation && previousSample
+      ? previousSample.animation
+      : { fromOffset: periodicOffset, toOffset: periodicOffset };
+  const worldAnimationDurationMs = canStartWorldAnimation && previousSample
+    ? sceneMotionInterpolationDurationMs(elapsedStudySeconds, previousSample.elapsedStudySeconds)
+    : canPreserveWorldAnimation && previousSample
+      ? previousSample.animation.durationMs
+      : 0;
+  useEffect(() => {
+    previousMotionSample.current = {
+      allowed: cameraMotionAllowed,
+      elapsedStudySeconds,
+      worldDistance,
+      viewportWorldWidth: viewBoxWidth,
+      animationFrame: worldAnimationFrame,
+      animation: {
+        active: worldInterpolate,
+        fromOffset: animationOffsets.fromOffset,
+        toOffset: animationOffsets.toOffset,
+        durationMs: worldAnimationDurationMs,
+      },
+    };
+  }, [
+    animationOffsets.fromOffset,
+    animationOffsets.toOffset,
+    cameraMotionAllowed,
+    elapsedStudySeconds,
+    viewBoxWidth,
+    worldAnimationDurationMs,
+    worldAnimationFrame,
+    worldDistance,
+    worldInterpolate,
+  ]);
+
+  const worldMotion = cameraMotionAllowed;
   const visibleX = (x: number) => x >= -150 && x <= 1100;
   const engineX = SCENE_ENGINE_CENTER_X;
   const trainLayout = sceneTrainLayout(engineX);
-  const viewBox = sceneViewBoxForZoom(zoom);
-  const viewBoxLeft = Number(viewBox.split(" ", 1)[0]);
+  const worldViewBox = `${viewBoxLeft - viewBoxWidth} ${viewBoxTop} ${viewBoxWidth * SCENE_WORLD_LAYER_VIEWPORTS} ${viewBoxHeight}`;
   const trainScale = sceneTrainScale(
     carriages.length,
     engineX,
@@ -229,8 +295,9 @@ export function TopDownScene({
           }]
         : [];
   const worldStyle = {
-    "--world-camera-offset": `${arrival ? 0 : cameraOffset}px`,
-    "--world-transition-duration": `${worldTransitionDurationMs}ms`,
+    "--world-camera-offset": `${sceneWorldLayerOffsetPercent(periodicOffset, viewBoxWidth)}%`,
+    "--world-animation-from": `${sceneWorldLayerOffsetPercent(animationOffsets.fromOffset, viewBoxWidth)}%`,
+    "--world-animation-duration": `${worldAnimationDurationMs}ms`,
   } as CSSProperties;
   const renderedStopPhase = restStop ? "parked" : "travelling";
   const captionStatus = arrival
@@ -275,96 +342,99 @@ export function TopDownScene({
           </button>
         </div>
       </div>
-      <svg
-        className="travel-world"
-        viewBox={viewBox}
-        role="group"
-        aria-label={arrival
-          ? `Điểm kết thúc ${arrival.completed ? "ga cuối" : "điểm dừng"}: ${arrivalLabel}`
-          : `Góc nhìn 2D: ${carriages.length} toa, ${sceneStatus}`}
-      >
-        <defs>
-          <pattern id={`${id}-sleepers`} width="30" height="50" patternUnits="userSpaceOnUse">
-            <rect x="3" y="2" width="8" height="46" rx="3" fill="#9a7654" />
-          </pattern>
-        </defs>
-        <rect className="travel-ground-base" width="900" height="420" fill="#c4dda0" />
-        <g
+      <div className="travel-world">
+        <div
           className="travel-world-motion"
           data-world-motion={worldMotion}
           data-world-interpolate={worldInterpolate}
+          data-world-animation-frame={worldAnimationFrame}
           data-world-distance={arrival ? 0 : worldDistance}
           data-world-camera-offset={arrival ? 0 : cameraOffset}
+          data-world-layer-offset={periodicOffset}
           data-world-periodic-origin={arrival ? 0 : periodicOrigin}
           style={worldStyle}
         >
-          <g
-            className="travel-periodic-world"
-            transform={"translate(" + (arrival ? 0 : periodicOrigin) + " 0)"}
-            aria-hidden="true"
+          <svg
+            className="travel-world-map"
+            viewBox={worldViewBox}
+            role="group"
+            aria-label={arrival
+              ? `Điểm kết thúc ${arrival.completed ? "ga cuối" : "điểm dừng"}: ${arrivalLabel}`
+              : `Cảnh vật quanh tàu, ${sceneStatus}`}
           >
-            <MapScenery kind="travel" coast={coast} />
-            <rect x="-900" y="183" width="2700" height="54" fill="#8b7355" opacity=".45" />
-            <rect x="-900" y="188" width="2700" height="44" fill="#c19b6b" />
-            <g className="travel-rail-ties">
-              <rect x="-900" y="188" width="2700" height="44" fill={"url(#" + id + "-sleepers)"} />
-            </g>
-            <path d="M-900 194 H1800 M-900 226 H1800" stroke="#5b6260" strokeWidth="7" />
-            <path d="M-900 193 H1800 M-900 227 H1800" stroke="#eee1bd" strokeWidth="2.5" />
-          </g>
-          {arrival ? (
+            <defs>
+              <pattern id={`${id}-sleepers`} width="30" height="50" patternUnits="userSpaceOnUse">
+                <rect x="3" y="2" width="8" height="46" rx="3" fill="#9a7654" />
+              </pattern>
+            </defs>
             <g
-              className="travel-station-position"
-              transform={"translate(" + SCENE_ENGINE_CENTER_X + " 18)"}
-              data-station-id="arrival"
-              data-station-world-x={SCENE_ENGINE_CENTER_X}
-              data-station-screen-x={SCENE_ENGINE_CENTER_X}
+              className="travel-periodic-world"
+              aria-hidden="true"
             >
-              <SceneStation
-                kind="arrival"
-                title={arrival.completed ? "GA CUỐI" : "ĐIỂM DỪNG"}
-                detail={arrival.completed ? "ĐÃ HOÀN THÀNH" : "KẾT THÚC SỚM"}
-                accessibleLabel={(arrival.completed ? "Ga cuối" : "Điểm dừng cuối") + ": " + arrivalLabel}
-              />
+              <MapScenery kind="travel" coast={coast} />
+              <rect x="-900" y="183" width="2700" height="54" fill="#8b7355" opacity=".45" />
+              <rect x="-900" y="188" width="2700" height="44" fill="#c19b6b" />
+              <g className="travel-rail-ties">
+                <rect x="-900" y="188" width="2700" height="44" fill={"url(#" + id + "-sleepers)"} />
+              </g>
+              <path d="M-900 194 H1800 M-900 226 H1800" stroke="#5b6260" strokeWidth="7" />
+              <path d="M-900 193 H1800 M-900 227 H1800" stroke="#eee1bd" strokeWidth="2.5" />
             </g>
-          ) : stationAnchors.map((station) => {
-            const screenX = sceneStationScreenX(station.anchor, elapsedStudySeconds, worldSpeed);
-            const worldX = sceneStationWorldX(station.anchor, worldSpeed);
-            return (
+            {arrival ? (
               <g
-                key={station.id}
                 className="travel-station-position"
-                transform={"translate(" + worldX + " 18)"}
-                data-station-id={station.id}
-                data-station-world-x={worldX}
-                data-station-screen-x={screenX}
-                data-station-anchor-study-seconds={station.anchor}
+                transform={"translate(" + SCENE_ENGINE_CENTER_X + " 18)"}
+                data-station-id="arrival"
+                data-station-world-x={SCENE_ENGINE_CENTER_X}
+                data-station-screen-x={SCENE_ENGINE_CENTER_X}
               >
                 <SceneStation
-                  kind={station.kind}
-                  title={station.title}
-                  detail={station.detail}
-                  accessibleLabel={station.label}
+                  kind="arrival"
+                  title={arrival.completed ? "GA CUỐI" : "ĐIỂM DỪNG"}
+                  detail={arrival.completed ? "ĐÃ HOÀN THÀNH" : "KẾT THÚC SỚM"}
+                  accessibleLabel={(arrival.completed ? "Ga cuối" : "Điểm dừng cuối") + ": " + arrivalLabel}
                 />
               </g>
-            );
-          })}
-        </g>
-        <g className="travel-train-motion">
-          <g
-            className="travel-train-position"
-            data-stop-phase={renderedStopPhase}
-            style={{
-              "--travel-shift": `${trainLayout.travelShift}px`,
-              "--arrival-shift": `${trainLayout.arrivalShift}px`,
-            } as CSSProperties}
-          >
-          <g
-            className="travel-train"
-            aria-label="Đoàn tàu nhìn từ trên xuống"
-            transform={`translate(${engineX} 210) scale(${trainScale}) translate(${-engineX} -210)`}
-            data-train-scale={trainScale}
-          >
+            ) : stationAnchors.map((station) => {
+              const screenX = sceneStationScreenX(station.anchor, elapsedStudySeconds, worldSpeed);
+              const worldX = sceneStationWorldX(station.anchor, worldSpeed);
+              return (
+                <g
+                  key={station.id}
+                  className="travel-station-position"
+                  transform={"translate(" + (worldX - periodicOrigin) + " 18)"}
+                  data-station-id={station.id}
+                  data-station-world-x={worldX}
+                  data-station-screen-x={screenX}
+                  data-station-anchor-study-seconds={station.anchor}
+                >
+                  <SceneStation
+                    kind={station.kind}
+                    title={station.title}
+                    detail={station.detail}
+                    accessibleLabel={station.label}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+        <svg className="travel-train-overlay" viewBox={viewBox} role="group" aria-label="Đoàn tàu nhìn từ trên xuống">
+          <g className="travel-train-motion">
+            <g
+              className="travel-train-position"
+              data-stop-phase={renderedStopPhase}
+              style={{
+                "--travel-shift": `${trainLayout.travelShift}px`,
+                "--arrival-shift": `${trainLayout.arrivalShift}px`,
+              } as CSSProperties}
+            >
+              <g
+                className="travel-train"
+                aria-label="Đoàn tàu nhìn từ trên xuống"
+                transform={`translate(${engineX} 210) scale(${trainScale}) translate(${-engineX} -210)`}
+                data-train-scale={trainScale}
+              >
             <g transform={`translate(${engineX} 210)`} aria-label="Đầu tàu">
               <ellipse cx="3" cy="17" rx="44" ry="21" fill="#385f4b" opacity=".27" />
               <g transform="translate(-16 19)">
@@ -434,6 +504,7 @@ export function TopDownScene({
           </g>
         </g>
       </svg>
+      </div>
       <div className="travel-caption">
         <span>{chosen?.name} · {carriages.length} toa</span>
         <span>{captionStatus}</span>

@@ -57,8 +57,8 @@
   animation: map-fog-drift-quick 63s ease-in-out infinite alternate;
 }
 
-/* Keep the map's last painted fog frame while the adjacent trip form is in use. */
-.dashboard-grid:focus-within .map-fog-flow.is-active {
+/* Keep dashboard fog static from first paint to avoid a costly pause on form focus. */
+.dashboard-grid .map-fog-flow.is-active {
   animation-play-state: paused;
 }
 

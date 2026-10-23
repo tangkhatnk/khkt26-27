@@ -69,9 +69,14 @@ function near(actual, expected) {
   assert.ok(Math.abs(actual - expected) < 0.0001, `expected ${actual} to be near ${expected}`);
 }
 
+function worldMotionTag(markup) {
+  const tag = markup.match(/<div\b[^>]*class="travel-world-motion"[^>]*>/u)?.[0];
+  assert.ok(tag, "the scene uses an HTML camera layer for the moving world");
+  return tag;
+}
+
 function worldNumber(markup, attribute) {
-  const tag = markup.match(/<g\b[^>]*class="travel-world-motion"[^>]*>/u)?.[0];
-  assert.ok(tag, "the scene uses one shared world-motion group");
+  const tag = worldMotionTag(markup);
   const value = tag.match(new RegExp(`${attribute}="([^"]+)"`, "u"))?.[1];
   assert.notEqual(value, undefined, `world motion exposes ${attribute}`);
   return Number(value);
@@ -88,6 +93,21 @@ test("the trip origin stays visible after the opening seconds and follows the te
     stationNumber(afterTwoSeconds, "start", "data-station-screen-x") -
     (450 - worldNumber(afterTwoSeconds, "data-world-distance")),
   ) < 0.0001);
+});
+
+test("the moving world and centered train use separate aligned viewports", () => {
+  const markup = sceneMarkup({ sessionTiming: timingAtStudy(2) });
+  const cameraTag = worldMotionTag(markup);
+  const worldStart = markup.indexOf(cameraTag);
+  const worldEnd = markup.indexOf("</div>", worldStart);
+  const trainStart = markup.indexOf('<svg class="travel-train-overlay"');
+
+  assert.match(cameraTag, /data-world-camera-offset="-33\.333333333333336"/u);
+  assert.match(cameraTag, /style="--world-camera-offset:-3\.703703703703704%/u);
+  assert.match(markup, /<svg class="travel-world-map" viewBox="-900 0 2700 420"/u);
+  assert.match(markup, /<svg class="travel-train-overlay" viewBox="0 0 900 420"/u);
+  assert.ok(worldEnd >= 0 && trainStart > worldEnd, "the fixed train sits outside the transformed world layer");
+  assert.ok(markup.indexOf('<g class="travel-train-motion"', trainStart) > trainStart);
 });
 
 test("the rest footprint approaches, parks, and departs at the shared world speed", () => {

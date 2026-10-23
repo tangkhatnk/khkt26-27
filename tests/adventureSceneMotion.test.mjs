@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   sceneMotionCanInterpolate,
+  sceneMotionDistanceGapCanInterpolate,
   sceneMotionForStudyElapsed,
+  sceneMotionInterpolationOffsets,
   sceneMotionInterpolationDurationMs,
+  sceneWorldLayerOffsetPercent,
   sceneStationScreenX,
   sceneStationWorldX,
   sceneTrainLayout,
@@ -73,6 +76,38 @@ test("periodic terrain reindexes without reversing its shared camera movement", 
 
   const wrappedDelta = ((afterWrap.periodicOffset - beforeWrap.periodicOffset + 450) % 900 + 900) % 900 - 450;
   assert.ok(Math.abs(wrappedDelta + 0.3333333333333) < 0.0001);
+});
+
+test("periodic wrap interpolation uses both endpoints in the current tile frame", () => {
+  const speed = 50 / 3;
+  const beforeWrap = sceneMotionForStudyElapsed(53.99, speed);
+  const afterWrap = sceneMotionForStudyElapsed(54.01, speed);
+  const offsets = sceneMotionInterpolationOffsets(
+    beforeWrap.distance,
+    afterWrap.distance,
+    afterWrap.periodicOrigin,
+  );
+
+  assert.ok(Math.abs(offsets.fromOffset - 0.1666666666666) < 0.0001);
+  assert.ok(Math.abs(offsets.toOffset + 0.1666666666666) < 0.0001);
+  assert.ok(Math.abs((offsets.toOffset - offsets.fromOffset) + (afterWrap.distance - beforeWrap.distance)) < 0.0001);
+  const stationWorldX = 1200;
+  const beforeScreenX = stationWorldX - beforeWrap.distance;
+  const rebasedStartScreenX = stationWorldX - afterWrap.periodicOrigin + offsets.fromOffset;
+  const rebasedEndScreenX = stationWorldX - afterWrap.periodicOrigin + offsets.toOffset;
+  assert.ok(Math.abs(rebasedStartScreenX - beforeScreenX) < 0.0001);
+  assert.ok(Math.abs(rebasedEndScreenX - (stationWorldX - afterWrap.distance)) < 0.0001);
+  assert.ok(Math.abs(sceneMotionInterpolationDurationMs(54.01, 53.99) - 20) < 1e-9);
+  assert.equal(sceneMotionDistanceGapCanInterpolate(beforeWrap.distance, afterWrap.distance), true);
+  assert.equal(sceneMotionDistanceGapCanInterpolate(0, 900), false);
+  assert.equal(sceneMotionDistanceGapCanInterpolate(901, 900), false);
+});
+
+test("compositor world offsets preserve world-unit travel at each zoom", () => {
+  assert.equal(sceneWorldLayerOffsetPercent(-900, 900), -100);
+  assert.equal(sceneWorldLayerOffsetPercent(-900, 600), -150);
+  assert.equal(sceneWorldLayerOffsetPercent(0, 900), 0);
+  assert.equal(sceneWorldLayerOffsetPercent(-900, 0), 0);
 });
 
 test("world interpolation is suppressed on mount and after motion resumes", () => {
