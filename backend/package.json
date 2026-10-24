@@ -27,7 +27,7 @@
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/websocket": "^11.2.0",
     "@google/genai": "^2.27.0",
-    "@prisma/client": "6.19.0",
+    "@prisma/client": "7.10.1",
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.0",
