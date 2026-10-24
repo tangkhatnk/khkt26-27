@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@types/node": "^24.19.1",
+    "@types/node": "^24.19.2",
     "@types/react": "~19.2.2",
     "@types/react-dom": "~19.2.0",
     "@vitejs/plugin-react": "^6.1.2",
@@ -23,7 +23,7 @@
     "globals": "^17.13.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.1",
-    "vite": "^8.3.4"
+    "vite": "^8.3.5"
   },
   "scripts": {
     "prestart": "node scripts/start.mjs --prepare-only",
