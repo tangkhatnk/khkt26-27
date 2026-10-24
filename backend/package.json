@@ -37,9 +37,9 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8",
-    "@electric-sql/pglite-socket": "^0.2.11",
-    "@types/node": "^24.0.0",
+    "@electric-sql/pglite": "^0.5.10",
+    "@electric-sql/pglite-socket": "^0.2.13",
+    "@types/node": "^24.19.2",
     "@types/ws": "^8.18.1",
     "ioredis-mock": "^8.13.1",
     "prisma": "6.19.3",
