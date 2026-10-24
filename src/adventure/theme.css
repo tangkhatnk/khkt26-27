@@ -208,12 +208,19 @@ html[data-theme="dark"] .adventure .overhead-carriages button[aria-pressed="true
 
 html[data-theme="dark"] .adventure .primary {
   background: #b9653e;
-  border-color: #b9653e;
+  border-color: #e4ad89;
   color: #fff7ed;
 }
 
 html[data-theme="dark"] .adventure .primary:hover:not(:disabled) {
   background: #cf754b;
+  border-color: #f4c7a4;
+}
+
+html[data-theme="dark"] .adventure .primary:focus-visible {
+  outline: 3px solid #ffd6b7;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 1px #17231b, 0 0 0 4px #ffd6b7;
 }
 
 html[data-theme="dark"] .adventure textarea,
@@ -358,6 +365,7 @@ html[data-theme="dark"] .adventure .boarding-ticket {
   --ticket-paper: #26332a;
   --ticket-stub: #202c24;
   --ticket-line: #536151;
+  --ticket-route: #e0a178;
   border-color: #4a5c4c;
   box-shadow: 0 12px 26px rgb(0 0 0 / 28%);
 }

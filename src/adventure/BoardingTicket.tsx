@@ -63,12 +63,33 @@ export function BoardingTicket({
     <section className="boarding-ticket" aria-label="Vé chuyến học">
       <header className="boarding-ticket__band boarding-ticket__band--top">
         <span className="boarding-ticket__brand">VIỄN DU · VÉ LÊN TÀU</span>
+        <svg className="boarding-ticket__ornament" aria-hidden="true" focusable="false" viewBox="0 0 84 20">
+          <path d="M5 10h74" fill="none" stroke="currentColor" strokeDasharray="2 4" strokeWidth="1.4" />
+          <circle cx="8" cy="10" r="2.4" fill="currentColor" />
+          <circle cx="76" cy="10" r="2.4" fill="currentColor" />
+          <g fill="currentColor" stroke="var(--ticket-green-dark)" strokeWidth=".8">
+            <path d="M36 4.5h14a2 2 0 0 1 2 2v7h-2v2h-2v-2h-9v2h-2v-2h-2v-7a2 2 0 0 1 2-2Z" />
+            <path d="M38 6.5h4v3h-4zM45 6.5h4v3h-4z" fill="var(--ticket-green-dark)" stroke="none" />
+          </g>
+        </svg>
         <span className="boarding-ticket__mode">
           {mode === "group" ? "Cùng đoàn" : "Một mình"}
         </span>
       </header>
 
       <div className="boarding-ticket__main">
+        <svg className="boarding-ticket__landscape" aria-hidden="true" focusable="false" viewBox="0 0 240 72">
+          <circle cx="211" cy="16" r="7" fill="currentColor" opacity=".24" />
+          <path d="m3 50 24-23 18 19 19-14 24 22m12-3 25-29 21 25 16-17 23 21 20-16 32 17" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+          <path d="M4 59c34-13 63-14 97-3s69 8 135-3" fill="none" stroke="var(--ticket-route)" strokeDasharray="3 4" strokeLinecap="round" strokeWidth="1.5" />
+          <path d="M4 64c37-13 65-14 98-3s67 8 134-3M12 59l3 7m12-11 3 7m12-10 3 7m12-9 3 7m12-8 3 7m12-8 3 7m12-7 3 7m12-7 3 7m12-7 3 7m12-7 3 7m12-7 3 7m12-8 3 7m12-10 3 7m12-12 3 7" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1" opacity=".55" />
+          <g transform="translate(147 31)" fill="var(--ticket-route)" stroke="var(--ticket-paper)" strokeWidth=".8">
+            <path d="M3 4h20a3 3 0 0 1 3 3v13h-3v3h-2v-3H8v3H6v-3H3V7a3 3 0 0 1 3-3Z" />
+            <path d="M7 7h5v5H7zm8 0h5v5h-5z" fill="var(--ticket-paper)" stroke="none" />
+            <circle cx="8" cy="21" r="2" />
+            <circle cx="20" cy="21" r="2" />
+          </g>
+        </svg>
         <div className="boarding-ticket__details">
           <div className="boarding-ticket__destination">
             <p className="boarding-ticket__field-label">MỤC TIÊU HÔM NAY</p>

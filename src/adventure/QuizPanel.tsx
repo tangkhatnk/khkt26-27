@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Session } from "../../backend/src/adventure/domain";
 import { knowledgeGaps } from "./learning";
 import { StudyGuideInlineText } from "./StudyGuideRenderer";
+import { quizPrefetchNotice } from "./quizPrefetchPresentation";
 import {
   isQuizCount,
   isValidQuizDraft,
@@ -55,6 +56,7 @@ export function QuizPanel({
   const lastSavedDraft = useRef<QuizDraft | null>(null);
   const assessment = gradedQuiz ?? session.quiz;
   const questions = draft.questions;
+  const prefetchNotice = quizPrefetchNotice(prefetchStatus, prefetchError, generating, Boolean(error), questions.length);
 
   useEffect(() => () => requests.current.invalidate(), [ownerId, session.id]);
 
@@ -210,11 +212,10 @@ export function QuizPanel({
                   }}
                 />
               </label>
-              <button className="primary" disabled={generating || grading || prefetchStatus === "pending" || !isQuizCount(Number(countInput))} onClick={() => void generate()}>
+              <button className="primary quiz-panel__generate" disabled={generating || grading || prefetchStatus === "pending" || !isQuizCount(Number(countInput))} onClick={() => void generate()}>
                 {generating || prefetchStatus === "pending" ? "Đang chuẩn bị câu hỏi…" : questions.length ? "Tạo lại câu hỏi bằng AI" : "Tạo câu hỏi bằng AI"}
               </button>
-              {prefetchStatus === "pending" && <p className="quiz-prefetch-status" role="status">Viễn Du đang chuẩn bị câu hỏi trong lúc bạn tập trung.</p>}
-              {prefetchStatus === "failed" && <p className="quiz-prefetch-status" role="status">{prefetchError || "Chưa chuẩn bị sẵn được. Bạn có thể thử tạo câu hỏi ngay bây giờ."}</p>}
+              {prefetchNotice && <p className="quiz-prefetch-status" role={prefetchNotice.role}>{prefetchNotice.message}</p>}
               {questions.length > 0 && <p className="quiz-replace-hint">Tạo lại trước khi chấm sẽ thay câu hỏi và câu trả lời hiện tại.</p>}
             </>
           ) : (

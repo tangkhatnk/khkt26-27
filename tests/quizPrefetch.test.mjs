@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { QuizPrefetchCoordinator, quizPrefetchScopeKey } from "../src/adventure/quizPrefetch.ts";
 import { buildQuizGenerationPayload, quizGenerationSourceKey } from "../src/adventure/quizGeneration.ts";
+import { isCurrentQuizPrefetchRequest, quizPrefetchNotice } from "../src/adventure/quizPrefetchPresentation.ts";
 
 const scope = (overrides = {}) => ({
   ownerId: "owner-a",
@@ -93,12 +94,42 @@ test("explicit retry starts a fresh request after a failed prefetch but joins on
     return new Promise((resolve) => { resolveRequest = resolve; });
   };
   const retry = coordinator.retry(currentScope, start);
+  assert.deepEqual(coordinator.status(currentScope), { status: "pending" });
   const sameRetry = coordinator.retry(currentScope, start);
   assert.strictEqual(sameRetry, retry);
   assert.equal(calls, 1);
   resolveRequest(["ready"]);
   assert.deepEqual(await retry, ["ready"]);
   coordinator.dispose();
+});
+
+test("manual quiz retry replaces stale prefetch failure with one live status and one accessible error", () => {
+  const retrying = quizPrefetchNotice("failed", "offline", true, false, 0);
+  const retryFailed = quizPrefetchNotice("failed", "offline", false, true, 0);
+  const retrySucceeded = quizPrefetchNotice("failed", "offline", false, false, 3);
+
+  assert.deepEqual(retrying, { role: "status", message: "Đang chuẩn bị câu hỏi…" });
+  assert.equal(retryFailed, null);
+  assert.equal(retrySucceeded, null);
+});
+
+test("late quiz request status cannot replace a newer request for the same trip and count", () => {
+  const oldRequest = {
+    ownerId: "owner-a",
+    sessionId: "trip-a",
+    count: 3,
+    sourceKey: "source-old",
+    requestGeneration: 1,
+  };
+  const newRequest = {
+    ...oldRequest,
+    sourceKey: "source-new",
+    requestGeneration: 2,
+  };
+
+  assert.equal(isCurrentQuizPrefetchRequest(oldRequest, newRequest), false);
+  assert.equal(isCurrentQuizPrefetchRequest({ ...newRequest, requestGeneration: 1 }, newRequest), false);
+  assert.equal(isCurrentQuizPrefetchRequest(newRequest, newRequest), true);
 });
 
 test("account and workspace disposal abort a pending request", async () => {
@@ -162,4 +193,15 @@ test("quiz generation source identity changes with canonical input but leaves co
 
   assert.equal(quizGenerationSourceKey(countThree), quizGenerationSourceKey(countFive));
   assert.notEqual(quizGenerationSourceKey(countThree), quizGenerationSourceKey(changedSource));
+});
+
+test("a pending generated guide blocks quiz fallback to only the topic and goal", () => {
+  assert.throws(() => buildQuizGenerationPayload({
+    topic: "biology",
+    goal: "Study cells",
+    notes: "",
+    sources: [],
+    materials: [],
+    pendingStudyGuide: true,
+  }, 3), /xác nhận hoặc bỏ bản ôn tập/u);
 });

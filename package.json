@@ -4,6 +4,7 @@
   "dependencies": {
     "@tesseract.js-data/eng": "1.0.0",
     "@tesseract.js-data/vie": "1.0.0",
+    "katex": "0.19.1",
     "officeparser": "8.1.1",
     "pdfjs-dist": "6.2.108",
     "react": "19.2.3",

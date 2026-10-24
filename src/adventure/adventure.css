@@ -676,7 +676,7 @@ body,
 }
 .adventure .primary {
   background: #d67b49;
-  border-color: #d67b49;
+  border-color: #9f4d26;
   color: #fffdf4;
   padding: 13px 20px;
   font-weight: 600;
@@ -688,6 +688,18 @@ body,
 }
 .adventure .primary:hover:not(:disabled) {
   background: #c46b3b;
+  border-color: #87411f;
+}
+.adventure .primary:focus-visible {
+  outline: 3px solid #31583f;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 1px #fffdf4, 0 0 0 4px #31583f;
+}
+.adventure .study-guide__draft .primary,
+.adventure .material-source .primary,
+.adventure .quiz-panel__generate {
+  min-height: 48px;
+  border-width: 2px;
 }
 .ticket-card .primary {
   width: 100%;

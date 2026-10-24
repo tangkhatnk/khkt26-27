@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MaterialSourceReader } from '../src/adventure/MaterialSourceReader.ts';
+import { MaterialSourceReader, MaterialSourceReviewButton } from '../src/adventure/MaterialSourceReader.ts';
 import { createMaterialSource, quizSourceText } from '../src/adventure/materialSources.ts';
 
 test('shows a safe formatted source by default without changing the original or bypassing review', () => {
@@ -35,6 +35,15 @@ test('shows a safe formatted source by default without changing the original or 
   );
 });
 
+test('source review confirmation is an explicit primary action', () => {
+  const html = renderToStaticMarkup(createElement(MaterialSourceReviewButton, {
+    disabled: false,
+    onClick: () => {},
+  }));
+
+  assert.match(html, /<button type="button" class="primary">Xác nhận nội dung đã kiểm tra<\/button>/);
+});
+
 test('renders read-only text with safe paragraph and chemistry notation', () => {
   const html = renderToStaticMarkup(createElement(MaterialSourceReader, {
     title: 'Ghi chú',
@@ -42,7 +51,11 @@ test('renders read-only text with safe paragraph and chemistry notation', () => 
   }));
 
   assert.match(html, /<p>Nước tham gia phản ứng\.<\/p>/);
-  assert.match(html, /H<sub>2<\/sub>O/);
+  assert.match(html, /class="katex"/);
+  assert.match(html, /<msub>/);
+  assert.match(html, /<mn>2<\/mn>/);
+  assert.match(html, /class="katex-html"/);
+  assert.match(html, /class="msupsub"/);
   assert.doesNotMatch(html, /material-reader__toolbar/);
 });
 
@@ -60,6 +73,10 @@ test('formats old AI guides for display without changing their saved source or e
   }));
 
   assert.match(html, /<table>/);
-  assert.match(html, /AgNO<sub>3<\/sub>/);
+  assert.match(html, /class="katex"/);
+  assert.match(html, /AgNO/);
+  assert.match(html, /<msub>/);
+  assert.match(html, /class="katex-html"/);
+  assert.match(html, /class="msupsub"/);
   assert.equal(source.text, original);
 });

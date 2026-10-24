@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { useBrowserView } from "./navigation";
 import { useAuthStore } from "@/store/authStore";
 import { post, request } from "@/services/api";
@@ -11,10 +11,11 @@ import { SceneFallback } from "./SceneFallback";
 import { BoardingTicket } from "./BoardingTicket";
 import { StudyNotesInput } from "./StudyNotesInput";
 import { StudyGuideComposer } from "./StudyGuideComposer";
-import { MaterialSourceReader } from "./MaterialSourceReader";
+import { MaterialSourceReader, MaterialSourceReviewButton } from "./MaterialSourceReader";
 import { FlipClock } from "./FlipClock";
 import { ThemeToggle } from "./theme";
 import { studyGuideDownload, studyGuideSource, type StudyGuideDraft } from "./studyGuide";
+import { createStudyGuideReviewState, hasPendingStudyGuide as hasPendingGuideReview, reduceStudyGuideReview } from "./studyGuideReview";
 import { useStudyFullscreen } from "./useStudyFullscreen";
 import { JourneyView } from "./JourneyView";
 import { TopDownScene } from "./TopDownScene";
@@ -28,6 +29,7 @@ import { QuizPanel } from "./QuizPanel";
 import { HomeTripForm } from "./HomeTripForm";
 import { updateQuickTripDraft, type QuickTripDraft } from "./quickTripDraft";
 import { QuizPrefetchCoordinator, quizPrefetchScopeKey, type QuizPrefetchScope } from "./quizPrefetch";
+import { isCurrentQuizPrefetchRequest } from "./quizPrefetchPresentation";
 import { buildQuizGenerationPayload, quizDraftFromQuestions, quizGenerationSourceKey } from "./quizGeneration";
 import { permanentGuestFailure, publishGuestSessions, type GuestPublicationStatus } from "./guestPublication";
 import { GuestHistorySync } from "./GuestHistorySync";
@@ -107,6 +109,8 @@ type QuizPrefetchUiState = {
   ownerId: string;
   sessionId: string;
   count: number;
+  sourceKey?: string;
+  requestGeneration?: number;
   status: "pending" | "ready" | "failed";
   message?: string;
 };
@@ -160,6 +164,7 @@ function AdventureWorkspace() {
   const [quizCount, setQuizCount] = useState("3");
   const [quizPrefetch] = useState(() => new QuizPrefetchCoordinator<QuizQuestion[]>());
   const [quizPrefetchUi, setQuizPrefetchUi] = useState<QuizPrefetchUiState | null>(null);
+  const quizRequestGeneration = useRef(0);
   const quizPrefetchSaved = useRef(new Set<string>());
   const quizPrefetchLifecycle = useRef({ generation: 0 });
   useEffect(() => {
@@ -185,6 +190,8 @@ function AdventureWorkspace() {
     return () => controller.abort();
   }, [needsTicketCode, ticketId, ticketCode, loaded, exclusive, online, needsLogin, owner]);
   const [sources, setSources] = useState<MaterialSource[]>([]);
+  const [studyGuideReview, dispatchStudyGuideReview] = useReducer(reduceStudyGuideReview, createStudyGuideReviewState());
+  const studyGuideNeedsConfirmation = hasPendingGuideReview(studyGuideReview);
   const [studyInput, setStudyInput] = useState<"notes" | "files" | "ai">("notes");
   const originalFiles = useRef(new Map<string, File>());
   const [preferAiReading, setPreferAiReading] = useState(false);
@@ -736,7 +743,7 @@ function AdventureWorkspace() {
       commit({ ...current.current, active: leaveFocusView(current.current.active, Date.now()) });
     setError("");
     setNotice("");
-    if (next === "ticket") {
+    if (next === "ticket" && !studyGuideNeedsConfirmation) {
       const draft = quickTripDraft.current;
       setGoal(draft.goal);
       setTopic(draft.topic);
@@ -750,6 +757,10 @@ function AdventureWorkspace() {
   const prepareQuickTripRef = useRef<(draft: QuickTripDraft) => void>(() => {});
   const onPrepareQuickTrip = useCallback((draft: QuickTripDraft) => prepareQuickTripRef.current(draft), []);
   prepareQuickTripRef.current = (draft) => {
+    if (studyGuideNeedsConfirmation) {
+      setError("Hãy xác nhận hoặc bỏ bản ôn tập AI trước khi đổi mục tiêu hay nguồn học.");
+      return;
+    }
     updateQuickTripDraft(quickTripDraft, draft);
     if (current.current.active) {
       go("focus");
@@ -773,6 +784,7 @@ function AdventureWorkspace() {
   function start() {
     if (
       busy || materialRequest.current ||
+      studyGuideNeedsConfirmation ||
       !loaded ||
       !exclusive ||
       current.current.active ||
@@ -889,7 +901,7 @@ function AdventureWorkspace() {
     downloadData(JSON.stringify(current.current, null, 2), "vien-du-backup.json");
   }
   async function importMaterials(files: File[]) {
-    if (!files.length || busy || materialRequest.current || !workspaceLive.current || view !== "ticket") return;
+    if (!files.length || busy || studyGuideNeedsConfirmation || materialRequest.current || !workspaceLive.current || view !== "ticket") return;
     if (files.length > 10 || materials.length + files.length > 10) {
       setError("Mỗi chuyến tối đa 10 tài liệu. Hãy gộp nội dung hoặc bắt đầu chuyến mới.");
       return;
@@ -991,6 +1003,7 @@ function AdventureWorkspace() {
       });
       if (!isCurrent()) return;
       studyGuideSource("validation", result);
+      dispatchStudyGuideReview({ type: "generated", draft: result });
       return result;
     } catch (e) {
       if (isCurrent()) setError(e instanceof Error ? e.message : "Chưa tạo được bản ôn tập.");
@@ -1002,15 +1015,23 @@ function AdventureWorkspace() {
     }
   }
   function acceptStudyGuide(draft: StudyGuideDraft) {
-    if (busy || !workspaceLive.current || view !== "ticket" || materials.length || sources.length || documentText.trim()) return;
+    if (busy || !workspaceLive.current || view !== "ticket" || !studyGuideNeedsConfirmation ||
+        studyGuideReview.draft !== draft || materials.length || sources.length || documentText.trim()) return;
     try {
       const source = studyGuideSource(crypto.randomUUID(), draft);
       const reviewed = reviewMaterialSource(source, source.text);
       setSources([reviewed]);
       setMaterials([{ sourceId: source.id, name: source.name, size: new TextEncoder().encode(source.text).length,
         type: "text/plain", status: "extracted", message: "Bản ôn tập do AI tạo, đã được bạn kiểm tra và xác nhận." }]);
+      dispatchStudyGuideReview({ type: "discard" });
       setError(""); setNotice("Đã dùng bản ôn tập làm tài liệu cho chuyến này. Bạn có thể tải lại trong phần nội dung tài liệu.");
     } catch (e) { setError(e instanceof Error ? e.message : "Không dùng được bản ôn tập."); }
+  }
+  function discardStudyGuideDraft() {
+    if (busy || !studyGuideNeedsConfirmation) return;
+    dispatchStudyGuideReview({ type: "discard" });
+    setError("");
+    setNotice("Đã bỏ bản ôn tập AI. Bạn có thể chọn mục tiêu hoặc nguồn học khác.");
   }
   function downloadStudyGuide(draft: StudyGuideDraft) {
     try { downloadData(studyGuideDownload(draft), "vien-du-on-tap.txt", "text/plain;charset=utf-8"); }
@@ -1043,23 +1064,47 @@ function AdventureWorkspace() {
     if (current.current.summarySessionId !== session.id)
       throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần ôn tập.");
     const initial = buildQuizScope(session, count);
-    const pendingRequest = quizPrefetch.status(initial.scope)?.status === "pending"
-      ? quizPrefetch.retry(initial.scope, (signal) => requestQuizQuestions(session, count, initial.scope, signal))
-      : null;
-    await sync();
-    if (ownerRef.current !== id || !workspaceLive.current ||
-        current.current.summarySessionId !== session.id)
-      throw new Error("Chuyến đã đổi trước khi quiz được tạo.");
-    if (current.current.snapshot?.sessions.find((item) => item.id === session.id)?.quiz)
-      throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
-    if (pendingRequest) return pendingRequest;
-    const latest = buildQuizScope(session, count);
-    const result = await quizPrefetch.retry(latest.scope, (signal) =>
-      requestQuizQuestions(session, count, latest.scope, signal));
-    if (ownerRef.current !== id || !workspaceLive.current ||
-        current.current.summarySessionId !== session.id)
-      throw new Error("Chuyến đã đổi trước khi quiz được lưu.");
-    return result;
+    const requestIdentity = {
+      ownerId: id,
+      sessionId: session.id,
+      count,
+      sourceKey: initial.scope.sourceKey,
+      requestGeneration: ++quizRequestGeneration.current,
+    };
+    const pendingState = { ...requestIdentity, status: "pending" as const };
+    const isSameRequest = (state: QuizPrefetchUiState | null) =>
+      isCurrentQuizPrefetchRequest(state, requestIdentity);
+    setQuizPrefetchUi(pendingState);
+    try {
+      const pendingRequest = quizPrefetch.status(initial.scope)?.status === "pending"
+        ? quizPrefetch.retry(initial.scope, (signal) => requestQuizQuestions(session, count, initial.scope, signal))
+        : null;
+      await sync();
+      if (ownerRef.current !== id || !workspaceLive.current ||
+          current.current.summarySessionId !== session.id)
+        throw new Error("Chuyến đã đổi trước khi quiz được tạo.");
+      if (current.current.snapshot?.sessions.find((item) => item.id === session.id)?.quiz)
+        throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
+      let result: QuizQuestion[];
+      if (pendingRequest) result = await pendingRequest;
+      else {
+        const latest = buildQuizScope(session, count);
+        result = await quizPrefetch.retry(latest.scope, (signal) =>
+          requestQuizQuestions(session, count, latest.scope, signal));
+      }
+      if (ownerRef.current !== id || !workspaceLive.current ||
+          current.current.summarySessionId !== session.id)
+        throw new Error("Chuyến đã đổi trước khi quiz được lưu.");
+      setQuizPrefetchUi((previous) => isSameRequest(previous)
+        ? { ...pendingState, status: "ready" }
+        : previous);
+      return result;
+    } catch (cause) {
+      setQuizPrefetchUi((previous) => isSameRequest(previous)
+        ? null
+        : previous);
+      throw cause;
+    }
   }
   function saveQuizDraft(ownerId: string, sessionId: string, draft: QuizDraft) {
     if (!workspaceLive.current || ownerRef.current !== ownerId || !isValidQuizDraft(draft) ||
@@ -1107,6 +1152,10 @@ function AdventureWorkspace() {
     return graded;
   }
   function startReviewTrip(session: Session) {
+    if (studyGuideNeedsConfirmation) {
+      setError("Hãy xác nhận hoặc bỏ bản ôn tập AI trước khi đổi sang chuyến ôn tập khác.");
+      return;
+    }
     if (current.current.active) {
       go("focus");
       setNotice("Chuyến hiện tại vẫn đang chạy. Kết thúc chuyến đó trước khi chuẩn bị chuyến ôn tập.");
@@ -1418,24 +1467,26 @@ function AdventureWorkspace() {
                       <h2>Nội dung ôn tập</h2>
                       <p className="departure-intro">Dán nội dung đã có, chọn tệp hoặc nhờ AI soạn một bản ôn tập để mang lên tàu.</p>
                       <div className="departure-source-options" role="group" aria-label="Chọn cách chuẩn bị nội dung">
-                        <button disabled={busy} aria-pressed={studyInput === "notes"} onClick={() => setStudyInput("notes")}>Dán nội dung</button>
-                        <button disabled={busy} aria-pressed={studyInput === "files"} onClick={() => setStudyInput("files")}>Tải tài liệu</button>
+                        <button disabled={busy || studyGuideNeedsConfirmation} aria-pressed={studyInput === "notes"} onClick={() => setStudyInput("notes")}>Dán nội dung</button>
+                        <button disabled={busy || studyGuideNeedsConfirmation} aria-pressed={studyInput === "files"} onClick={() => setStudyInput("files")}>Tải tài liệu</button>
                         <button disabled={busy} aria-pressed={studyInput === "ai"} onClick={() => setStudyInput("ai")}>Nhờ AI soạn</button>
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "ai"}>
                         {!materials.length && !sources.length && !documentText.trim() ? <StudyGuideComposer
                           disabled={busy} canGenerate={Boolean(user && !needsLogin && online)}
                           unavailableReason={!online ? "Kết nối mạng để tạo bản ôn tập bằng AI." : "Đăng nhập để tạo bản ôn tập bằng API Google AI Studio."}
-                          onGenerate={generateStudyGuide} onCancel={() => materialRequest.current?.abort()} onUse={acceptStudyGuide} onDownload={downloadStudyGuide}
+                          review={studyGuideReview} onReviewAction={dispatchStudyGuideReview}
+                          onGenerate={generateStudyGuide} onCancel={() => materialRequest.current?.abort()} onUse={acceptStudyGuide}
+                          onDiscard={discardStudyGuideDraft} onDownload={downloadStudyGuide}
                         /> : <p className="info-box">Bạn đã có nội dung cho chuyến này. Để tạo bản ôn tập mới từ yêu cầu bằng chữ, hãy xóa nội dung đã dán và gỡ các tài liệu bên dưới trước.</p>}
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "notes"}>
-                        <StudyNotesInput value={documentText} onChange={setDocumentText} disabled={busy} hasDocuments={Boolean(materials.length || sources.length)} />
+                        <StudyNotesInput value={documentText} onChange={setDocumentText} disabled={busy || studyGuideNeedsConfirmation} hasDocuments={Boolean(materials.length || sources.length)} />
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "files"}>
                       <h3 className="material-title">Tài liệu học tập</h3>
                       <label className="material-ai-option">
-                        <input type="checkbox" checked={preferAiReading} disabled={busy} onChange={(e) => setPreferAiReading(e.target.checked)} aria-describedby="material-ai-help" />
+                          <input type="checkbox" checked={preferAiReading} disabled={busy || studyGuideNeedsConfirmation} onChange={(e) => setPreferAiReading(e.target.checked)} aria-describedby="material-ai-help" />
                         <span>Ưu tiên dùng AI để đọc PDF/ảnh</span>
                       </label>
                       <p id="material-ai-help" className="material-hint">Thông thường, ứng dụng đọc chữ trên thiết bị. Với ảnh/PDF khó đọc, AI dùng chính API Google AI Studio (Gemini) đã tích hợp. Tệp chỉ được gửi khi bạn bấm “Đọc bằng AI”; cần đăng nhập.</p>
@@ -1444,7 +1495,7 @@ function AdventureWorkspace() {
                         <input
                           type="file"
                           multiple
-                          disabled={busy}
+                          disabled={busy || studyGuideNeedsConfirmation}
                           onChange={(e) => {
                             const files = Array.from(e.target.files ?? []);
                             e.target.value = "";
@@ -1467,7 +1518,7 @@ function AdventureWorkspace() {
                         <summary>{source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra nội dung"}</summary>
                         <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} disabled={busy} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => setSources((items) => items.map((item) => item.id === source.id ? {...item,text,reviewed:false} : item))} />
                         <div className="choice-row">
-                          <button disabled={busy || source.text.trim().length < 10} onClick={() => { try { const reviewed = reviewMaterialSource(source, source.text); setSources((items) => items.map((item) => item.id === source.id ? reviewed : item)); setError(""); } catch(e) { setError(e instanceof Error ? e.message : "Không xác nhận được tài liệu."); } }}>Xác nhận nội dung đã kiểm tra</button>
+                          <MaterialSourceReviewButton disabled={busy || source.text.trim().length < 10} onClick={() => { try { const reviewed = reviewMaterialSource(source, source.text); setSources((items) => items.map((item) => item.id === source.id ? reviewed : item)); setError(""); } catch(e) { setError(e instanceof Error ? e.message : "Không xác nhận được tài liệu."); } }} />
                           {source.source !== "ai-generated" && <button disabled={busy || !originalFiles.current.has(source.id) || !/\.(pdf|png|jpe?g|webp)$/i.test(source.name)} onClick={() => void readHandwriting(source.id)}>Đọc bằng AI · gửi tệp này</button>}
                           {source.source === "ai-generated" && <button disabled={busy} onClick={() => downloadStudyGuide({title:source.name.replace(/\.txt$/i, ""),text:source.text})}>Tải bản ôn tập (.txt)</button>}
                           <button disabled={busy} onClick={() => { originalFiles.current.delete(source.id); setSources((items) => items.filter((item) => item.id !== source.id)); setMaterials((items) => items.filter((file) => source.covers ? !source.covers.includes(file.name) : file.sourceId !== source.id)); }}>Gỡ tài liệu</button>
@@ -1487,6 +1538,7 @@ function AdventureWorkspace() {
                           <textarea
                             value={goal}
                             maxLength={500}
+                              disabled={busy || studyGuideNeedsConfirmation}
                             onChange={(e) => {
                               updateQuickTripDraft(quickTripDraft, { goal: e.target.value });
                               setGoal(e.target.value);
@@ -1498,6 +1550,7 @@ function AdventureWorkspace() {
                           Chủ đề
                           <select
                             value={topic}
+                              disabled={busy || studyGuideNeedsConfirmation}
                             onChange={(e) => {
                               updateQuickTripDraft(quickTripDraft, { topic: e.target.value });
                               setTopic(e.target.value);
@@ -1573,6 +1626,7 @@ function AdventureWorkspace() {
                         className="primary"
                         disabled={
                           busy ||
+                          studyGuideNeedsConfirmation ||
                           !!active ||
                           goal.trim().length < 3 ||
                           !Number.isInteger(minutes) ||
@@ -1586,6 +1640,7 @@ function AdventureWorkspace() {
                         Bắt đầu chuyến ·{" "}
                         {Number.isFinite(minutes) ? minutes : "…"} phút học →
                       </button>
+                      {studyGuideNeedsConfirmation && <p className="material-hint" role="status">Hãy xác nhận hoặc bỏ bản ôn tập AI trước khi bắt đầu chuyến.</p>}
                       {active && (
                         <button onClick={() => go("focus")}>
                           Tiếp tục phiên đang mở
@@ -2326,14 +2381,14 @@ function AdventureWorkspace() {
                           invalidateQuizForSourceEdit(owner, summarySession.id);
                           commitRef.current({...value,sources:{...value.sources,[summarySession.id]:(value.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? {...item,text,reviewed:false} : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
                         }} />
-                        <button disabled={source.text.trim().length < 10} onClick={() => {try {
+                        <MaterialSourceReviewButton disabled={source.text.trim().length < 10} onClick={() => {try {
                           const value = current.current;
                           if(value.summarySessionId !== summarySession.id) return;
                           const reviewed = reviewMaterialSource(source, source.text);
                           invalidateQuizForSourceEdit(owner, summarySession.id);
                           commitRef.current({...value,sources:{...value.sources,[summarySession.id]:(value.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? reviewed : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
                           setError("");
-                        } catch(e) {setError(e instanceof Error ? e.message : "Không xác nhận được nguồn.");}}}>Xác nhận nội dung đã kiểm tra</button>
+                        } catch(e) {setError(e instanceof Error ? e.message : "Không xác nhận được nguồn.");}}} />
                       </details>)}
                       <QuizPanel
                         key={`${owner}:${summarySession.id}`}

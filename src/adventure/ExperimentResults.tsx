@@ -26,6 +26,20 @@ export type ExperimentRun = {
   publishedAt: string;
 };
 type Results = { runs: ExperimentRun[]; total: number; limit: number; offset: number };
+type ExperimentMineStatus = "loading" | "shared" | "not-shared" | "unknown";
+
+export function ExperimentShareMineStatus({ status, disabled, onRetry }: {
+  status: ExperimentMineStatus;
+  disabled: boolean;
+  onRetry: () => void;
+}) {
+  if (status === "loading") return <p className="material-hint" role="status">Đang kiểm tra trạng thái công khai của phiên…</p>;
+  if (status === "unknown") return <div className="choice-row">
+    <p role="alert">Chưa kiểm tra được phiên này đã công khai chưa. Hãy thử lại trước khi gửi để tránh công khai trùng.</p>
+    <button type="button" disabled={disabled} onClick={onRetry}>Thử kiểm tra lại</button>
+  </div>;
+  return null;
+}
 
 export function formatExperimentDuration(seconds: number): string {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -219,24 +233,34 @@ export function ExperimentResults() {
 
 export function ExperimentShare({ sessionId, canPublish, sync }: { sessionId: string; canPublish: boolean; sync: () => Promise<void> }) {
   const [completion, setCompletion] = useState("");
-  const [shared, setShared] = useState(false);
+  const [mine, setMine] = useState<{ sessionId: string; status: ExperimentMineStatus }>({ sessionId, status: "loading" });
+  const [mineRetry, setMineRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
     if (!canPublish) return;
     let cancelled = false;
     request<{ sessionId: string }[]>("/experiments/mine").then((rows) => {
-      if (!cancelled) setShared(rows.some((row) => row.sessionId === sessionId));
-    }).catch(() => {});
+      if (!cancelled) setMine({ sessionId, status: rows.some((row) => row.sessionId === sessionId) ? "shared" : "not-shared" });
+    }).catch(() => {
+      if (!cancelled) setMine({ sessionId, status: "unknown" });
+    });
     return () => { cancelled = true; };
-  }, [canPublish, sessionId]);
+  }, [canPublish, sessionId, mineRetry]);
+  const mineStatus = mine.sessionId === sessionId ? mine.status : "loading";
+  const shared = mineStatus === "shared";
+  function retryMine() {
+    setMine({ sessionId, status: "loading" });
+    setMineRetry((current) => current + 1);
+  }
   async function publish() {
+    if (busy || !canPublish || mineStatus === "unknown" || mineStatus === "loading") return;
     setBusy(true);
     setMessage("");
     try {
       await sync();
       await post("/experiments", { sessionId, completionPercent: completion === "" ? null : Number(completion) });
-      setShared(true);
+      setMine({ sessionId, status: "shared" });
       setMessage("Kết quả đã được công khai trong mục Kết quả tester.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Chưa công khai được kết quả.");
@@ -245,11 +269,12 @@ export function ExperimentShare({ sessionId, canPublish, sync }: { sessionId: st
     }
   }
   async function withdraw() {
+    if (busy || !canPublish || mineStatus !== "shared") return;
     setBusy(true);
     setMessage("");
     try {
       await request(`/experiments/${sessionId}`, { method: "DELETE" });
-      setShared(false);
+      setMine({ sessionId, status: "not-shared" });
       setMessage("Đã rút phiên này khỏi bảng công khai.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Chưa rút được phiên công khai.");
@@ -261,9 +286,10 @@ export function ExperimentShare({ sessionId, canPublish, sync }: { sessionId: st
     <h2>Đóng góp kết quả thực nghiệm</h2>
     <p>Nếu bạn chọn công khai, người xem sẽ thấy chủ đề, mã tester ẩn danh, ngày giờ, thời gian học và giải lao, loại thiết bị, số lần xao nhãng, điểm quiz cùng mức hoàn thành tự đánh giá. Mục tiêu viết riêng, email, tài liệu và câu trả lời chi tiết vẫn riêng tư.</p>
     {!canPublish ? <p>Đăng nhập và đồng bộ phiên để chọn công khai kết quả.</p> : <>
+      <ExperimentShareMineStatus status={mineStatus} disabled={busy} onRetry={retryMine} />
       <label htmlFor={`completion-${sessionId}`}>Mức hoàn thành mục tiêu tự đánh giá (%) · tùy chọn</label>
       <input id={`completion-${sessionId}`} type="number" min="0" max="100" step="1" placeholder="0–100" value={completion} onChange={(event) => setCompletion(event.target.value)} />
-      <button disabled={busy || (completion !== "" && (!Number.isInteger(Number(completion)) || Number(completion) < 0 || Number(completion) > 100))} onClick={() => void publish()}>{shared ? "Cập nhật kết quả công khai" : "Công khai kết quả phiên này"}</button>
+      <button disabled={busy || mineStatus === "unknown" || mineStatus === "loading" || (completion !== "" && (!Number.isInteger(Number(completion)) || Number(completion) < 0 || Number(completion) > 100))} onClick={() => void publish()}>{shared ? "Cập nhật kết quả công khai" : "Công khai kết quả phiên này"}</button>
       {shared && <button disabled={busy} onClick={() => void withdraw()}>Rút phiên này khỏi bảng công khai</button>}
     </>}
     {message && <p role="status">{message}</p>}

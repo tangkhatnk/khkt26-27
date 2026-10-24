@@ -10,7 +10,7 @@ export type StudyGuideInlineNode =
   | { type: "strong" | "emphasis"; children: StudyGuideInlineNode[] }
   | { type: "code"; text: string }
   | { type: "link"; href: string; children: StudyGuideInlineNode[] }
-  | { type: "math"; parts: StudyGuideMathPart[] };
+  | { type: "math"; source: string; parts: StudyGuideMathPart[] };
 
 export type StudyGuideBlock =
   | { type: "heading"; level: number; children: StudyGuideInlineNode[] }
@@ -19,7 +19,7 @@ export type StudyGuideBlock =
   | { type: "table"; headers: StudyGuideInlineNode[][]; rows: StudyGuideInlineNode[][][] }
   | { type: "quote"; children: StudyGuideInlineNode[] }
   | { type: "code"; text: string }
-  | { type: "math-block"; parts: StudyGuideMathPart[] }
+  | { type: "math-block"; source: string; parts: StudyGuideMathPart[] }
   | { type: "rule" };
 
 function appendText(nodes: StudyGuideInlineNode[], text: string) {
@@ -137,7 +137,8 @@ function parseInline(source: string, depth = 0): StudyGuideInlineNode[] {
     if (source.startsWith("\\ce{", index)) {
       const end = source.indexOf("}", index + 4);
       if (end > index + 4) {
-        nodes.push({ type: "math", parts: mathParts(source.slice(index, end + 1)) });
+        const mathSource = source.slice(index, end + 1);
+        nodes.push({ type: "math", source: mathSource, parts: mathParts(mathSource) });
         index = end + 1;
         continue;
       }
@@ -187,7 +188,8 @@ function parseInline(source: string, depth = 0): StudyGuideInlineNode[] {
     if (source[index] === "$" && source[index + 1] !== "$" && source[index - 1] !== "\\") {
       const end = findClosing(source, "$", index + 1);
       if (end > index && source[end + 1] !== "$") {
-        nodes.push({ type: "math", parts: mathParts(source.slice(index + 1, end)) });
+        const mathSource = source.slice(index + 1, end);
+        nodes.push({ type: "math", source: mathSource, parts: mathParts(mathSource) });
         index = end + 1;
         continue;
       }
@@ -196,7 +198,8 @@ function parseInline(source: string, depth = 0): StudyGuideInlineNode[] {
     if (source.startsWith("\\(", index)) {
       const end = source.indexOf("\\)", index + 2);
       if (end > index + 2) {
-        nodes.push({ type: "math", parts: mathParts(source.slice(index + 2, end)) });
+        const mathSource = source.slice(index + 2, end);
+        nodes.push({ type: "math", source: mathSource, parts: mathParts(mathSource) });
         index = end + 2;
         continue;
       }
@@ -276,7 +279,8 @@ export function parseStudyGuideMarkdown(markdown: string): StudyGuideBlock[] {
         }
         content = mathLines.join(" ");
       }
-      blocks.push({ type: "math-block", parts: mathParts(content.trim()) });
+      const mathSource = content.trim();
+      blocks.push({ type: "math-block", source: mathSource, parts: mathParts(mathSource) });
       index += 1;
       continue;
     }

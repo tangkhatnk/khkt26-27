@@ -6,6 +6,7 @@
   --ticket-paper: #f1ede3;
   --ticket-stub: #e8e2d7;
   --ticket-line: #c9c8ba;
+  --ticket-route: #bc704c;
   position: relative;
   display: grid;
   width: 100%;
@@ -57,6 +58,17 @@
   white-space: nowrap;
 }
 
+.boarding-ticket__ornament {
+  flex: 1 1 72px;
+  width: 72px;
+  min-width: 38px;
+  max-width: 82px;
+  height: 18px;
+  margin: 0 auto;
+  color: #dfa77d;
+  opacity: 0.85;
+}
+
 .boarding-ticket__mode {
   flex: 0 0 auto;
   padding: 3px 8px;
@@ -71,6 +83,7 @@
 
 .boarding-ticket__main {
   position: relative;
+  isolation: isolate;
   display: grid;
   min-width: 0;
   grid-row: 2;
@@ -81,7 +94,21 @@
   background: var(--ticket-paper);
 }
 
+.boarding-ticket__landscape {
+  position: absolute;
+  z-index: 0;
+  right: 34px;
+  bottom: 2px;
+  width: min(38%, 250px);
+  height: 76px;
+  color: var(--ticket-green);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
 .boarding-ticket__details {
+  position: relative;
+  z-index: 1;
   min-width: 0;
 }
 
@@ -163,6 +190,8 @@
 }
 
 .boarding-ticket__barcode {
+  position: relative;
+  z-index: 1;
   width: 22px;
   height: min(100%, 112px);
   min-height: 76px;
@@ -274,6 +303,13 @@
     padding: 13px 12px;
   }
 
+  .boarding-ticket__landscape {
+    right: 26px;
+    width: min(45%, 190px);
+    height: 60px;
+    opacity: 0.3;
+  }
+
   .boarding-ticket__stub {
     padding-right: 10px;
     padding-left: 15px;
@@ -323,9 +359,20 @@
     display: none;
   }
 
+  .boarding-ticket__ornament {
+    max-width: 58px;
+  }
+
   .boarding-ticket__main {
     grid-row: 2;
     padding: 14px 18px;
+  }
+
+  .boarding-ticket__landscape {
+    right: 38px;
+    width: 43%;
+    height: 42px;
+    opacity: 0.24;
   }
 
   .boarding-ticket__stub {
@@ -357,5 +404,11 @@
   .boarding-ticket__stats .boarding-ticket__total {
     padding-top: 0;
     border-top: 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .boarding-ticket__landscape {
+    display: none;
   }
 }

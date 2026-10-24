@@ -7,6 +7,7 @@ export type QuizGenerationSource = {
   notes: string;
   sources: MaterialSource[];
   materials: { name: string; sourceId?: string }[];
+  pendingStudyGuide?: boolean;
 };
 
 export type QuizGenerationPayload = {
@@ -22,6 +23,8 @@ export function buildQuizGenerationPayload(
   source: QuizGenerationSource,
   count: number,
 ): QuizGenerationPayload {
+  if (source.pendingStudyGuide)
+    throw new Error("Hãy xác nhận hoặc bỏ bản ôn tập AI trước khi tạo câu hỏi.");
   const text = quizSourceText(source.notes, source.sources, source.materials);
   return {
     topic: source.topic,

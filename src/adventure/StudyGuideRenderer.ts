@@ -1,17 +1,33 @@
 import { createElement, type ReactNode } from "react";
+import katex from "katex";
+import "katex/contrib/mhchem";
 import { normalizeStudyGuideAiTextForDisplay, parseStudyGuideInline, parseStudyGuideMarkdown, type StudyGuideBlock, type StudyGuideInlineNode, type StudyGuideMathPart } from "./studyGuideMarkdown.ts";
 
-function renderMathPart(part: StudyGuideMathPart, key: string): ReactNode {
-  if (part.type === "subscript") return createElement("sub", { key }, part.text);
-  if (part.type === "superscript") return createElement("sup", { key }, part.text);
-  if (part.type === "labelled-arrow") return createElement("span", { key, className: "study-guide__notation-arrow" },
-    createElement("span", { className: "study-guide__notation-arrow-label" }, renderMathParts(part.label, `${key}-label`)),
-    createElement("span", { className: "study-guide__notation-arrow-symbol" }, part.symbol));
-  return part.text;
-}
-
-function renderMathParts(parts: StudyGuideMathPart[], keyPrefix: string) {
-  return parts.map((part, index) => renderMathPart(part, `${keyPrefix}-${index}`));
+function renderMath(source: string, key: string, displayMode: boolean): ReactNode {
+  try {
+    const html = katex.renderToString(source, {
+      displayMode,
+      throwOnError: false,
+      trust: false,
+      maxExpand: 100,
+      maxSize: 20,
+      output: "htmlAndMathml",
+    });
+    return createElement(displayMode ? "div" : "span", {
+      key,
+      className: displayMode
+        ? "study-guide__notation study-guide__notation--display"
+        : "study-guide__notation",
+      role: "math",
+      dangerouslySetInnerHTML: { __html: html },
+    });
+  } catch {
+    return createElement(displayMode ? "div" : "code", {
+      key,
+      className: "study-guide__notation study-guide__notation--error",
+      role: "math",
+    }, source);
+  }
 }
 
 function renderInline(nodes: StudyGuideInlineNode[], keyPrefix: string): ReactNode[] {
@@ -23,7 +39,7 @@ function renderInline(nodes: StudyGuideInlineNode[], keyPrefix: string): ReactNo
       case "strong": return createElement("strong", { key }, renderInline(node.children, key));
       case "emphasis": return createElement("em", { key }, renderInline(node.children, key));
       case "link": return createElement("a", { key, href: node.href, target: "_blank", rel: "noopener noreferrer" }, renderInline(node.children, key));
-      case "math": return createElement("span", { key, className: "study-guide__notation" }, renderMathParts(node.parts, `${key}-math`));
+      case "math": return renderMath(node.source, key, false);
     }
   });
 }
@@ -45,7 +61,7 @@ function renderBlock(block: StudyGuideBlock, key: string): ReactNode {
         createElement("tbody", null, block.rows.map((row, rowIndex) => createElement("tr", { key: `${key}-row-${rowIndex}` }, row.map((cell, cellIndex) => createElement("td", { key: `${key}-cell-${rowIndex}-${cellIndex}` }, renderInline(cell, `${key}-cell-${rowIndex}-${cellIndex}`))))))));
     case "quote": return createElement("blockquote", { key }, renderInline(block.children, key));
     case "code": return createElement("pre", { key }, createElement("code", null, block.text));
-    case "math-block": return createElement("div", { key, className: "study-guide__notation study-guide__notation--display", role: "math" }, renderMathParts(block.parts, `${key}-math`));
+    case "math-block": return renderMath(block.source, key, true);
     case "rule": return createElement("hr", { key });
   }
 }

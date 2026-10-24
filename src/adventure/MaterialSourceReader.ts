@@ -13,6 +13,18 @@ type MaterialSourceReaderProps = {
   emptyMessage?: string;
 };
 
+export function MaterialSourceReviewButton({ disabled = false, onClick }: {
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return createElement("button", {
+    type: "button",
+    className: "primary",
+    disabled,
+    onClick,
+  }, "Xác nhận nội dung đã kiểm tra");
+}
+
 /** Shows the exact saved source as safe formatted text, with an explicit original-text editor when allowed. */
 export function MaterialSourceReader({
   title,

@@ -12,6 +12,9 @@ let vite;
 let BoardingTicket;
 let JourneyView;
 let tripSceneTiming;
+let StudyGuideComposer;
+let ExperimentShareMineStatus;
+let QuizPanel;
 
 before(async () => {
   vite = await createServer({
@@ -23,6 +26,9 @@ before(async () => {
   });
   ({ BoardingTicket } = await vite.ssrLoadModule("/src/adventure/BoardingTicket.tsx"));
   ({ JourneyView } = await vite.ssrLoadModule("/src/adventure/JourneyView.tsx"));
+  ({ StudyGuideComposer } = await vite.ssrLoadModule("/src/adventure/StudyGuideComposer.tsx"));
+  ({ ExperimentShareMineStatus } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
+  ({ QuizPanel } = await vite.ssrLoadModule("/src/adventure/QuizPanel.tsx"));
   ({ tripSceneTiming } = await vite.ssrLoadModule("/src/adventure/focus.ts"));
 });
 
@@ -61,6 +67,55 @@ test("boarding pass keeps the goal, route, and planned time on a concise ticket"
   assert.match(markup, /V-ABCDEF012345/u);
   assert.doesNotMatch(markup, /Kết thúc phiên|Nghỉ xen kẽ/u);
   assert.doesNotMatch(markup, /Thành phố Bình minh/u);
+  assert.match(markup, /<svg class="boarding-ticket__ornament" aria-hidden="true"/u);
+  assert.match(markup, /<svg class="boarding-ticket__landscape" aria-hidden="true"/u);
+});
+
+test("pending AI guide review exposes a clearly primary confirmation and explicit discard", () => {
+  const markup = renderToStaticMarkup(React.createElement(StudyGuideComposer, {
+    disabled: false,
+    canGenerate: true,
+    unavailableReason: "",
+    review: { draft: { title: "Ôn Sinh học", text: "## Tế bào\nMàng tế bào điều hòa trao đổi chất." }, view: "preview" },
+    onReviewAction: () => {},
+    onGenerate: async () => undefined,
+    onCancel: () => {},
+    onUse: () => {},
+    onDiscard: () => {},
+    onDownload: () => {},
+  }));
+
+  assert.match(markup, /<button class="primary"[^>]*>Xác nhận và dùng làm tài liệu<\/button>/u);
+  assert.match(markup, /Bản AI chưa là tài liệu/u);
+  assert.match(markup, /Bỏ bản nháp AI/u);
+});
+
+test("unknown experiment publication state stays visible and offers a retry", () => {
+  const markup = renderToStaticMarkup(React.createElement(ExperimentShareMineStatus, {
+    status: "unknown",
+    disabled: false,
+    onRetry: () => {},
+  }));
+
+  assert.match(markup, /role="alert"/u);
+  assert.match(markup, /Chưa kiểm tra được phiên này đã công khai chưa/u);
+  assert.match(markup, /Thử kiểm tra lại/u);
+});
+
+test("quiz generation exposes a distinct primary action", () => {
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "owner-a",
+    session: { id: "trip-a", topic: "biology", goal: "Review cells" },
+    canUseAI: true,
+    needsLogin: false,
+    onGenerate: async () => [],
+    onSaveDraft: () => {},
+    onGrade: async () => ({}),
+    onLogin: () => {},
+    onStartReview: () => {},
+  }));
+
+  assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
 });
 
 test("boarding pass shows the honest pending code copy unless given a valid history code", () => {

@@ -4,6 +4,10 @@ import test from "node:test";
 
 const themeCssUrl = new URL("../src/adventure/theme.css", import.meta.url);
 const css = await readFile(themeCssUrl, "utf8");
+const adventureCssUrl = new URL("../src/adventure/adventure.css", import.meta.url);
+const adventureCss = await readFile(adventureCssUrl, "utf8");
+const boardingCssUrl = new URL("../src/adventure/boarding.css", import.meta.url);
+const boardingCss = await readFile(boardingCssUrl, "utf8");
 
 function rule(selector) {
   const exact = css.indexOf(`${selector} {`);
@@ -28,6 +32,39 @@ test("dark base button styling leaves selected duration and mode choices distinc
   const selected = rule('html[data-theme="dark"] .adventure button.selected');
   assert.match(selected, /background:\s*#30483a/u);
   assert.match(selected, /color:\s*#d9edda/u);
+});
+
+test("dark primary actions keep a clear border and focus treatment", () => {
+  const primary = rule('html[data-theme="dark"] .adventure .primary');
+  const hover = rule('html[data-theme="dark"] .adventure .primary:hover:not(:disabled)');
+  const focus = rule('html[data-theme="dark"] .adventure .primary:focus-visible');
+
+  assert.match(primary, /border-color:\s*#e4ad89/u);
+  assert.match(hover, /border-color:\s*#f4c7a4/u);
+  assert.match(focus, /outline:\s*3px solid #ffd6b7/u);
+  assert.match(focus, /box-shadow:/u);
+});
+
+test("light primary actions keep a clear border and focus treatment", () => {
+  assert.match(adventureCss, /\.adventure \.primary \{[^}]*border-color:\s*#9f4d26/u);
+  assert.match(adventureCss, /\.adventure \.primary:hover:not\(:disabled\) \{[^}]*border-color:\s*#87411f/u);
+  assert.match(adventureCss, /\.adventure \.primary:focus-visible \{[^}]*outline:\s*3px solid #31583f/u);
+  assert.match(adventureCss, /\.adventure \.primary:focus-visible \{[^}]*box-shadow:/u);
+});
+
+test("boarding ticket landscape stays behind readable content and scales for narrow tickets", () => {
+  assert.match(boardingCss, /\.boarding-ticket__main \{[^}]*isolation:\s*isolate/u);
+  assert.match(boardingCss, /\.boarding-ticket__landscape \{[^}]*z-index:\s*0/u);
+  assert.match(boardingCss, /\.boarding-ticket__details \{[^}]*z-index:\s*1/u);
+  assert.match(boardingCss, /\.boarding-ticket__barcode \{[^}]*z-index:\s*1/u);
+  assert.match(boardingCss, /@media \(max-width:\s*620px\)[\s\S]*?\.boarding-ticket__landscape \{/u);
+  assert.match(boardingCss, /@media \(max-width:\s*380px\)[\s\S]*?\.boarding-ticket__landscape \{/u);
+  const phoneRule = boardingCss.match(/@media \(max-width:\s*430px\)\s*\{[^}]*\.boarding-ticket__landscape\s*\{[^}]*\}[^}]*\}/u)?.[0];
+  assert.ok(phoneRule, "small phone tickets explicitly suppress the body motif to protect route text");
+  assert.match(phoneRule, /\.boarding-ticket__landscape\s*\{[^}]*display:\s*none/u);
+  assert.doesNotMatch(phoneRule, /boarding-ticket__ornament/u);
+  assert.match(boardingCss, /--ticket-route:\s*#bc704c/u);
+  assert.match(css, /--ticket-route:\s*#e0a178/u);
 });
 
 test("dark status and experiment metadata use readable muted colors", () => {

@@ -1,3 +1,5 @@
+@import "katex/dist/katex.min.css";
+
 .study-guide {
   padding: 22px;
   border: 1px solid #c9d8c9;
@@ -50,6 +52,8 @@
 .adventure .study-guide__article th, .adventure .study-guide__article td { padding: 9px 12px; border: 1px solid #d7e0d3; vertical-align: top; }
 .adventure .study-guide__article th { background: #edf3e9; color: #315b40; }
 .adventure .study-guide__notation { white-space: nowrap; font-variant-numeric: lining-nums; }
+.adventure .study-guide__notation .katex { color: inherit; }
+.adventure .study-guide__notation--error { white-space: pre-wrap; overflow-wrap: anywhere; }
 .adventure .study-guide__notation-arrow { display: inline-grid; grid-template-rows: auto auto; min-width: 1.1em; margin: 0 .08em; vertical-align: middle; text-align: center; line-height: 1; }
 .adventure .study-guide__notation-arrow-label { min-height: .8em; font-size: .68em; line-height: 1; }
 .adventure .study-guide__notation-arrow-symbol { line-height: .9; }
