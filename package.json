@@ -37,6 +37,7 @@
     "build:web": "vite build && node scripts/build-web.mjs",
     "build": "npm run build:web && npm --prefix backend run db:generate && npm --prefix backend run build",
     "preview": "vite preview",
+    "admin:fixture": "node scripts/admin-fixture.mjs",
     "lint": "eslint src vite.config.ts scripts tests eslint.config.js",
     "typecheck": "tsc --noEmit",
     "test:web": "node --test tests/*.test.mjs",

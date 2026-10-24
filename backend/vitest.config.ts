@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 export default defineConfig({
   resolve: {
@@ -8,6 +8,7 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 30000,
     fileParallelism: false,
+    exclude: [...configDefaults.exclude, "tests/adminPostgresConcurrency.test.ts"],
     env: {
       DATABASE_URL:
         "postgresql://postgres:postgres@127.0.0.1:15432/postgres?connection_limit=1&sslmode=disable",

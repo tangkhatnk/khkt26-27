@@ -23,7 +23,9 @@ node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'
 
 The launcher requires a PostgreSQL `DATABASE_URL`, a `redis://` or `rediss://` `REDIS_URL`, and a `JWT_SECRET` of at least 32 characters. If any is missing or invalid, startup stops with a configuration error. Production never starts PGlite or creates a local JWT secret.
 
-Admin reporting is denied by default. To enable it, set `ADMIN_USER_IDS` in the backend service variables to comma-separated account UUIDs from the `users.id` column. The backend validates these UUIDs at startup and checks the verified account ID for every admin request. Keep this variable server-side; do not expose it through a `VITE_` variable or add an admin role to account registration. Leave it empty to disable admin access. No database migration is required.
+Admin access is denied by default. Set `ADMIN_USER_IDS` in the backend service variables to comma-separated account UUIDs from `users.id` to establish protected bootstrap/recovery administrators. Keep this variable server-side; never expose it through `VITE_` or account registration. Bootstrap accounts cannot be modified through the admin panel. Administrators can grant persistent database roles to other accounts; removing an ID from this variable does not revoke a separate persistent grant. The API checks current role, suspension/deletion state, and token version on every authenticated request.
+
+Account management requires `20261024120000_admin_account_management` and `20261024130000_admin_account_recovery`. The normal image startup applies pending migrations with `prisma migrate deploy` before starting the API. They add persistent grants, account state/version fields, a mutation lock, and append-only audit history. The panel supports display-name edits, roles, suspension/restore, and recoverable deletion. Deletion keeps study history while revoking admin access and login sessions; restoration requires fresh login and does not restore a revoked role. Bootstrap variables remain the recovery path if all persistent administrators become unavailable.
 
 ## Configure and deploy the service
 

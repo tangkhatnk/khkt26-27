@@ -13,15 +13,55 @@ model User {
   auth_provider   String   @default("email")
   auth_provider_id String?
   password_hash   String?
+  suspended_at    DateTime?
+  deleted_at      DateTime?
+  admin_state_version Int @default(0)
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
   refreshTokens   RefreshToken[]
+  adminGrant      AdminGrant?
   sessions        StudySession[]
   documents       Document[]
   questions       QuizQuestion[]
   testerRuns      TesterRun[]
   @@unique([auth_provider, auth_provider_id])
   @@map("users")
+}
+model AdminGrant {
+  user_id    String   @id @db.Uuid
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  @@index([is_active, user_id])
+  @@map("admin_grants")
+}
+model AdminActionAudit {
+  id               String   @id @default(uuid()) @db.Uuid
+  actor_user_id    String   @db.Uuid
+  target_user_id   String   @db.Uuid
+  action           String   @db.VarChar(20)
+  before_is_admin  Boolean
+  after_is_admin   Boolean
+  before_suspended Boolean
+  after_suspended  Boolean
+  before_deleted   Boolean   @default(false)
+  after_deleted    Boolean   @default(false)
+  before_name      String?   @db.VarChar(100)
+  after_name       String?   @db.VarChar(100)
+  before_version   Int
+  after_version    Int
+  reason           String   @db.VarChar(500)
+  created_at       DateTime @default(now())
+  @@index([created_at(sort: Desc), id(sort: Desc)])
+  @@index([target_user_id, created_at(sort: Desc)])
+  @@index([actor_user_id, created_at(sort: Desc)])
+  @@map("admin_action_audits")
+}
+model AdminControl {
+  id         Int      @id @default(1)
+  created_at DateTime @default(now())
+  @@map("admin_control")
 }
 model RefreshToken {
   id         String   @id @default(uuid()) @db.Uuid

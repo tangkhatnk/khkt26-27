@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { verifyAccess } from "./auth.js";
+import { verifyActiveAccess } from "./auth.js";
+import { ApiError } from "./errors.js";
 import { uuid, topicId } from "./schemas.js";
 export function realtime(app: FastifyInstance, redis: Redis, db: PrismaClient) {
   app.get(
@@ -13,7 +14,7 @@ export function realtime(app: FastifyInstance, redis: Redis, db: PrismaClient) {
         const { token } = z
           .object({ token: z.string().min(1) })
           .parse(req.query);
-        req.userId = await verifyAccess(token);
+        req.userId = await verifyActiveAccess(db, token);
       },
     },
     (socket, req) => {
@@ -26,7 +27,7 @@ export function realtime(app: FastifyInstance, redis: Redis, db: PrismaClient) {
       const token = (req.query as { token: string }).token;
       const key = `focus:${req.userId}`;
       const tick = async () => {
-        await verifyAccess(token);
+        await verifyActiveAccess(db, token);
         const raw = await redis.get(key);
         if (!raw) return;
         const state = JSON.parse(raw) as {
@@ -53,7 +54,7 @@ export function realtime(app: FastifyInstance, redis: Redis, db: PrismaClient) {
         if (busy) return;
         busy = true;
         void (async () => {
-          await verifyAccess(token);
+          await verifyActiveAccess(db, token);
           const hits = await redis.incr(`ws-rate:${req.userId}`);
           if (hits === 1) await redis.expire(`ws-rate:${req.userId}`, 60);
           if (hits > 100) throw new Error("Too many events");
@@ -127,11 +128,15 @@ export function realtime(app: FastifyInstance, redis: Redis, db: PrismaClient) {
             }
           }
         })()
-          .catch(() =>
+          .catch((error: unknown) => {
+            if (error instanceof ApiError && error.status === 401) {
+              socket.close(1008, "Authentication required");
+              return;
+            }
             send("error", {
               message: "Invalid event, expired token, or service unavailable",
-            }),
-          )
+            });
+          })
           .finally(() => {
             busy = false;
           });

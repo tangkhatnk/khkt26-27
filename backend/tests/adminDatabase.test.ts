@@ -88,6 +88,16 @@ function postgresQueryRaw(parts: TemplateStringsArray, ...values: unknown[]) {
 const fakeDb = {
   $queryRaw: postgresQueryRaw,
   user: {
+    findUnique: async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      email: "admin@example.test",
+      name: "Admin fixture",
+      created_at: new Date("2026-01-02T03:04:05.000Z"),
+      suspended_at: null,
+      deleted_at: null,
+      admin_state_version: 0,
+      adminGrant: null,
+    }),
     findMany: async () => [],
     count: async () => 0,
   },

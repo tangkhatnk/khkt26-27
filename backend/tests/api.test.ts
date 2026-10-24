@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import RedisMock from "ioredis-mock";
@@ -90,6 +91,8 @@ beforeAll(async () => {
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261009000000_tester_runs/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261009100000_quiz_knowledge_point/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261010120000_remove_static_quiz_bank/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261024120000_admin_account_management/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261024130000_admin_account_recovery/migration.sql", import.meta.url), "utf8"));
   await server.start();
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();
@@ -460,6 +463,203 @@ it("registers, logs in, rotates refresh tokens, rejects replay and revokes on lo
     ).statusCode,
   ).toBe(401);
 });
+
+it("blocks suspended accounts at HTTP, password/OAuth login, refresh, and existing WebSocket frames", async () => {
+  const providerId = randomUUID();
+  const email = `suspended-${randomUUID()}@example.com`;
+  const password = "Temporary!123";
+  const identity = { id: providerId, email, name: "Suspended fixture" };
+  const account = await db.user.create({
+    data: {
+      email,
+      name: identity.name,
+      auth_provider: "google",
+      auth_provider_id: providerId,
+      password_hash: await bcrypt.hash(password, 4),
+    },
+  });
+  const oauthApp = await buildApp({
+    db,
+    redis: redis as unknown as Redis,
+    logger: false,
+    verifyOAuth: async () => identity,
+  });
+  let ws: Awaited<ReturnType<typeof app.injectWS>> | undefined;
+  try {
+    await oauthApp.ready();
+    const oauthBefore = await oauthApp.inject({
+      method: "POST",
+      url: "/api/v1/auth/oauth/google",
+      payload: { id_token: "synthetic-provider-token" },
+    });
+    expect(oauthBefore.statusCode).toBe(200);
+    const tokens = await issueTokens(db, account);
+    ws = await app.injectWS(`/ws/v1?token=${tokens.access_token}`);
+
+    await db.user.update({ where: { id: account.id }, data: {
+      suspended_at: new Date(), admin_state_version: { increment: 1 },
+    } });
+    const authenticated = await app.inject({
+      url: "/api/v1/users/me",
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    const passwordLogin = await app.inject({
+      method: "POST", url: "/api/v1/auth/login", payload: { email, password },
+    });
+    const oauthAfter = await oauthApp.inject({
+      method: "POST", url: "/api/v1/auth/oauth/google", payload: { id_token: "synthetic-provider-token" },
+    });
+    const refresh = await app.inject({
+      method: "POST", url: "/api/v1/auth/refresh", payload: { refresh_token: tokens.refresh_token },
+    });
+    await expect(app.injectWS(`/ws/v1?token=${tokens.access_token}`)).rejects.toThrow();
+    expect(authenticated.statusCode).toBe(401);
+    expect(passwordLogin.statusCode).toBe(401);
+    expect(oauthAfter.statusCode).toBe(401);
+    expect(refresh.statusCode).toBe(401);
+
+    const closeCode = await new Promise<number>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Suspended WebSocket was not closed")), 3000);
+      ws!.once("close", (code) => {
+        clearTimeout(timeout);
+        resolve(code);
+      });
+      ws!.send(JSON.stringify({
+        event: "session:start",
+        payload: { session_id: randomUUID(), topic_id: "biology", target_duration: 60 },
+      }));
+    });
+    expect(closeCode).toBe(1008);
+
+    await db.user.update({ where: { id: account.id }, data: {
+      suspended_at: null, admin_state_version: { increment: 1 },
+    } });
+    const restoredWithOldAccess = await app.inject({
+      url: "/api/v1/users/me",
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(restoredWithOldAccess.statusCode).toBe(401);
+  } finally {
+    ws?.terminate();
+    await db.user.update({ where: { id: account.id }, data: { suspended_at: null } });
+    await oauthApp.close();
+  }
+});
+
+it("blocks deleted accounts across HTTP, login, OAuth, refresh, and existing WebSocket frames, including after restore", async () => {
+  const providerId = randomUUID();
+  const email = `deleted-${randomUUID()}@example.com`;
+  const password = "Temporary!123";
+  const account = await db.user.create({
+    data: {
+      email,
+      name: "Deleted fixture",
+      auth_provider: "google",
+      auth_provider_id: providerId,
+      password_hash: await bcrypt.hash(password, 4),
+    },
+  });
+  const oauthApp = await buildApp({
+    db,
+    redis: redis as unknown as Redis,
+    logger: false,
+    verifyOAuth: async () => ({ id: providerId, email, name: "Deleted fixture" }),
+  });
+  let ws: Awaited<ReturnType<typeof app.injectWS>> | undefined;
+  try {
+    await oauthApp.ready();
+    const tokens = await issueTokens(db, account);
+    ws = await app.injectWS(`/ws/v1?token=${tokens.access_token}`);
+    await db.refreshToken.deleteMany({ where: { user_id: account.id } });
+    await db.user.update({ where: { id: account.id }, data: {
+      deleted_at: new Date(), admin_state_version: { increment: 1 },
+    } });
+
+    const authenticated = await app.inject({
+      url: "/api/v1/users/me",
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    const passwordLogin = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password } });
+    const oauthLogin = await oauthApp.inject({
+      method: "POST", url: "/api/v1/auth/oauth/google", payload: { id_token: "synthetic-provider-token" },
+    });
+    const refresh = await app.inject({ method: "POST", url: "/api/v1/auth/refresh", payload: { refresh_token: tokens.refresh_token } });
+    await expect(app.injectWS(`/ws/v1?token=${tokens.access_token}`)).rejects.toThrow();
+    expect([authenticated.statusCode, passwordLogin.statusCode, oauthLogin.statusCode, refresh.statusCode]).toEqual([401, 401, 401, 401]);
+
+    const closeCode = await new Promise<number>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Deleted WebSocket was not closed")), 3000);
+      ws!.once("close", (code) => {
+        clearTimeout(timeout);
+        resolve(code);
+      });
+      ws!.send(JSON.stringify({
+        event: "session:start",
+        payload: { session_id: randomUUID(), topic_id: "biology", target_duration: 60 },
+      }));
+    });
+    expect(closeCode).toBe(1008);
+
+    await db.user.update({ where: { id: account.id }, data: {
+      deleted_at: null, admin_state_version: { increment: 1 },
+    } });
+    const oldAccessAfterRestore = await app.inject({
+      url: "/api/v1/users/me", headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    const oldRefreshAfterRestore = await app.inject({
+      method: "POST", url: "/api/v1/auth/refresh", payload: { refresh_token: tokens.refresh_token },
+    });
+    expect(oldAccessAfterRestore.statusCode).toBe(401);
+    expect(oldRefreshAfterRestore.statusCode).toBe(401);
+    const freshLogin = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password } });
+    expect(freshLogin.statusCode, freshLogin.body).toBe(200);
+    const freshAccess = await app.inject({
+      url: "/api/v1/users/me",
+      headers: { authorization: `Bearer ${freshLogin.json().tokens.access_token}` },
+    });
+    expect(freshAccess.statusCode).toBe(200);
+  } finally {
+    ws?.terminate();
+    await db.user.update({ where: { id: account.id }, data: { deleted_at: null, suspended_at: null } });
+    await oauthApp.close();
+  }
+});
+
+it("closes an existing WebSocket when a persistent admin role is revoked", async () => {
+  const account = await db.user.create({
+    data: {
+      email: `revoked-admin-${randomUUID()}@example.com`,
+      name: "Revoked admin fixture",
+      admin_state_version: 1,
+      adminGrant: { create: { is_active: true } },
+    },
+  });
+  const tokens = await issueTokens(db, account);
+  const ws = await app.injectWS(`/ws/v1?token=${tokens.access_token}`);
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.adminGrant.update({ where: { user_id: account.id }, data: { is_active: false } });
+      await tx.user.update({ where: { id: account.id }, data: { admin_state_version: { increment: 1 } } });
+    });
+    await expect(app.injectWS(`/ws/v1?token=${tokens.access_token}`)).rejects.toThrow();
+    const closeCode = await new Promise<number>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Revoked-admin WebSocket was not closed")), 3000);
+      ws.once("close", (code) => {
+        clearTimeout(timeout);
+        resolve(code);
+      });
+      ws.send(JSON.stringify({ event: "session:start", payload: {} }));
+    });
+    expect(closeCode).toBe(1008);
+    const freshTokens = await issueTokens(db, await db.user.findUniqueOrThrow({ where: { id: account.id } }));
+    expect((await app.inject({ url: "/api/v1/users/me", headers: { authorization: `Bearer ${freshTokens.access_token}` } })).statusCode).toBe(200);
+  } finally {
+    ws.terminate();
+    await db.user.update({ where: { id: account.id }, data: { admin_state_version: 0 } });
+    await db.adminGrant.delete({ where: { user_id: account.id } });
+  }
+});
+
 it("returns problem details for invalid input, unauthenticated and invalid credentials", async () => {
   const invalid = await app.inject({
     method: "POST",
@@ -529,6 +729,59 @@ it("reads and updates profile, lists topics", async () => {
     (await app.inject({ url: "/api/v1/topics", headers })).json().topics[0]
       .question_count,
   ).toBe(1);
+});
+it("rejects an admin profile edit when the account name changed after its list snapshot", async () => {
+  const actor = await db.user.create({
+    data: { email: `admin-${randomUUID()}@example.test`, name: "Synthetic profile admin" },
+  });
+  const target = await db.user.create({
+    data: { email: `target-${randomUUID()}@example.test`, name: "Listed account name" },
+  });
+  const actorTokens = await issueTokens(db, actor);
+  const targetTokens = await issueTokens(db, target);
+  const previousAdminIds = config.ADMIN_USER_IDS;
+  config.ADMIN_USER_IDS = [actor.id];
+  const adminApp = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
+  config.ADMIN_USER_IDS = previousAdminIds;
+
+  try {
+    await adminApp.ready();
+    const listed = await adminApp.inject({
+      url: `/api/v1/admin/accounts?q=${target.id}`,
+      headers: { authorization: `Bearer ${actorTokens.access_token}` },
+    });
+    expect(listed.statusCode, listed.body).toBe(200);
+    const snapshot = listed.json().users[0];
+    expect(snapshot).toMatchObject({ id: target.id, name: "Listed account name", adminStateVersion: 0 });
+
+    const ordinaryProfileUpdate = await app.inject({
+      method: "PUT",
+      url: "/api/v1/users/me",
+      headers: { authorization: `Bearer ${targetTokens.access_token}` },
+      payload: { name: "Learner changed this name" },
+    });
+    expect(ordinaryProfileUpdate.statusCode, ordinaryProfileUpdate.body).toBe(200);
+
+    const staleAdminEdit = await adminApp.inject({
+      method: "PUT",
+      url: `/api/v1/admin/accounts/${target.id}/profile`,
+      headers: { authorization: `Bearer ${actorTokens.access_token}` },
+      payload: {
+        name: "Admin overwrite must not win",
+        expectedName: snapshot.name,
+        expectedVersion: snapshot.adminStateVersion,
+        reason: "Reject stale profile snapshot",
+      },
+    });
+    expect(staleAdminEdit.statusCode, staleAdminEdit.body).toBe(409);
+    expect(await db.user.findUniqueOrThrow({ where: { id: target.id } })).toMatchObject({
+      name: "Learner changed this name",
+      admin_state_version: 0,
+    });
+    expect(await db.adminActionAudit.count({ where: { target_user_id: target.id } })).toBe(0);
+  } finally {
+    await adminApp.close();
+  }
 });
 it("saves idempotently, lists pages, hides other users sessions", async () => {
   const payload = session();

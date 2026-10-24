@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { config } from "./config.js";
 import { ApiError } from "./errors.js";
@@ -24,6 +24,28 @@ const sessionFilterSchema = pageSchema.extend({
   accountId: z.uuid().optional(),
   groupId: z.uuid().optional(),
 });
+const auditQuerySchema = pageSchema.extend({ targetId: z.uuid().optional() });
+const roleMutationSchema = z.object({
+  isAdmin: z.boolean(),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+const suspensionMutationSchema = z.object({
+  suspended: z.boolean(),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+const profileMutationSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  expectedName: z.string().max(100),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+const deletionMutationSchema = z.object({
+  deleted: z.boolean(),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
 
 const breakPlanSchema = z.object({
   count: z.number().int().min(0).max(10),
@@ -405,6 +427,205 @@ function groupRecord(value: unknown) {
   }).strip().safeParse(value);
 }
 
+const adminAccountSelect = {
+  id: true,
+  email: true,
+  name: true,
+  created_at: true,
+  suspended_at: true,
+  deleted_at: true,
+  admin_state_version: true,
+  adminGrant: { select: { is_active: true } },
+} as const;
+
+type AdminAccountRecord = Prisma.UserGetPayload<{ select: typeof adminAccountSelect }>;
+type AdminDatabase = PrismaClient | Prisma.TransactionClient;
+type AdminAction = "role" | "suspension" | "profile" | "deletion";
+type AdminMutation =
+  | { action: "role"; value: boolean }
+  | { action: "suspension"; value: boolean }
+  | { action: "profile"; name: string; expectedName: string }
+  | { action: "deletion"; deleted: boolean };
+
+function accountAdminState(user: AdminAccountRecord, admins: ReadonlySet<string>) {
+  const bootstrap = admins.has(user.id.toLowerCase());
+  const persistent = user.adminGrant?.is_active ?? false;
+  const deleted = Boolean(user.deleted_at);
+  const adminSource = deleted ? null : bootstrap ? "bootstrap" : persistent ? "persistent" : null;
+  const suspended = user.suspended_at !== null;
+  return {
+    isAdmin: adminSource !== null,
+    adminSource,
+    status: deleted ? "deleted" as const : suspended ? "suspended" as const : "active" as const,
+    suspendedAt: user.suspended_at?.toISOString() ?? null,
+    deletedAt: user.deleted_at?.toISOString() ?? null,
+    adminStateVersion: user.admin_state_version,
+    suspended,
+    deleted,
+  };
+}
+
+function adminAccountDto(user: AdminAccountRecord, admins: ReadonlySet<string>) {
+  const state = accountAdminState(user, admins);
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    createdAt: user.created_at.toISOString(),
+    isAdmin: state.isAdmin,
+    adminSource: state.adminSource,
+    status: state.status,
+    suspendedAt: state.suspendedAt,
+    deletedAt: state.deletedAt,
+    adminStateVersion: state.adminStateVersion,
+  };
+}
+
+function isActiveAdmin(user: AdminAccountRecord, admins: ReadonlySet<string>) {
+  const state = accountAdminState(user, admins);
+  return state.isAdmin && !state.suspended && !state.deleted;
+}
+
+async function findAdminAccount(db: AdminDatabase, id: string) {
+  return db.user.findUnique({ where: { id }, select: adminAccountSelect });
+}
+
+async function countActiveAdmins(db: AdminDatabase, admins: ReadonlySet<string>) {
+  const bootstrapIds = [...admins];
+  const bootstrapClause = bootstrapIds.length
+    ? Prisma.sql`OR u.id::text IN (${Prisma.join(bootstrapIds)})`
+    : Prisma.empty;
+  const rows = await db.$queryRaw<{ total: number }[]>`
+    SELECT COUNT(*)::int AS total
+    FROM users u
+    LEFT JOIN admin_grants g ON g.user_id = u.id
+    WHERE u.suspended_at IS NULL
+      AND u.deleted_at IS NULL
+      AND (g.is_active = true ${bootstrapClause})`;
+  return rows[0]?.total ?? 0;
+}
+
+async function performAdminMutation(
+  db: PrismaClient,
+  actorId: string,
+  targetId: string,
+  expectedVersion: number,
+  reason: string,
+  mutation: AdminMutation,
+  admins: ReadonlySet<string>,
+) {
+  return db.$transaction(async (tx) => {
+    const control = await tx.$queryRaw<{ id: number }[]>`
+      SELECT id FROM admin_control WHERE id = 1 FOR UPDATE`;
+    if (control.length !== 1)
+      throw new ApiError(503, "service-unavailable", "Admin controls are unavailable");
+
+    const actor = await findAdminAccount(tx, actorId);
+    if (!actor || !isActiveAdmin(actor, admins))
+      throw new ApiError(403, "authorization-error", "Admin access required");
+
+    if (actorId.toLowerCase() === targetId.toLowerCase())
+      throw new ApiError(409, "conflict", "Admins cannot change their own account");
+
+    const targetLocks = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM users WHERE id = ${targetId}::uuid FOR UPDATE`;
+    if (targetLocks.length !== 1)
+      throw new ApiError(404, "not-found", "Account not found");
+    const target = await findAdminAccount(tx, targetId);
+    if (!target) throw new ApiError(404, "not-found", "Account not found");
+
+    if (admins.has(target.id.toLowerCase()))
+      throw new ApiError(409, "conflict", "Bootstrap administrators cannot be changed here");
+
+    const before = accountAdminState(target, admins);
+    if (before.adminStateVersion !== expectedVersion)
+      throw new ApiError(409, "conflict", "Account admin state changed; reload and try again");
+    if (mutation.action === "profile" && mutation.expectedName !== target.name)
+      throw new ApiError(409, "conflict", "Account name changed; reload and try again");
+
+    if (before.deleted && !(mutation.action === "deletion" && !mutation.deleted))
+      throw new ApiError(409, "conflict", "Deleted accounts must be restored before other changes");
+
+    const nextIsAdmin = mutation.action === "role" ? mutation.value : before.isAdmin;
+    const nextSuspended = mutation.action === "suspension" ? mutation.value : before.suspended;
+    const nextDeleted = mutation.action === "deletion" ? mutation.deleted : before.deleted;
+    const nextName = mutation.action === "profile" ? mutation.name : target.name;
+    if (nextIsAdmin === before.isAdmin && nextSuspended === before.suspended &&
+      nextDeleted === before.deleted && nextName === target.name)
+      throw new ApiError(409, "conflict", "Account already has that state");
+
+    const wasActiveAdmin = before.isAdmin && !before.suspended && !before.deleted;
+    const willBeActiveAdmin = nextIsAdmin && !nextSuspended && !nextDeleted;
+    if (wasActiveAdmin && !willBeActiveAdmin && await countActiveAdmins(tx, admins) <= 1)
+      throw new ApiError(409, "conflict", "At least one active administrator must remain");
+
+    if (mutation.action === "role") {
+      if (mutation.value) {
+        await tx.adminGrant.upsert({
+          where: { user_id: target.id },
+          create: { user_id: target.id, is_active: true },
+          update: { is_active: true },
+        });
+      } else if (target.adminGrant?.is_active) {
+        await tx.adminGrant.update({
+          where: { user_id: target.id },
+          data: { is_active: false },
+        });
+      }
+    }
+
+    if (mutation.action === "deletion") {
+      await tx.adminGrant.upsert({
+        where: { user_id: target.id },
+        create: { user_id: target.id, is_active: false },
+        update: { is_active: false },
+      });
+    }
+
+    const suspendedAt = mutation.action === "suspension"
+      ? (mutation.value ? new Date() : null)
+      : target.suspended_at;
+    const deletedAt = mutation.action === "deletion"
+      ? (mutation.deleted ? new Date() : null)
+      : target.deleted_at;
+    const updated = await tx.user.update({
+      where: { id: target.id },
+      data: {
+        ...(mutation.action === "profile" ? { name: mutation.name } : {}),
+        suspended_at: suspendedAt,
+        deleted_at: deletedAt,
+        admin_state_version: { increment: 1 },
+      },
+      select: adminAccountSelect,
+    });
+    if ((mutation.action === "suspension" && mutation.value) ||
+      (mutation.action === "deletion" && mutation.deleted))
+      await tx.refreshToken.deleteMany({ where: { user_id: target.id } });
+
+    const after = accountAdminState(updated, admins);
+    const action: AdminAction = mutation.action;
+    await tx.adminActionAudit.create({
+      data: {
+        actor_user_id: actor.id,
+        target_user_id: target.id,
+        action,
+        before_is_admin: before.isAdmin,
+        after_is_admin: after.isAdmin,
+        before_suspended: before.suspended,
+        after_suspended: after.suspended,
+        before_deleted: before.deleted,
+        after_deleted: after.deleted,
+        before_name: mutation.action === "profile" ? target.name : null,
+        after_name: mutation.action === "profile" ? mutation.name : null,
+        before_version: before.adminStateVersion,
+        after_version: after.adminStateVersion,
+        reason,
+      },
+    });
+    return adminAccountDto(updated, admins);
+  });
+}
+
 export function adminRoutes(
   app: FastifyInstance,
   db: PrismaClient,
@@ -422,14 +643,16 @@ export function adminRoutes(
     preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
       noStore(request, reply);
       await authenticate(request);
-      if (!admins.has(request.userId.toLowerCase()))
+      const actor = await findAdminAccount(db, request.userId);
+      if (!actor || !isActiveAdmin(actor, admins))
         throw new ApiError(403, "authorization-error", "Admin access required");
     },
   };
 
-  app.get("/api/v1/admin/access", authenticatedOptions, async (request) => ({
-    allowed: admins.has(request.userId.toLowerCase()),
-  }));
+  app.get("/api/v1/admin/access", authenticatedOptions, async (request) => {
+    const actor = await findAdminAccount(db, request.userId);
+    return { allowed: Boolean(actor && isActiveAdmin(actor, admins)) };
+  });
 
   app.get("/api/v1/admin/report", adminOptions, async (request) => {
     const { days, accountId, groupId } = reportQuery(request.query);
@@ -447,10 +670,128 @@ export function adminRoutes(
       .send(adminReportCsv(report, scope, accountId ?? groupId));
   });
 
+  app.put("/api/v1/admin/accounts/:id/role", adminOptions, async (request) => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const body = roleMutationSchema.parse(request.body);
+    return performAdminMutation(
+      db,
+      request.userId,
+      id,
+      body.expectedVersion,
+      body.reason,
+      { action: "role", value: body.isAdmin },
+      admins,
+    );
+  });
+
+  app.put("/api/v1/admin/accounts/:id/suspension", adminOptions, async (request) => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const body = suspensionMutationSchema.parse(request.body);
+    return performAdminMutation(
+      db,
+      request.userId,
+      id,
+      body.expectedVersion,
+      body.reason,
+      { action: "suspension", value: body.suspended },
+      admins,
+    );
+  });
+
+  app.put("/api/v1/admin/accounts/:id/profile", adminOptions, async (request) => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const body = profileMutationSchema.parse(request.body);
+    return performAdminMutation(
+      db,
+      request.userId,
+      id,
+      body.expectedVersion,
+      body.reason,
+      { action: "profile", name: body.name, expectedName: body.expectedName },
+      admins,
+    );
+  });
+
+  app.put("/api/v1/admin/accounts/:id/deletion", adminOptions, async (request) => {
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const body = deletionMutationSchema.parse(request.body);
+    return performAdminMutation(
+      db,
+      request.userId,
+      id,
+      body.expectedVersion,
+      body.reason,
+      { action: "deletion", deleted: body.deleted },
+      admins,
+    );
+  });
+
+  app.get("/api/v1/admin/audit", adminOptions, async (request) => {
+    const { targetId, limit, offset } = auditQuerySchema.parse(request.query);
+    const where = targetId ? { target_user_id: targetId } : {};
+    const [rows, total] = await Promise.all([
+      db.adminActionAudit.findMany({
+        where,
+        select: {
+          actor_user_id: true,
+          target_user_id: true,
+          action: true,
+          before_is_admin: true,
+          after_is_admin: true,
+          before_suspended: true,
+          after_suspended: true,
+          before_deleted: true,
+          after_deleted: true,
+          before_name: true,
+          after_name: true,
+          before_version: true,
+          after_version: true,
+          reason: true,
+          created_at: true,
+        },
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        take: limit,
+        skip: offset,
+      }),
+      db.adminActionAudit.count({ where }),
+    ]);
+    return {
+      actions: rows.map((row) => {
+        const common = {
+          actorId: row.actor_user_id,
+          targetId: row.target_user_id,
+          action: row.action,
+          reason: row.reason,
+          createdAt: row.created_at.toISOString(),
+        };
+        const before = {
+          isAdmin: row.before_is_admin,
+          suspended: row.before_suspended,
+          deleted: row.before_deleted,
+          version: row.before_version,
+        };
+        const after = {
+          isAdmin: row.after_is_admin,
+          suspended: row.after_suspended,
+          deleted: row.after_deleted,
+          version: row.after_version,
+        };
+        return row.action === "profile"
+          ? { ...common, action: "profile", before: { ...before, name: row.before_name! }, after: { ...after, name: row.after_name! } }
+          : { ...common, before, after };
+      }),
+      total,
+      limit,
+      offset,
+    };
+  });
+
   app.get("/api/v1/admin/accounts", adminOptions, async (request) => {
     const { q, limit, offset } = accountQuery(request.query);
-    const where = q ? {
+    const exactId = z.uuid().safeParse(q);
+    const where: Prisma.UserWhereInput = q ? {
       OR: [
+        ...(exactId.success ? [{ id: exactId.data }] : []),
         { email: { contains: q, mode: "insensitive" as const } },
         { name: { contains: q, mode: "insensitive" as const } },
       ],
@@ -458,7 +799,7 @@ export function adminRoutes(
     const [users, total] = await Promise.all([
       db.user.findMany({
         where,
-        select: { id: true, email: true, name: true, created_at: true },
+        select: adminAccountSelect,
         orderBy: [{ created_at: "desc" }, { id: "asc" }],
         take: limit,
         skip: offset,
@@ -466,12 +807,7 @@ export function adminRoutes(
       db.user.count({ where }),
     ]);
     return {
-      users: users.map((user) => ({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        createdAt: user.created_at.toISOString(),
-      })),
+      users: users.map((user) => adminAccountDto(user, admins)),
       total,
       limit,
       offset,

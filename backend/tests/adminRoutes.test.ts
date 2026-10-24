@@ -37,7 +37,16 @@ const savedSession = {
 const dbCalls = { raw: [] as unknown[][], users: [] as unknown[] };
 const fakeDb = {
   user: {
-    findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id }),
+    findUnique: async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      email: where.id === adminId ? "admin@example.test" : "learner@example.test",
+      name: where.id === adminId ? "Admin" : "Learner",
+      created_at: new Date("2026-01-02T03:04:05.000Z"),
+      suspended_at: null,
+      deleted_at: null,
+      admin_state_version: 0,
+      adminGrant: null,
+    }),
     findMany: async (query: unknown) => {
       dbCalls.users.push(query);
       return [{
@@ -45,6 +54,10 @@ const fakeDb = {
         email: "learner@example.test",
         name: "Learner",
         created_at: new Date("2026-01-02T03:04:05.000Z"),
+        suspended_at: null,
+        deleted_at: null,
+        admin_state_version: 0,
+        adminGrant: null,
         password_hash: "must-not-leak",
       }];
     },

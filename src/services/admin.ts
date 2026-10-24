@@ -1,12 +1,18 @@
 import { API_URL, ApiError, getAccessToken, request } from "./api";
 import type {
+  AdminAccountUpdateResponse,
   AdminAccess,
+  AdminAuditPage,
   AdminAccountsPage,
   AdminGroupsPage,
   AdminPeriod,
   AdminReportFilters,
   AdminReport,
   AdminReportCsv,
+  AdminRoleUpdateRequest,
+  AdminProfileUpdateRequest,
+  AdminDeletionUpdateRequest,
+  AdminSuspensionUpdateRequest,
   AdminSessionsPage,
 } from "./adminContracts";
 
@@ -28,6 +34,40 @@ export const fetchAdminAccounts = (
   offset = 0,
   signal?: AbortSignal,
 ) => request<AdminAccountsPage>(`/admin/accounts?${query({ q: search.trim(), limit, offset })}`, {
+  signal,
+  cache: "no-store",
+});
+
+export const updateAdminAccountRole = (accountId: string, update: AdminRoleUpdateRequest) =>
+  request<AdminAccountUpdateResponse>(`/admin/accounts/${encodeURIComponent(accountId)}/role`, {
+    method: "PUT",
+    body: JSON.stringify(update),
+    cache: "no-store",
+  });
+
+export const updateAdminAccountSuspension = (accountId: string, update: AdminSuspensionUpdateRequest) =>
+  request<AdminAccountUpdateResponse>(`/admin/accounts/${encodeURIComponent(accountId)}/suspension`, {
+    method: "PUT",
+    body: JSON.stringify(update),
+    cache: "no-store",
+  });
+
+export const updateAdminAccountProfile = (accountId: string, update: AdminProfileUpdateRequest) =>
+  request<AdminAccountUpdateResponse>(`/admin/accounts/${encodeURIComponent(accountId)}/profile`, {
+    method: "PUT", body: JSON.stringify(update), cache: "no-store",
+  });
+
+export const updateAdminAccountDeletion = (accountId: string, update: AdminDeletionUpdateRequest) =>
+  request<AdminAccountUpdateResponse>(`/admin/accounts/${encodeURIComponent(accountId)}/deletion`, {
+    method: "PUT", body: JSON.stringify(update), cache: "no-store",
+  });
+
+export const fetchAdminAudit = (
+  targetId: string,
+  limit = 25,
+  offset = 0,
+  signal?: AbortSignal,
+) => request<AdminAuditPage>(`/admin/audit?${query({ targetId, limit, offset })}`, {
   signal,
   cache: "no-store",
 });
