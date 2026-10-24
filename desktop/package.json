@@ -12,9 +12,9 @@
     "package:win": "npm run build && npm run prepare:web && electron-builder --win nsis --x64"
   },
   "devDependencies": {
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "electron": "^44.5.1",
-    "electron-builder": "26.15.3",
+    "electron-builder": "26.18.0",
     "typescript": "~6.0.3"
   },
   "engines": {
