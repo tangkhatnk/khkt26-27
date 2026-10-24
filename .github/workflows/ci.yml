@@ -82,6 +82,20 @@ jobs:
     name: Backend
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      admin-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: admin_concurrency
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 15435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d admin_concurrency"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -109,6 +123,11 @@ jobs:
 
       - name: Test
         run: npm --prefix backend test
+
+      - name: Test admin transactions against PostgreSQL
+        run: npm --prefix backend run test:admin-postgres
+        env:
+          ADMIN_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:15435/admin_concurrency?sslmode=disable
 
       - name: Build
         run: npm --prefix backend run build

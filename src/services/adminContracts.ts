@@ -7,6 +7,73 @@ export type AdminReportFilters = {
 
 export type AdminAccess = { allowed: boolean };
 
+export type AdminAccountStatus = "active" | "suspended" | "deleted";
+export type AdminSource = "bootstrap" | "persistent" | null;
+export type AdminAction = "role" | "suspension" | "profile" | "deletion";
+
+export type AdminStateVersion = {
+  isAdmin: boolean;
+  suspended: boolean;
+  deleted: boolean;
+  version: number;
+};
+
+export type AdminRoleUpdateRequest = {
+  isAdmin: boolean;
+  expectedVersion: number;
+  reason: string;
+};
+
+export type AdminSuspensionUpdateRequest = {
+  suspended: boolean;
+  expectedVersion: number;
+  reason: string;
+};
+
+export type AdminProfileUpdateRequest = {
+  name: string;
+  expectedName: string;
+  expectedVersion: number;
+  reason: string;
+};
+
+export type AdminDeletionUpdateRequest = {
+  deleted: boolean;
+  expectedVersion: number;
+  reason: string;
+};
+
+type AdminActionAuditBase = {
+  actorId: string;
+  targetId: string;
+  reason: string;
+  createdAt: string;
+};
+
+export type AdminActionAudit =
+  | (AdminActionAuditBase & {
+      action: "profile";
+      before: AdminStateVersion & { name: string };
+      after: AdminStateVersion & { name: string };
+    })
+  | (AdminActionAuditBase & {
+      action: Exclude<AdminAction, "profile">;
+      before: AdminStateVersion;
+      after: AdminStateVersion;
+    });
+
+export type AdminProfileUpdateResponse = AdminAccountDto;
+export type AdminDeletionUpdateResponse = AdminAccountDto;
+
+export type AdminAuditPage = AdminPage<{ actions: AdminActionAudit[] }>;
+
+export type AdminProblem = {
+  status: 400 | 401 | 403 | 404 | 409;
+  detail: string;
+  title?: string;
+  type?: string;
+};
+
 export type AdminMetricTotals = {
   sessionCount: number;
   plannedStudySeconds: number;
@@ -45,12 +112,21 @@ export type AdminPage<T> = {
   [key: string]: unknown;
 } & T;
 
-export type AdminAccount = {
+export type AdminAccountDto = {
   id: string;
   email: string;
   name: string;
   createdAt: string;
+  isAdmin: boolean;
+  adminSource: AdminSource;
+  status: AdminAccountStatus;
+  suspendedAt: string | null;
+  deletedAt: string | null;
+  adminStateVersion: number;
 };
+
+export type AdminAccount = AdminAccountDto;
+export type AdminAccountUpdateResponse = AdminAccountDto;
 
 export type AdminAccountsPage = AdminPage<{ users: AdminAccount[] }>;
 

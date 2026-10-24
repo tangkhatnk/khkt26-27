@@ -34,7 +34,11 @@ beforeEach(async () => {
   userId = randomUUID();
   authorization = `Bearer ${await accessToken(userId)}`;
   const db = {
-    user: { findUnique: vi.fn().mockResolvedValue({ id: userId }) },
+    user: { findUnique: vi.fn().mockResolvedValue({
+      id: userId,
+      suspended_at: null,
+      admin_state_version: 0,
+    }) },
   } as unknown as PrismaClient;
   redis = new RedisMock();
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });

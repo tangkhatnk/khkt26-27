@@ -140,6 +140,11 @@ function AdventureWorkspace() {
   const [busy, setBusy] = useState(false),
     [online, setOnline] = useState(true);
   const adminAccess = useAdminAccess(owner, !!user && !needsLogin && online && !authOffline);
+  const adminNoticeHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (view === "admin" && !adminAccess.allowed && !adminAccess.checking)
+      adminNoticeHeading.current?.focus({ preventScroll: true });
+  }, [view, adminAccess.allowed, adminAccess.checking]);
   const workspaceNav = adminAccess.allowed ? [...nav, { id: "admin", icon: "▥", label: "Quản trị" }] : nav;
   const lastLocalDay = useRef(localDayKey(now));
   const [goal, setGoal] = useState(""),
@@ -2238,13 +2243,13 @@ function AdventureWorkspace() {
               )}
               {view === "experiments" && <ExperimentResults />}
               {view === "admin" && (adminAccess.allowed
-                ? <AdminPanel onClose={() => go("station")} onAccessDenied={adminAccess.refresh} />
+                ? <AdminPanel onClose={() => go("station")} onAccessDenied={adminAccess.refresh} currentUserId={user?.id} />
                 : <section className="panel">
-                  <h2>Khu vực quản trị</h2>
+                  <h2 ref={adminNoticeHeading} tabIndex={-1}>Khu vực quản trị</h2>
                   <p>{adminAccess.checking ? "Đang kiểm tra quyền truy cập…" : !user || needsLogin
                     ? "Đăng nhập bằng tài khoản quản trị để xem báo cáo."
                     : !online || authOffline ? "Kết nối lại máy chủ để mở báo cáo quản trị."
-                      : "Tài khoản này chưa được cấp quyền quản trị. Quyền được cấu hình tại máy chủ."}</p>
+                      : "Tài khoản này chưa được cấp quyền quản trị."}</p>
                   <div className="choice-row">
                     <button onClick={() => go("account")}>Mở tài khoản</button>
                     {user && !needsLogin && online && !authOffline && <button disabled={adminAccess.checking} onClick={adminAccess.refresh}>Kiểm tra lại quyền</button>}

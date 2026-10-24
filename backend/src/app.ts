@@ -20,7 +20,7 @@ import {
   hashToken,
   issueTokens,
   rotateToken,
-  verifyAccess,
+  verifyActiveAccess,
   verifyOAuth,
   publicUser,
   userSelect,
@@ -65,9 +65,11 @@ export async function buildApp(deps?: {
   logger?: boolean;
   storageHealth?: () => Promise<unknown>;
   onStartupStep?: (step: string) => void;
+  verifyOAuth?: typeof verifyOAuth;
 }) {
   deps?.onStartupStep?.("1. Initializing DB client...");
   const db = deps?.db ?? new PrismaClient();
+  const verifyOAuthIdentity = deps?.verifyOAuth ?? verifyOAuth;
   deps?.onStartupStep?.("1.1. Initializing Redis client...");
   const redis = deps?.redis ?? createRedis(config.REDIS_URL);
   const app = Fastify({
@@ -224,22 +226,11 @@ export async function buildApp(deps?: {
   );
   deps?.onStartupStep?.("2.4. Registering API routes...");
   const authenticate = async (req: FastifyRequest) => {
-    req.userId = await verifyAccess(
+    req.userId = await verifyActiveAccess(db,
       req.headers.authorization?.startsWith("Bearer ")
         ? req.headers.authorization.slice(7)
         : undefined,
     );
-    if (
-      !(await db.user.findUnique({
-        where: { id: req.userId },
-        select: { id: true },
-      }))
-    )
-      throw new ApiError(
-        401,
-        "authentication-error",
-        "Account no longer exists",
-      );
   };
   adminRoutes(app, db, authenticate);
   adventureRoutes(app, db, authenticate);
@@ -374,7 +365,7 @@ export async function buildApp(deps?: {
       const { id_token } = z
         .object({ id_token: z.string().min(1).max(16000) })
         .parse(req.body);
-      const identity = await verifyOAuth(provider, id_token);
+      const identity = await verifyOAuthIdentity(provider, id_token);
       let user = await db.user.findUnique({
         where: {
           auth_provider_auth_provider_id: {

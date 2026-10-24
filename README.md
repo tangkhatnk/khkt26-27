@@ -21,9 +21,13 @@ Each departure is counted once as a distraction; returning resumes immediately. 
 
 ## Admin reporting
 
-Admin reporting is disabled until the backend `ADMIN_USER_IDS` environment variable contains one or more comma-separated account UUIDs from the `users.id` column. Leave it empty to deny admin access. Configure it only in the backend environment, then restart the API. The server validates the signed-in account on every admin request; a client-supplied role does not grant access. Admin tools are read-only and report study timing, progress, group summaries, and graded quiz totals. They do not return personal goals, documents, or quiz feedback. Reports use UTC and analyze up to 20,000 recent sessions per selected window; the panel marks capped results.
+Admin access is denied until a bootstrap account is configured in the backend `ADMIN_USER_IDS` variable or a persistent database grant exists. Set comma-separated account UUIDs from `users.id` only in backend configuration, then restart the API. Bootstrap administrators are protected recovery accounts; the panel cannot edit, demote, suspend, or delete them. They can grant persistent admin access to other accounts through the panel. Emptying the variable removes only bootstrap grants, not persistent grants. The server checks the live account on every admin request; client-supplied roles do not grant access.
+
+Reports show study timing, progress, group summaries, and graded quiz totals. They exclude private goals, documents, and quiz feedback, use UTC, and analyze up to 20,000 recent sessions per selected window; capped results are marked. Account controls include display-name edits, role changes, suspension, and recoverable deletion. Each change requires a reason, rejects stale versions, and records an append-only audit entry. Deletion preserves study history, revokes persistent admin access and login sessions, and blocks login. Restoring an account requires a fresh login and does not reinstate admin access; a separate suspension remains in effect. Do not put learner content, private goals, documents, or quiz answers in audit reasons.
 
 Open your profile using your name/avatar, then **Khu vực quản trị**. Confirmed administrators see **Mở khu vực quản trị**; other accounts can copy their account ID and recheck access after the server configuration changes. The profile also shows owner-scoped study totals, recent trips, personal journey progress, and sync status.
+
+To preview account search, reports, pagination, mutations, audit history, CSV export, and failure states without connecting to a real API, follow [the isolated admin fixture guide](docs/ADMIN_FIXTURE.md). It binds only to loopback port 5194 and uses synthetic `example.invalid` accounts.
 
 ## Scanned documents and exploration
 

@@ -1,20 +1,27 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ApiError } from "../services/api";
 import {
   exportAdminReport,
   fetchAdminAccounts,
+  fetchAdminAudit,
   fetchAdminGroups,
   fetchAdminReport,
   fetchAdminSessions,
+  updateAdminAccountRole,
+  updateAdminAccountSuspension,
+  updateAdminAccountProfile,
+  updateAdminAccountDeletion,
 } from "../services/admin";
 import type {
   AdminAccount,
+  AdminActionAudit,
   AdminGroup,
   AdminMetricTotals,
   AdminPeriod,
   AdminReportFilters,
   AdminReport,
   AdminSession,
+  AdminStateVersion,
 } from "../services/adminContracts";
 import "./admin.css";
 
@@ -25,8 +32,55 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Không tải được dữ liệu quản trị.";
 }
 
-function isDenied(error: unknown): error is ApiError {
+export function isAdminAccessDenied(error: unknown): error is ApiError {
   return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
+export type AdminMutationAction = { kind: "role" | "suspension" | "deletion"; value: boolean } | { kind: "profile" };
+
+export function adminAccountMutationBlockReason(account: AdminAccount, currentUserId?: string, action?: AdminMutationAction) {
+  if (currentUserId && account.id === currentUserId) return "Không thể thay đổi tài khoản đang đăng nhập.";
+  if (account.adminSource === "bootstrap") return "Không thể thay đổi tài khoản quản trị bootstrap.";
+  if (account.status === "deleted" && action && action.kind !== "deletion") return "Tài khoản đã xóa. Hãy khôi phục trước khi chỉnh sửa.";
+  if (action?.kind === "role" && action.value === account.isAdmin) return "Tài khoản đã ở trạng thái quyền được yêu cầu.";
+  if (action?.kind === "suspension" && action.value === (account.status === "suspended")) return "Tài khoản đã ở trạng thái được yêu cầu.";
+  if (action?.kind === "deletion" && action.value === (account.status === "deleted")) return "Tài khoản đã ở trạng thái được yêu cầu.";
+  return "";
+}
+
+export function isAdminReasonValid(reason: string) {
+  return reason.trim().length > 0 && reason.length <= 500;
+}
+
+export function isAdminNameValid(name: string) {
+  return name.trim().length > 0 && name.trim().length <= 100;
+}
+
+function adminRoleLabel(isAdmin: boolean) {
+  return isAdmin ? "Quản trị" : "Không quản trị";
+}
+
+function adminStatusLabel(suspended: boolean) {
+  return suspended ? "Tạm ngưng" : "Hoạt động";
+}
+
+function adminStateSummary(state: AdminStateVersion) {
+  return `${adminRoleLabel(state.isAdmin)} · ${state.deleted ? "Đã xóa" : adminStatusLabel(state.suspended)} · phiên bản ${state.version}`;
+}
+
+function adminMutationTitle(action: AdminMutationAction) {
+  if (action.kind === "role") return action.value ? "Cấp quyền quản trị" : "Thu hồi quyền quản trị";
+  if (action.kind === "profile") return "Chỉnh sửa tên";
+  if (action.kind === "deletion") return action.value ? "Xóa tài khoản" : "Khôi phục tài khoản đã xóa";
+  return action.value ? "Tạm ngưng tài khoản" : "Khôi phục tài khoản";
+}
+
+export function adminMutationProblem(error: unknown) {
+  if (!(error instanceof ApiError)) return errorMessage(error);
+  if (error.status === 400) return `Thông tin thay đổi chưa hợp lệ: ${error.message}`;
+  if (error.status === 404) return "Không còn tìm thấy tài khoản này. Hãy tải lại danh sách tài khoản.";
+  if (error.status === 409) return `Trạng thái tài khoản đã thay đổi hoặc thao tác không được phép: ${error.message}`;
+  return error.message;
 }
 
 export function formatAdminDuration(value: number) {
@@ -261,6 +315,153 @@ function Pager({ total, offset, onChange }: { total: number; offset: number; onC
   </div>;
 }
 
+export function AdminAccountGovernance({ account, currentUserId, onChangeRequested }: {
+  account: AdminAccount;
+  currentUserId?: string;
+  onChangeRequested: (action: AdminMutationAction) => void;
+}) {
+  const blockReason = adminAccountMutationBlockReason(account, currentUserId);
+  const source = account.adminSource === "bootstrap" ? "Bootstrap máy chủ"
+    : account.adminSource === "persistent" ? "Cơ sở dữ liệu"
+      : "Không có nguồn quản trị";
+  const suspended = account.status === "suspended";
+  const deleted = account.status === "deleted";
+  return <section className="admin-account-governance" aria-label={"Quyền và trạng thái tài khoản " + account.name}>
+    <div className="admin-detail-heading">
+      <div><h3>Quyền và trạng thái tài khoản</h3><p>Thay đổi luôn được máy chủ xác thực lại và ghi vào nhật ký kiểm toán.</p></div>
+    </div>
+    <dl className="admin-account-facts">
+      <div><dt>Mã tài khoản</dt><dd><code>{account.id}</code></dd></div>
+      <div><dt>Email</dt><dd>{account.email}</dd></div>
+      <div><dt>Quyền</dt><dd>{account.isAdmin ? "Quản trị viên" : "Người học"}</dd></div>
+      <div><dt>Nguồn quyền quản trị</dt><dd>{source}</dd></div>
+      <div><dt>Trạng thái</dt><dd>{deleted ? "Đã xóa" : suspended ? "Đang tạm ngưng" : "Đang hoạt động"}{account.deletedAt ? <small> từ {utcTime(account.deletedAt)}</small> : account.suspendedAt ? <small> từ {utcTime(account.suspendedAt)}</small> : null}</dd></div>
+      <div><dt>Phiên bản trạng thái</dt><dd>{account.adminStateVersion}</dd></div>
+    </dl>
+    {blockReason && <p className="admin-analysis-note">{blockReason}</p>}
+    <div className="admin-account-actions">
+      <button type="button" disabled={Boolean(blockReason) || deleted} onClick={() => onChangeRequested({ kind: "profile" })}>Chỉnh sửa tên</button>
+      <button type="button" disabled={Boolean(blockReason) || deleted} onClick={() => onChangeRequested({ kind: "role", value: !account.isAdmin })}>
+        {account.isAdmin ? "Thu hồi quyền quản trị" : "Cấp quyền quản trị"}
+      </button>
+      <button type="button" disabled={Boolean(blockReason) || deleted} onClick={() => onChangeRequested({ kind: "suspension", value: !suspended })}>
+        {suspended ? "Khôi phục tài khoản" : "Tạm ngưng tài khoản"}
+      </button>
+      <button type="button" className={deleted ? undefined : "admin-destructive"} disabled={Boolean(blockReason)} onClick={() => onChangeRequested({ kind: "deletion", value: !deleted })}>
+        {deleted ? "Khôi phục tài khoản đã xóa" : "Xóa tài khoản"}
+      </button>
+    </div>
+    {deleted && <p className="admin-analysis-note">Dữ liệu học được giữ lại. Khôi phục tài khoản không cấp lại quyền quản trị đã thu hồi.</p>}
+  </section>;
+}
+
+export function AdminMutationConfirmation({ account, currentUserId, action, busy, error, onCancel, onConfirm }: {
+  account: AdminAccount;
+  currentUserId?: string;
+  action: AdminMutationAction;
+  busy: boolean;
+  error: string;
+  onCancel: () => void;
+  onConfirm: (reason: string, name?: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [name, setName] = useState(account.name);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const blockReason = adminAccountMutationBlockReason(account, currentUserId, action);
+  const title = adminMutationTitle(action);
+  const current = action.kind === "profile" ? account.name : action.kind === "deletion" ? (account.status === "deleted" ? "Đã xóa" : "Chưa xóa")
+    : action.kind === "role" ? adminRoleLabel(account.isAdmin) : adminStatusLabel(account.status === "suspended");
+  const next = action.kind === "profile" ? name.trim() : action.kind === "deletion" ? (action.value ? "Đã xóa" : "Chưa xóa")
+    : action.kind === "role" ? adminRoleLabel(action.value) : adminStatusLabel(action.value);
+  const nameIsValid = action.kind !== "profile" || (isAdminNameValid(name) && name.trim() !== account.name);
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!blockReason && !busy && nameIsValid && isAdminReasonValid(reason)) onConfirm(reason.trim(), action.kind === "profile" ? name.trim() : undefined);
+  };
+  useEffect(() => {
+    const trigger = document.activeElement;
+    dialogRef.current?.focus({ preventScroll: true });
+    return () => { if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus({ preventScroll: true }); };
+  }, []);
+  const keepFocusInDialog = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (!busy) onCancel();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const items = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled), input:not(:disabled)') ?? [])];
+    if (!items.length) return;
+    const first = items[0];
+    const last = items.at(-1);
+    if (!dialogRef.current?.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  return <div className="admin-dialog-backdrop"><section ref={dialogRef} tabIndex={-1} onKeyDown={keepFocusInDialog} className="admin-confirmation" role="dialog" aria-modal="true" aria-labelledby="admin-mutation-title">
+    <h3 id="admin-mutation-title">Xác nhận: {title}</h3>
+    <p><strong>{account.name}</strong> · {account.email}</p>
+    <p>Mã tài khoản: <code>{account.id}</code></p>
+    <p>Thay đổi: <strong>{current}</strong> → <strong>{next}</strong>. Phiên bản hiện tại: <strong>{account.adminStateVersion}</strong>.</p>
+    {action.kind === "deletion" && <p className="admin-analysis-note">{action.value
+      ? "Xóa có thể khôi phục: giữ lại dữ liệu học, thu hồi quyền quản trị và các phiên đăng nhập. Tài khoản không thể đăng nhập khi đã xóa."
+      : "Giữ lại dữ liệu học. Người dùng cần đăng nhập lại; quyền quản trị đã thu hồi không tự được cấp lại. Tài khoản đang tạm ngưng vẫn cần được bỏ tạm ngưng."}</p>}
+    {blockReason && <p className="admin-error" role="alert">{blockReason}</p>}
+    {error && <p className="admin-error" role="alert">{error}</p>}
+    <form onSubmit={submit}>
+      {action.kind === "profile" && <><label htmlFor="admin-mutation-name">Tên hiển thị mới</label><input id="admin-mutation-name" value={name} maxLength={100} required disabled={busy || Boolean(blockReason)} onChange={(event) => setName(event.target.value)} /></>}
+      <label htmlFor="admin-mutation-reason">Lý do kiểm toán</label>
+      <textarea id="admin-mutation-reason" value={reason} maxLength={500} required disabled={busy || Boolean(blockReason)} onChange={(event) => setReason(event.target.value)} />
+      <p className="admin-analysis-note">Không ghi nội dung học tập của người học, mục tiêu riêng, tài liệu hoặc câu trả lời quiz trong lý do.</p>
+      <div className="admin-account-actions">
+        <button type="button" disabled={busy} onClick={onCancel}>Hủy</button>
+        <button type="submit" className={action.kind === "deletion" && action.value ? "admin-destructive" : undefined} disabled={busy || Boolean(blockReason) || !nameIsValid || !isAdminReasonValid(reason)}>{busy ? "Đang lưu…" : "Xác nhận thay đổi"}</button>
+      </div>
+    </form>
+  </section></div>;
+}
+
+export function AdminAuditView({ actions, loading, error, total, offset, onOffsetChange, onRetry }: {
+  actions: AdminActionAudit[];
+  loading: boolean;
+  error: string;
+  total: number;
+  offset: number;
+  onOffsetChange: (next: number) => void;
+  onRetry: () => void;
+}) {
+  return <section className="admin-detail admin-audit" aria-label="Nhật ký thay đổi tài khoản" aria-live="polite">
+    <div className="admin-detail-heading"><div><h3>Nhật ký thay đổi</h3><p>Ghi nhận thay đổi tên, quyền, trạng thái và việc xóa/khôi phục tài khoản.</p></div></div>
+    {loading && <p role="status">Đang tải nhật ký…</p>}
+    {error && <div className="admin-error" role="alert"><span>{error}</span> <button type="button" onClick={onRetry}>Thử lại</button></div>}
+    {!loading && !error && actions.length === 0 && <p className="admin-empty">Chưa có thay đổi được ghi nhận.</p>}
+    {!!actions.length && <>
+      <ol className="admin-audit-list">
+        {actions.map((item, index) => <li key={item.createdAt + "-" + item.actorId + "-" + index}>
+          <div className="admin-audit-heading"><strong>{item.action === "profile" ? "Chỉnh sửa tên" : item.action === "deletion" ? "Xóa / khôi phục tài khoản" : item.action === "role" ? "Thay đổi quyền quản trị" : "Thay đổi trạng thái tài khoản"}</strong><time dateTime={item.createdAt}>{utcTime(item.createdAt)}</time></div>
+          <p>Người thực hiện: <code>{item.actorId}</code></p>
+          <p>Mục tiêu: <code>{item.targetId}</code></p>
+          <p>Quyền: {adminRoleLabel(item.before.isAdmin)} → {adminRoleLabel(item.after.isAdmin)}</p>
+          <p>Trạng thái: {item.before.deleted ? "Đã xóa" : adminStatusLabel(item.before.suspended)} → {item.after.deleted ? "Đã xóa" : adminStatusLabel(item.after.suspended)}</p>
+          {item.action === "profile" && <p>Tên: {item.before.name} → {item.after.name}</p>}
+          <p>{adminStateSummary(item.before)} → {adminStateSummary(item.after)}</p>
+          <p>Lý do: {item.reason}</p>
+        </li>)}
+      </ol>
+      <Pager total={total} offset={offset} onChange={onOffsetChange} />
+    </>}
+  </section>;
+}
+
 function SessionsView({
   sessions,
   loading,
@@ -268,6 +469,7 @@ function SessionsView({
   total,
   offset,
   onOffsetChange,
+  onRetry,
   label,
 }: {
   sessions: AdminSession[];
@@ -276,12 +478,13 @@ function SessionsView({
   total: number;
   offset: number;
   onOffsetChange: (next: number) => void;
+  onRetry: () => void;
   label: string;
 }) {
   return <section className="admin-detail" aria-live="polite">
     <div className="admin-detail-heading"><div><h3>Phiên học của {label}</h3><p>Hiển thị thời lượng học, thời gian tập trung, nghỉ, xao nhãng và quiz đã chấm. Không hiển thị mục tiêu riêng hoặc nội dung tài liệu.</p></div></div>
     {loading && <p role="status">Đang tải phiên học…</p>}
-    {error && <p className="admin-error" role="alert">{error}</p>}
+    {error && <p className="admin-error" role="alert">{error} <button type="button" onClick={onRetry}>Thử lại</button></p>}
     {!loading && !error && sessions.length === 0 && <p className="admin-empty">Chưa có phiên học trong khoảng thời gian này.</p>}
     {!!sessions.length && <>
       <div className="admin-table-scroll" role="region" aria-label={`Phiên học của ${label}`} tabIndex={0}>
@@ -304,12 +507,19 @@ function SessionsView({
   </section>;
 }
 
-export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; onAccessDenied?: () => void } = {}) {
+export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
+  onClose?: () => void;
+  onAccessDenied?: () => void;
+  currentUserId?: string;
+} = {}) {
   const [days, setDays] = useState<AdminPeriod>(7);
   const [tab, setTab] = useState<"overview" | "accounts" | "groups">("overview");
   const [report, setReport] = useState<AdminReport | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reportError, setReportError] = useState("");
+  const [reportRetry, setReportRetry] = useState(0);
+  const [detailReportRetry, setDetailReportRetry] = useState(0);
+  const [exportError, setExportError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [detailReportResult, setDetailReportResult] = useState<{ key: string; value: AdminReport } | null>(null);
   const [detailReportError, setDetailReportError] = useState<{ key: string; message: string } | null>(null);
@@ -320,7 +530,16 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
   const [accountOffset, setAccountOffset] = useState(0);
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState("");
+  const [accountRetry, setAccountRetry] = useState(0);
   const [selectedAccount, setSelectedAccount] = useState<AdminAccount | null>(null);
+  const [mutationAction, setMutationAction] = useState<AdminMutationAction | null>(null);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const [mutationError, setMutationError] = useState("");
+  const [auditResult, setAuditResult] = useState<{ key: string; actions: AdminActionAudit[]; total: number } | null>(null);
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditRetry, setAuditRetry] = useState(0);
   const [groupSearch, setGroupSearch] = useState("");
   const [groupQuery, setGroupQuery] = useState("");
   const [groups, setGroups] = useState<AdminGroup[]>([]);
@@ -328,13 +547,17 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
   const [groupOffset, setGroupOffset] = useState(0);
   const [groupLoading, setGroupLoading] = useState(false);
   const [groupError, setGroupError] = useState("");
+  const [groupRetry, setGroupRetry] = useState(0);
   const [selectedGroup, setSelectedGroup] = useState<AdminGroup | null>(null);
   const [sessionResult, setSessionResult] = useState<{ key: string; rows: AdminSession[]; total: number } | null>(null);
   const [sessionOffset, setSessionOffset] = useState(0);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState("");
+  const [sessionRetry, setSessionRetry] = useState(0);
   const selectedAccountId = selectedAccount?.id;
   const selectedGroupId = selectedGroup?.id;
+  const auditKey = [selectedAccountId ?? "", auditOffset].join(":");
+  const auditValue = auditResult?.key === auditKey ? auditResult : null;
   const reportFilters: AdminReportFilters | null = selectedAccountId
     ? { accountId: selectedAccountId }
     : selectedGroupId ? { groupId: selectedGroupId } : null;
@@ -357,6 +580,10 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
     setSessionResult(null);
     setDetailReportResult(null);
     setDetailReportError(null);
+    setAuditResult(null);
+    setAuditError("");
+    setMutationAction(null);
+    setMutationError("");
     setAccountTotal(0);
     setGroupTotal(0);
     setSelectedAccount(null);
@@ -373,12 +600,12 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
       .then((value) => { if (!controller.signal.aborted) setReport(value); })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        if (isDenied(error)) clearAdminData();
+        if (isAdminAccessDenied(error)) clearAdminData();
         else setReportError(errorMessage(error));
       })
       .finally(() => { if (!controller.signal.aborted) setReportLoading(false); });
     return () => controller.abort();
-  }, [days, clearAdminData]);
+  }, [days, clearAdminData, reportRetry]);
 
   useEffect(() => {
     const filters = selectedAccountId
@@ -395,11 +622,11 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
       .then((value) => { if (!controller.signal.aborted) setDetailReportResult({ key: reportKey, value }); })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        if (isDenied(error)) clearAdminData();
+        if (isAdminAccessDenied(error)) clearAdminData();
         else setDetailReportError({ key: reportKey, message: errorMessage(error) });
       });
     return () => controller.abort();
-  }, [clearAdminData, days, reportKey, selectedAccountId, selectedGroupId]);
+  }, [clearAdminData, days, detailReportRetry, reportKey, selectedAccountId, selectedGroupId]);
 
   useEffect(() => {
     if (tab !== "accounts") return;
@@ -412,15 +639,45 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
         if (controller.signal.aborted) return;
         setAccounts(value.users);
         setAccountTotal(value.total);
+        setSelectedAccount((previous) => previous
+          ? value.users.find((account) => account.id === previous.id) ?? previous
+          : previous);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        if (isDenied(error)) clearAdminData();
+        if (isAdminAccessDenied(error)) clearAdminData();
         else setAccountError(errorMessage(error));
       })
       .finally(() => { if (!controller.signal.aborted) setAccountLoading(false); });
     return () => controller.abort();
-  }, [accountOffset, accountQuery, clearAdminData, tab]);
+  }, [accountOffset, accountQuery, accountRetry, clearAdminData, tab]);
+
+  useEffect(() => {
+    if (tab !== "accounts" || !selectedAccountId) {
+      setAuditResult(null);
+      setAuditError("");
+      setAuditLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setAuditLoading(true);
+    setAuditError("");
+    fetchAdminAudit(selectedAccountId, pageSize, auditOffset, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setAuditResult({
+          key: auditKey,
+          actions: value.actions,
+          total: value.total,
+        });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (isAdminAccessDenied(error)) clearAdminData();
+        else setAuditError(errorMessage(error));
+      })
+      .finally(() => { if (!controller.signal.aborted) setAuditLoading(false); });
+    return () => controller.abort();
+  }, [auditKey, auditOffset, auditRetry, clearAdminData, selectedAccountId, tab]);
 
   useEffect(() => {
     if (tab !== "groups") return;
@@ -436,12 +693,12 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        if (isDenied(error)) clearAdminData();
+        if (isAdminAccessDenied(error)) clearAdminData();
         else setGroupError(errorMessage(error));
       })
       .finally(() => { if (!controller.signal.aborted) setGroupLoading(false); });
     return () => controller.abort();
-  }, [clearAdminData, groupOffset, groupQuery, tab]);
+  }, [clearAdminData, groupOffset, groupQuery, groupRetry, tab]);
 
   useEffect(() => {
     const filters = selectedAccount ? { accountId: selectedAccount.id } : selectedGroup ? { groupId: selectedGroup.id } : null;
@@ -461,18 +718,20 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        if (isDenied(error)) clearAdminData();
+        if (isAdminAccessDenied(error)) clearAdminData();
         else setSessionError(errorMessage(error));
       })
       .finally(() => { if (!controller.signal.aborted) setSessionLoading(false); });
     return () => controller.abort();
-  }, [clearAdminData, days, selectedAccount, selectedGroup, sessionOffset, sessionKey]);
+  }, [clearAdminData, days, selectedAccount, selectedGroup, sessionOffset, sessionKey, sessionRetry]);
 
   const searchAccounts = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSelectedAccount(null);
     setSelectedGroup(null);
+    setMutationAction(null);
     setAccountOffset(0);
+    setAuditOffset(0);
     setAccountQuery(accountSearch.trim());
   };
 
@@ -486,16 +745,60 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
 
   const chooseAccount = (account: AdminAccount) => {
     setSessionError("");
+    setMutationAction(null);
+    setMutationError("");
     setSelectedAccount(account);
     setSelectedGroup(null);
     setSessionOffset(0);
+    setAuditOffset(0);
   };
 
   const chooseGroup = (group: AdminGroup) => {
     setSessionError("");
+    setMutationAction(null);
     setSelectedGroup(group);
     setSelectedAccount(null);
     setSessionOffset(0);
+  };
+
+  const submitAccountMutation = async (reason: string, name?: string) => {
+    if (!selectedAccount || !mutationAction || !isAdminReasonValid(reason)) return;
+    const target = selectedAccount;
+    const action = mutationAction;
+    setMutationBusy(true);
+    setMutationError("");
+    try {
+      const common = { expectedVersion: target.adminStateVersion, reason: reason.trim() };
+      let updated: AdminAccount;
+      if (action.kind === "profile") {
+        if (!name || !isAdminNameValid(name)) return;
+        updated = await updateAdminAccountProfile(target.id, { ...common, name: name.trim(), expectedName: target.name });
+      } else if (action.kind === "deletion") {
+        updated = await updateAdminAccountDeletion(target.id, { ...common, deleted: action.value });
+      } else if (action.kind === "role") {
+        updated = await updateAdminAccountRole(target.id, { ...common, isAdmin: action.value });
+      } else {
+        updated = await updateAdminAccountSuspension(target.id, { ...common, suspended: action.value });
+      }
+      setAccounts((previous) => previous.map((account) => account.id === updated.id ? updated : account));
+      setSelectedAccount(updated);
+      setMutationAction(null);
+      setMutationError("");
+      setAuditOffset(0);
+      setAccountRetry((value) => value + 1);
+      setAuditRetry((value) => value + 1);
+    } catch (error) {
+      if (isAdminAccessDenied(error)) clearAdminData();
+      else {
+        if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+          setAccountRetry((value) => value + 1);
+          setAuditRetry((value) => value + 1);
+        }
+        setMutationError(adminMutationProblem(error));
+      }
+    } finally {
+      setMutationBusy(false);
+    }
   };
 
   const visibleExportFilters: AdminReportFilters = tab === "accounts" && selectedAccount
@@ -511,7 +814,7 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
     exportRequest.current?.abort();
     exportRequest.current = controller;
     setExporting(true);
-    setReportError("");
+    setExportError("");
     try {
       const file = await exportAdminReport(days, controller.signal, visibleExportFilters);
       if (controller.signal.aborted) return;
@@ -526,8 +829,8 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (isDenied(error)) clearAdminData();
-      else setReportError(errorMessage(error));
+      if (isAdminAccessDenied(error)) clearAdminData();
+      else setExportError(errorMessage(error));
     } finally {
       if (!controller.signal.aborted) setExporting(false);
     }
@@ -560,7 +863,8 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
       <button type="button" aria-pressed={tab === "groups"} onClick={() => setTab("groups")}>Nhóm học</button>
     </nav>
 
-    {reportError && <p className="admin-error" role="alert">{reportError}</p>}
+    {reportError && <p className="admin-error" role="alert">{reportError} <button type="button" onClick={() => setReportRetry((value) => value + 1)}>Thử tải báo cáo lại</button></p>}
+    {exportError && <p className="admin-error" role="alert">{exportError} <button type="button" onClick={() => void exportCsv()}>Thử tải CSV lại</button></p>}
     {tab === "overview" && <section aria-label="Tổng quan quản trị" className="admin-panel-content">
       {reportLoading && <p role="status">Đang tải báo cáo…</p>}
       {!reportLoading && report && <AdminOverview report={report} />}
@@ -569,12 +873,12 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
 
     {tab === "accounts" && <section aria-label="Tra cứu tài khoản" className="admin-panel-content">
       <form className="admin-search" onSubmit={searchAccounts}>
-        <label htmlFor="admin-account-search">Tìm theo tên hoặc email</label>
+        <label htmlFor="admin-account-search">Tìm theo UUID, tên hoặc email</label>
         <div><input id="admin-account-search" value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} maxLength={100} />
           <button type="submit">Tìm tài khoản</button></div>
       </form>
       {accountLoading && <p role="status">Đang tìm tài khoản…</p>}
-      {accountError && <p className="admin-error" role="alert">{accountError}</p>}
+      {accountError && <p className="admin-error" role="alert">{accountError} <button type="button" onClick={() => setAccountRetry((value) => value + 1)}>Thử lại</button></p>}
       {!accountLoading && !accountError && accounts.length === 0 && <p className="admin-empty">Không có tài khoản phù hợp. Thử tìm bằng tên hoặc email khác.</p>}
       {!!accounts.length && <>
         <ul className="admin-result-list">
@@ -584,16 +888,45 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
             </button>
           </li>)}
         </ul>
-        <Pager total={accountTotal} offset={accountOffset} onChange={setAccountOffset} />
+        <Pager total={accountTotal} offset={accountOffset} onChange={(offset) => {
+          setAccountOffset(offset);
+          setSelectedAccount(null);
+          setMutationAction(null);
+          setMutationError("");
+        }} />
       </>}
       {selectedAccount && <>
+        <AdminAccountGovernance
+          account={selectedAccount}
+          currentUserId={currentUserId}
+          onChangeRequested={(action) => { setMutationAction(action); setMutationError(""); }}
+        />
+        {mutationAction && <AdminMutationConfirmation
+          key={`${selectedAccount.id}:${mutationAction.kind}`}
+          account={selectedAccount}
+          currentUserId={currentUserId}
+          action={mutationAction}
+          busy={mutationBusy}
+          error={mutationError}
+          onCancel={() => { if (!mutationBusy) { setMutationAction(null); setMutationError(""); } }}
+          onConfirm={(reason, name) => void submitAccountMutation(reason, name)}
+        />}
+        <AdminAuditView
+          actions={auditValue?.actions ?? []}
+          loading={auditLoading}
+          error={auditError}
+          total={auditValue?.total ?? 0}
+          offset={auditOffset}
+          onOffsetChange={setAuditOffset}
+          onRetry={() => setAuditRetry((value) => value + 1)}
+        />
         <section className="admin-detail" aria-label={`Phân tích tài khoản ${selectedAccount.name}`} aria-live="polite">
           <div className="admin-detail-heading"><div><h3>Phân tích học tập của {selectedAccount.name}</h3><p>Tổng hợp trong khoảng {days} ngày đã chọn; biểu đồ, bảng và CSV chỉ dùng phiên của tài khoản này.</p></div></div>
           {detailReportLoading && <p role="status">Đang tải phân tích tài khoản…</p>}
-          {detailReportErrorMessage && <p className="admin-error" role="alert">{detailReportErrorMessage}</p>}
+          {detailReportErrorMessage && <p className="admin-error" role="alert">{detailReportErrorMessage} <button type="button" onClick={() => setDetailReportRetry((value) => value + 1)}>Thử lại</button></p>}
           {detailReport && <AdminOverview report={detailReport} scopeLabel={`Tài khoản: ${selectedAccount.name} · ${selectedAccount.email}`} />}
         </section>
-        <SessionsView sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} label={`${selectedAccount.name} · ${selectedAccount.email}`} />
+        <SessionsView sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={() => setSessionRetry((value) => value + 1)} label={`${selectedAccount.name} · ${selectedAccount.email}`} />
       </>}
     </section>}
 
@@ -604,7 +937,7 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
           <button type="submit">Tìm nhóm</button></div>
       </form>
       {groupLoading && <p role="status">Đang tìm nhóm…</p>}
-      {groupError && <p className="admin-error" role="alert">{groupError}</p>}
+      {groupError && <p className="admin-error" role="alert">{groupError} <button type="button" onClick={() => setGroupRetry((value) => value + 1)}>Thử lại</button></p>}
       {!groupLoading && !groupError && groups.length === 0 && <p className="admin-empty">Không có nhóm phù hợp. Thử tên nhóm khác.</p>}
       {!!groups.length && <>
         <ul className="admin-result-list admin-group-list">
@@ -622,10 +955,10 @@ export function AdminPanel({ onClose, onAccessDenied }: { onClose?: () => void; 
         <section className="admin-detail" aria-label={`Phân tích nhóm ${selectedGroup.name}`} aria-live="polite">
           <div className="admin-detail-heading"><div><h3>Phân tích học tập của nhóm {selectedGroup.name}</h3><p>Tổng hợp trong khoảng {days} ngày đã chọn; biểu đồ, bảng và CSV chỉ dùng phiên thuộc nhóm này.</p></div></div>
           {detailReportLoading && <p role="status">Đang tải phân tích nhóm…</p>}
-          {detailReportErrorMessage && <p className="admin-error" role="alert">{detailReportErrorMessage}</p>}
+          {detailReportErrorMessage && <p className="admin-error" role="alert">{detailReportErrorMessage} <button type="button" onClick={() => setDetailReportRetry((value) => value + 1)}>Thử lại</button></p>}
           {detailReport && <AdminOverview report={detailReport} scopeLabel={`Nhóm: ${selectedGroup.name}`} />}
         </section>
-        <SessionsView sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} label={selectedGroup.name} />
+        <SessionsView sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={() => setSessionRetry((value) => value + 1)} label={selectedGroup.name} />
       </>}
     </section>}
 
