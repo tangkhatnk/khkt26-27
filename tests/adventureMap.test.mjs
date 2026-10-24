@@ -11,11 +11,25 @@ import { mapGeometry, stopIndices } from "../src/adventure/mapGeometry.ts";
 import {
   mapFogMotionShouldRun,
   mapFogRouteDashArray,
+  mapFogRouteGuardDashOffset,
+  MAP_FOG_ROUTE_CLEARANCE_COLLAR_WIDTH,
   MAP_FOG_ROUTE_CLEARANCE_WIDTH,
+  MAP_FOG_ROUTE_EDGE_FEATHER_RADIUS,
+  MAP_FOG_ROUTE_GUARD_LEAD,
+  MAP_FOG_ROUTE_UNDERLAY_WIDTH,
   MAP_FOG_STATION_GUARD_RADIUS,
 } from "../src/adventure/mapFogGeometry.ts";
 import * as mapFogGeometry from "../src/adventure/mapFogGeometry.ts";
 import { studyTopics } from "../backend/src/adventure/topics.ts";
+
+function hiddenStationCount(markup) {
+  const centers = new Set();
+  for (const [tag] of markup.matchAll(/<circle\b[^>]*class="map-fog-hidden-station-guard"[^>]*>/gu)) {
+    const center = tag.match(/cx="([^"]+)" cy="([^"]+)"/u);
+    if (center) centers.add(`${center[1]}:${center[2]}`);
+  }
+  return centers.size;
+}
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 let vite;
@@ -118,14 +132,14 @@ test("fog uses billowed noise density and soft wisps over the route mask", () =>
   assert.match(markup, /filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"/u);
 });
 
-test("fog transforms remain available on map views while the dashboard stays static", async () => {
+test("filtered fog density stays static on every map view", async () => {
   const stylesheet = await readFile(resolve(projectRoot, "src/adventure/fog.css"), "utf8");
 
-  assert.match(stylesheet, /\.map-fog-flow--slow\.is-active\s*\{\s*animation: map-fog-drift-slow/u);
-  assert.match(stylesheet, /\.map-fog-flow--quick\.is-active\s*\{\s*animation: map-fog-drift-quick/u);
+  assert.match(stylesheet, /\.map-fog-flow\.is-active\s*\{\s*animation: none;/u,
+    "procedural filters do not trigger per-frame redraws while reveal and fade remain active");
+  assert.doesNotMatch(stylesheet, /@keyframes\s+map-fog-drift/u,
+    "the costly full-map texture transforms are removed rather than left active elsewhere");
   assert.match(stylesheet, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.map-fog-flow\.is-active\s*\{\s*animation:\s*none;/u);
-  assert.match(stylesheet, /\.dashboard-grid\s+\.map-fog-flow\.is-active\s*\{\s*animation-play-state:\s*paused;/u,
-    "dashboard fog stays static from activation, so form focus does not pause the animation");
 });
 
 test("route fog mask clamps progress and keeps a full-train clear corridor", () => {
@@ -134,8 +148,16 @@ test("route fog mask clamps progress and keeps a full-train clear corridor", () 
   assert.equal(mapFogRouteDashArray(150, 100), "100.00 100.00");
   assert.equal(mapFogRouteDashArray(Number.NaN, 100), "0.00 100.00");
   assert.equal(mapFogRouteDashArray(50, Number.NaN), "0.00 0.00");
+  assert.equal(mapFogRouteGuardDashOffset(315, 2287.76), "-603.00");
+  assert.equal(mapFogRouteGuardDashOffset(-1, 100), "-100.00");
+  assert.equal(mapFogRouteGuardDashOffset(500, 100), "-100.00");
+  assert.equal(mapFogRouteGuardDashOffset(Number.NaN, 100), "-100.00");
   assert.equal(MAP_FOG_ROUTE_CLEARANCE_WIDTH, 252);
   assert.equal(MAP_FOG_ROUTE_CLEARANCE_WIDTH / 2, 126, "the 42px reveal radius is tripled");
+  assert.equal(MAP_FOG_ROUTE_EDGE_FEATHER_RADIUS, 72);
+  assert.equal(MAP_FOG_ROUTE_UNDERLAY_WIDTH, 396);
+  assert.equal(MAP_FOG_ROUTE_CLEARANCE_COLLAR_WIDTH, 324);
+  assert.equal(MAP_FOG_ROUTE_GUARD_LEAD, 288);
   assert.ok(MAP_FOG_ROUTE_CLEARANCE_WIDTH / 2 >= 37, "the corridor contains the engine's 37px front reach");
   assert.equal(MAP_FOG_STATION_GUARD_RADIUS, 125);
 });
@@ -194,8 +216,10 @@ test("overview fog clears the traveled rail with train clearance and guards futu
 
   assert.ok(clearance, "the mask has an explicit traveled-route clearance path");
   assert.ok(unexplored, "the mask protects the remaining route from widened-feather spill");
-  assert.match(unexplored, /stroke-width="252"/u);
-  assert.match(unexplored, /stroke-dashoffset="-315"/u, "the guard begins where the traveled prefix ends");
+  assert.match(unexplored, /stroke-width="324"/u,
+    "the graduated suffix guard has a 36px soft cap around its opaque core");
+  assert.match(unexplored, /stroke-dashoffset="-603\.00"/u,
+    "the guard begins after the graduated route-cap transition");
   const [guardStart, guardGap] = unexplored.match(/stroke-dasharray="([\d.]+) ([\d.]+)"/u).slice(1);
   assert.equal(guardStart, guardGap, "the dashed stroke covers the route suffix after its offset");
   assert.match(clearance, /d="M35 505 L350 505 L630 505 L810 410 L810 220 L650 140 L430 140 L280 230 L360 320 L610 320 L965 320"/u);
@@ -203,8 +227,9 @@ test("overview fog clears the traveled rail with train clearance and guards futu
   assert.match(clearance, /stroke-linecap="round"/u, "the current-position end cap covers the whole engine");
   assert.match(clearance, /stroke-dasharray="315\.00 2287\.76"/u, "only the route traveled through the current station is clear");
   assert.doesNotMatch(markup, /class="map-fog-aperture"/u, "independent cloud holes cannot expose a future route bend");
-  assert.equal([...markup.matchAll(/class="map-fog-hidden-station-guard"/gu)].length, 4);
-  assert.match(markup, /class="map-fog-hidden-station-guard"[^>]*cx="810" cy="410" r="125" fill="#fff"/u);
+  assert.equal(hiddenStationCount(markup), 4);
+  assert.match(markup, /class="map-fog-hidden-station-guard"[^>]*cx="810" cy="410" r="125\.5" fill="#fff" fill-opacity=/u,
+    "the graduated station mask overlaps the protected radius with explicit opacity");
   assert.ok(markup.indexOf('class="map-fog-hidden-station-guard"') < markup.indexOf('class="map-fog-route-clearance"'),
     "the opaque train corridor is drawn last so future-station guards cannot hide the train");
 
@@ -217,7 +242,7 @@ test("overview fog clears the traveled rail with train clearance and guards futu
   );
   const midwayClearance = midwayMarkup.match(/<path class="map-fog-route-clearance"[^>]*>/u)?.[0];
   assert.match(midwayClearance, /stroke-dasharray="556\.77 2287\.76"/u, "the cleared prefix grows with journey progress");
-  assert.equal([...midwayMarkup.matchAll(/class="map-fog-hidden-station-guard"/gu)].length, 4);
+  assert.equal(hiddenStationCount(midwayMarkup), 4);
 
   const arrivedMarkup = renderToStaticMarkup(
     React.createElement(TopDownMap, {
@@ -226,7 +251,7 @@ test("overview fog clears the traveled rail with train clearance and guards futu
       ownId: "guest",
     }),
   );
-  assert.equal([...arrivedMarkup.matchAll(/class="map-fog-hidden-station-guard"/gu)].length, 3,
+  assert.equal(hiddenStationCount(arrivedMarkup), 3,
     "arrival removes the current station's guard");
   assert.doesNotMatch(arrivedMarkup, /class="map-fog-hidden-station-guard"[^>]*cx="810" cy="410"/u);
 
@@ -238,7 +263,7 @@ test("overview fog clears the traveled rail with train clearance and guards futu
     }),
   );
   assert.match(coastMarkup, /class="map-fog-route-clearance"[^>]*d="M35 505 L350 505 L630 505 L810 410 L810 220 L650 140 L870 230/u);
-  assert.equal([...coastMarkup.matchAll(/class="map-fog-hidden-station-guard"/gu)].length, 4);
+  assert.equal(hiddenStationCount(coastMarkup), 4);
 
   const finalMarkup = renderToStaticMarkup(
     React.createElement(TopDownMap, {
@@ -249,6 +274,22 @@ test("overview fog clears the traveled rail with train clearance and guards futu
   );
   assert.doesNotMatch(finalMarkup, /class="map-fog-hidden-station-guard"/u);
   assert.match(finalMarkup, /class="map-fog-layer"[^>]*style="opacity:0"/u);
+});
+
+test("fog mask edge profiles do not run full-map SVG filters", () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(TopDownMap, {
+      journey: { branch: "mountain", station: 0, remaining: 900, threshold: 1800 },
+      carriages: [{ id: "guest", name: "Toa Mây", color: "#398575" }],
+      ownId: "guest",
+    }),
+  );
+  const mask = markup.match(/<mask\b[^>]*>([\s\S]*?)<\/mask>/u)?.[1];
+  assert.ok(mask, "the rendered fog has a route mask");
+  assert.doesNotMatch(mask, /\bfilter=/u,
+    "graduated vector profiles avoid raster filter passes on every mask shape");
+  assert.match(mask, /class="map-fog-route-soft-underlay"[^>]*stroke-opacity=/u,
+    "the traveled edge is represented by graduated alpha strokes");
 });
 test("every study topic has unique valid metadata", () => {
   assert.equal(studyTopics.length, 12);
