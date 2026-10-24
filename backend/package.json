@@ -42,7 +42,7 @@
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "ioredis-mock": "^8.13.1",
-    "prisma": "6.19.0",
+    "prisma": "7.10.1",
     "tsx": "^4.20.6",
     "typescript": "~6.0.3",
     "vitest": "^3.2.4"
