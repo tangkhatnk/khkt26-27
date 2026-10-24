@@ -31,7 +31,7 @@ export const quizResponseSchema = (requireSourceExcerpt = false) => ({
 const GENERATION_TIMEOUT_MS = 90_000;
 // Gemini rejects manually configured deadlines below 10 seconds; keep one second above that floor.
 const MIN_PROVIDER_REQUEST_BUDGET_MS = 11_000;
-// Reserve room for a 20-second fallback, an 11-second source repair, and deadline overhead.
+// Reserve room for a fallback when enabled and one bounded output repair.
 const PRIMARY_WITH_FALLBACK_BUDGET_MS = 55_000;
 const FALLBACK_REQUEST_BUDGET_MS = 20_000;
 const REQUEST_RESERVE_MARGIN_MS = 1_000;
@@ -102,7 +102,7 @@ function providerApiError(error: unknown, timedOut: boolean): ApiError {
   return new ApiError(503, "service-unavailable", "Gemini hiện không khả dụng. Vui lòng thử lại sau.");
 }
 
-type OutputRepairReason = "empty" | "grounding";
+type OutputRepairReason = "empty" | "grounding" | "format";
 
 function isEmptyQuestionArray(text: string): boolean {
   if (Buffer.byteLength(text, "utf8") > 512 * 1024) return false;
@@ -158,9 +158,7 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
   const fallbackEnabled = Boolean(fallbackModel && fallbackModel !== primaryModel);
   const primaryBudgetMs = fallbackEnabled
     ? PRIMARY_WITH_FALLBACK_BUDGET_MS
-    : body.documentText
-      ? GENERATION_TIMEOUT_MS - MIN_PROVIDER_REQUEST_BUDGET_MS - REQUEST_RESERVE_MARGIN_MS
-      : GENERATION_TIMEOUT_MS;
+    : GENERATION_TIMEOUT_MS - MIN_PROVIDER_REQUEST_BUDGET_MS - REQUEST_RESERVE_MARGIN_MS;
   const assertWithinDeadline = () => {
     if (controller.signal.aborted || Date.now() >= deadline) {
       controller.abort();
@@ -180,7 +178,9 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
       ? ` Lần trước không tạo được câu hỏi nào. Hãy rà soát toàn bộ documentText; vẫn phải tạo đúng ${body.count} câu nếu nguồn đủ căn cứ, không giảm số lượng và không suy diễn. Chỉ trả mảng rỗng nếu sau khi rà soát nguồn thực sự không thể hỗ trợ đủ số câu.`
       : repairReason === "grounding"
         ? ` Lần trước có câu không vượt qua kiểm tra nguồn. Mỗi sourceExcerpt phải là đoạn nguyên văn liên tục trong documentText; cụm đáp án đúng phải xuất hiện nguyên văn trong đoạn trích; câu hỏi hoặc giải thích phải nêu ít nhất một thuật ngữ nội dung từ đoạn trích. Vẫn phải tạo đúng ${body.count} câu nếu nguồn đủ căn cứ, không giảm số lượng và không thêm kiến thức ngoài nguồn.`
-        : "";
+        : repairReason === "format"
+          ? ` Lần trước đầu ra không đúng JSON/schema nghiêm ngặt, số lượng câu hoặc id duy nhất. Hãy sửa thành một mảng JSON hợp lệ gồm đúng ${body.count} câu theo đầy đủ schema yêu cầu, không thêm văn bản ngoài JSON. Vẫn phải giữ mọi điều kiện nguồn và đáp án; không giảm số lượng hoặc suy diễn.`
+          : "";
     return base + grounding + repair;
   };
   const generateText = async (
@@ -219,7 +219,7 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
         text = await generateText(
           fallbackModel,
           undefined,
-          body.documentText ? FALLBACK_REQUEST_BUDGET_MS : GENERATION_TIMEOUT_MS,
+          FALLBACK_REQUEST_BUDGET_MS,
         );
       } catch (fallbackError) {
         throw providerApiError(fallbackError, controller.signal.aborted);
@@ -242,7 +242,7 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
         }
       } catch (error) {
         if (error instanceof ApiError) throw error;
-        throw invalidQuizOutputError();
+        repairReason = "format";
       }
     } else {
       try {
@@ -251,7 +251,7 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
         return questions;
       } catch (error) {
         if (error instanceof ApiError) throw error;
-        throw invalidQuizOutputError();
+        repairReason = "format";
       }
     }
 
@@ -266,16 +266,16 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
     if (repairReason === "empty" && isEmptyQuestionArray(repairedText))
       throw insufficientStudyMaterialError();
     try {
-      const questions = body.documentText
-        ? parseGeneratedQuiz(
+      const questions = repairReason === "format" || !body.documentText
+        ? parseGeneratedQuiz(repairedText, body.count, body.documentText)
+        : parseGeneratedQuiz(
           JSON.stringify(mergeGroundedQuestions([
             parseGroundedQuizCandidates(repairedText, body.count, body.documentText).questions,
             groundedQuestions,
           ], body.count)),
           body.count,
           body.documentText,
-        )
-        : parseGeneratedQuiz(repairedText, body.count);
+        );
       assertWithinDeadline();
       return questions;
     } catch (error) {

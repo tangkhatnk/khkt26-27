@@ -7,6 +7,10 @@ vi.mock("@google/genai", async importOriginal => {
 import { config } from "../src/config.js";
 import { generateGeminiQuiz, quizResponseSchema } from "../src/gemini.js";
 const question = { id: "q1", question: "Question?", options: ["A", "B", "C", "D"], correctAnswerIndex: 1, explanation: "Reason" };
+const exactTwoQuestionBatch = [
+  { ...question, knowledgePoint: "Photosynthesis" },
+  { ...question, id: "q2", question: "Second question?", knowledgePoint: "Cellular respiration" },
+];
 const sourceText = "In photosynthesis, chlorophyll absorbs light energy.";
 const groundedQuestion = {
   id: "q1", question: "What absorbs light energy during photosynthesis?",
@@ -171,6 +175,32 @@ describe("Gemini adapter", () => {
       status: 502, kind: "invalid-ai-output",
     });
   });
+  it.each([
+    ["malformed JSON", "not json"],
+    ["invalid question schema", JSON.stringify([
+      { ...exactTwoQuestionBatch[0], options: ["A", "B", "C"] }, exactTwoQuestionBatch[1],
+    ])],
+    ["wrong question count", JSON.stringify(exactTwoQuestionBatch.slice(0, 1))],
+    ["duplicate question IDs", JSON.stringify([
+      exactTwoQuestionBatch[0], { ...exactTwoQuestionBatch[1], id: exactTwoQuestionBatch[0].id },
+    ])],
+  ])("repairs one %s response without changing the requested batch", async (_case, invalidText) => {
+    config.GEMINI_API_KEY = "test-only-key";
+    generateContent
+      .mockResolvedValueOnce({ text: invalidText })
+      .mockResolvedValueOnce({ text: JSON.stringify(exactTwoQuestionBatch) });
+
+    await expect(generateGeminiQuiz({ topic: "biology", count: 2 })).resolves.toEqual(exactTwoQuestionBatch);
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    const first = generateContent.mock.calls[0][0];
+    const repair = generateContent.mock.calls[1][0];
+    expect(repair.model).toBe(first.model);
+    expect(repair.contents).toBe(first.contents);
+    expect(JSON.parse(repair.contents).studyData.count).toBe(2);
+    expect(repair.config.responseJsonSchema).toEqual(first.config.responseJsonSchema);
+    expect(repair.config.systemInstruction).toContain("đúng 2 câu");
+  });
   it("does not contact Gemini without a key", async () => {
     config.GEMINI_API_KEY = "";
     await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).rejects.toMatchObject({ status: 503 });
@@ -226,6 +256,27 @@ describe("Gemini adapter", () => {
     const retryInstruction = generateContent.mock.calls[1][0].config.systemInstruction;
     expect(retryInstruction).toContain("nguyên văn");
     expect(retryInstruction).not.toContain(unsupportedExcerpt.sourceExcerpt);
+  });
+  it("repairs malformed source output only when the exact repaired batch passes grounding", async () => {
+    config.GEMINI_API_KEY = "test-only-key";
+    generateContent
+      .mockResolvedValueOnce({ text: "not json" })
+      .mockResolvedValueOnce({ text: JSON.stringify(studyGuideQuestions) });
+
+    await expect(generateGeminiQuiz({
+      topic: "biology", documentAttached: true, documentText: substantialStudyGuide, count: 3,
+    })).resolves.toEqual(studyGuideQuestions);
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    const [first, repair] = generateContent.mock.calls.map(([request]) => request);
+    expect(repair.model).toBe(first.model);
+    expect(repair.contents).toBe(first.contents);
+    expect(JSON.parse(repair.contents).studyData).toMatchObject({
+      documentAttached: true, documentText: substantialStudyGuide, count: 3,
+    });
+    expect(repair.config.responseJsonSchema).toEqual(first.config.responseJsonSchema);
+    expect(repair.config.systemInstruction).toContain("đúng 3 câu");
+    expect(repair.config.systemInstruction).toContain("nguyên văn");
   });
   it("combines individually grounded questions from two complete provider batches", async () => {
     config.GEMINI_API_KEY = "test-only-key";
@@ -399,6 +450,7 @@ describe("Gemini adapter", () => {
     config.GEMINI_API_KEY = "test-only-key";
     generateContent.mockResolvedValue({ text });
     await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).rejects.toMatchObject({ status: 502 });
+    expect(generateContent).toHaveBeenCalledTimes(2);
   });
   it.each([
     [{ status: 400, message: JSON.stringify({ error: { details: [{ reason: "API_KEY_INVALID" }] } }) }, 502, "provider-authentication-failed", "Khóa Gemini không hợp lệ hoặc chưa được cấp quyền. Hãy kiểm tra GEMINI_API_KEY ở backend."],
@@ -424,7 +476,7 @@ describe("Gemini adapter", () => {
     await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).resolves.toEqual([question]);
     expect(generateContent).toHaveBeenCalledTimes(2);
     expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual(["gemini-primary", "gemini-fallback"]);
-    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBeGreaterThan(20_000);
+    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBe(20_000);
     expect(generateContent.mock.calls[0][0].config.abortSignal).toBe(generateContent.mock.calls[1][0].config.abortSignal);
   });
   it("does not make more than one fallback attempt when both models are overloaded", async () => {
@@ -466,22 +518,34 @@ describe("Gemini adapter", () => {
     await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).rejects.toMatchObject({ status: 503, kind: "service-unavailable" });
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
-  it("does not fall back when the primary returns invalid output", async () => {
+  it("repairs invalid primary output on the same model instead of falling back", async () => {
     config.GEMINI_API_KEY = "test-only-key";
+    config.GEMINI_MODEL = "gemini-primary";
     config.GEMINI_FALLBACK_MODEL = "gemini-fallback";
-    generateContent.mockResolvedValue({ text: "not json" });
+    generateContent
+      .mockResolvedValueOnce({ text: "not json" })
+      .mockResolvedValueOnce({ text: JSON.stringify([{ ...question, knowledgePoint: "Biology" }]) });
 
-    await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).rejects.toMatchObject({ kind: "invalid-ai-output" });
-    expect(generateContent).toHaveBeenCalledTimes(1);
+    await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).resolves.toHaveLength(1);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-primary", "gemini-primary",
+    ]);
   });
-  it("does not retry malformed output from a source-grounded request", async () => {
+  it("rejects an ungrounded repaired batch from a source-grounded request", async () => {
     config.GEMINI_API_KEY = "test-only-key";
-    generateContent.mockResolvedValue({ text: "not json" });
+    const ungroundedRepair = studyGuideQuestions.map(item => ({
+      ...item, sourceExcerpt: "This text is not present in the study guide.",
+    }));
+    generateContent
+      .mockResolvedValueOnce({ text: "not json" })
+      .mockResolvedValueOnce({ text: JSON.stringify(ungroundedRepair) });
 
     await expect(generateGeminiQuiz({
       topic: "biology", documentAttached: true, documentText: substantialStudyGuide, count: 3,
     })).rejects.toMatchObject({ status: 502, kind: "invalid-ai-output" });
-    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls[1][0].config.systemInstruction).toContain("nguyên văn");
   });
   it("aborts requests after 90 seconds", async () => {
     vi.useFakeTimers(); config.GEMINI_API_KEY = "test-only-key";
@@ -513,6 +577,77 @@ describe("Gemini adapter", () => {
     expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBeGreaterThanOrEqual(11000);
 
     await expect(operation).resolves.toEqual([question]);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+  it("reserves fallback repair time within the same 90-second deadline for malformed no-source output", async () => {
+    vi.useFakeTimers();
+    config.GEMINI_API_KEY = "test-only-key";
+    config.GEMINI_MODEL = "gemini-primary";
+    config.GEMINI_FALLBACK_MODEL = "gemini-fallback";
+    let rejectPrimary!: (error: unknown) => void;
+    let resolveFallback!: (response: { text: string }) => void;
+    generateContent
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectPrimary = reject; }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFallback = resolve; }))
+      .mockImplementationOnce(({ config: options }) => new Promise((_, reject) => {
+        options.abortSignal.addEventListener("abort", () => reject(new Error("abort")), { once: true });
+      }));
+
+    const operation = generateGeminiQuiz({ topic: "biology", count: 1 });
+    const assertion = expect(operation).rejects.toMatchObject({ status: 504, kind: "upstream-timeout" });
+    await Promise.resolve();
+    const signal = generateContent.mock.calls[0][0].config.abortSignal;
+    expect(generateContent.mock.calls[0][0].config.httpOptions.timeout).toBe(55_000);
+
+    await vi.advanceTimersByTimeAsync(55_000);
+    rejectPrimary({ status: 503, message: JSON.stringify({ error: { status: "UNAVAILABLE" } }) });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls[1][0].model).toBe("gemini-fallback");
+    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBe(20_000);
+    expect(generateContent.mock.calls[1][0].config.abortSignal).toBe(signal);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    resolveFallback({ text: "not json" });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(generateContent).toHaveBeenCalledTimes(3);
+    const repair = generateContent.mock.calls[2][0];
+    expect(repair.model).toBe("gemini-fallback");
+    expect(repair.config.httpOptions.timeout).toBe(15_000);
+    expect(repair.config.abortSignal).toBe(signal);
+    expect(repair.contents).toBe(generateContent.mock.calls[0][0].contents);
+    expect(repair.config.responseJsonSchema).toEqual(generateContent.mock.calls[0][0].config.responseJsonSchema);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await assertion;
+    expect(generateContent).toHaveBeenCalledTimes(3);
+  });
+  it("reserves the original deadline for one structured-output repair without source text", async () => {
+    vi.useFakeTimers();
+    config.GEMINI_API_KEY = "test-only-key";
+    config.GEMINI_FALLBACK_MODEL = "";
+    let resolveFirst!: (response: { text: string }) => void;
+    generateContent
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ text: JSON.stringify([{ ...question, knowledgePoint: "Biology" }]) });
+
+    const operation = generateGeminiQuiz({ topic: "biology", count: 1 });
+    await Promise.resolve();
+    expect(generateContent.mock.calls[0][0].config.httpOptions.timeout).toBe(78_000);
+    await vi.advanceTimersByTimeAsync(78_000);
+    resolveFirst({ text: "not json" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBe(12_000);
+    await expect(operation).resolves.toHaveLength(1);
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
   it("shares the original 90-second deadline with the source-output repair attempt", async () => {
