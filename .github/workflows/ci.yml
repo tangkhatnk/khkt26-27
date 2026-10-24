@@ -24,6 +24,7 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
 
@@ -37,10 +38,12 @@ jobs:
               ;;
           esac
 
-          if [[ ! "$PR_TITLE" =~ ^(feat|fix|docs|test|ci|refactor|chore|build|perf|style|revert)(\([a-zA-Z0-9._/-]+\))?!?:[[:space:]].+ ]]; then
-            echo "Pull request title must use Conventional Commit style."
-            echo "Example: fix: preserve reviewed material after note edits"
-            exit 1
+          if [[ "$PR_AUTHOR" != "dependabot[bot]" && "$PR_AUTHOR" != "renovate[bot]" ]]; then
+            if [[ ! "$PR_TITLE" =~ ^(feat|fix|docs|test|ci|refactor|chore|build|perf|style|revert)(\([a-zA-Z0-9._/-]+\))?!?:[[:space:]].+ ]]; then
+              echo "Pull request title must use Conventional Commit style."
+              echo "Example: fix: preserve reviewed material after note edits"
+              exit 1
+            fi
           fi
 
   frontend:
