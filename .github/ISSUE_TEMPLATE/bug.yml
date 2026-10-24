@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible problem in Viễn Du
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the observed problem and provide enough evidence to reproduce it.
+        Do not include secrets, credentials, private study materials, personal account data, or other sensitive information.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Web UI
+        - Focus / session
+        - Quiz / learning journal
+        - Material import / OCR
+        - Authentication / sync
+        - Groups / journey
+        - Admin / experiment history
+        - Backend / API
+        - Desktop / Electron
+        - Build / CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: A short description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: What happens now?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable sequence that reproduces the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Relevant logs, screenshots, failing tests, commit range, or other evidence. Redact sensitive data.
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, OS, desktop/web, or other relevant environment details.
+      placeholder: "Example: Chrome 155 on Windows 11, web app"
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What observable result would make this issue complete?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched for an existing issue before opening this one.
+          required: true
+        - label: I removed secrets, credentials, private study materials, and personal data from this report.
+          required: true

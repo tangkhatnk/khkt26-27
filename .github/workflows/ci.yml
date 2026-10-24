@@ -1,35 +1,160 @@
 name: Validate app and API
-on: [push, pull_request]
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  check:
+  policy:
+    name: Policy
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Validate pull request metadata
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          case "$HEAD_REF" in
+            feat/*|fix/*|docs/*|test/*|ci/*|refactor/*|chore/*|build/*|perf/*|style/*|revert/*|hotfix/*|dependabot/*|renovate/*)
+              ;;
+            *)
+              echo "Unsupported branch name: $HEAD_REF"
+              echo "Use a short-lived typed branch such as fix/..., feat/..., docs/..., test/..., ci/..., refactor/..., or chore/...."
+              exit 1
+              ;;
+          esac
+
+          if [[ ! "$PR_TITLE" =~ ^(feat|fix|docs|test|ci|refactor|chore|build|perf|style|revert)(\([a-zA-Z0-9._/-]+\))?!?:[[:space:]].+ ]]; then
+            echo "Pull request title must use Conventional Commit style."
+            echo "Example: fix: preserve reviewed material after note edits"
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test web
+        run: npm run test:web
+
+      - name: Build web
+        run: npm run build:web
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
             backend/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:web
-      - run: npm ci
-        working-directory: backend
-      - run: npm run db:generate
-        working-directory: backend
-      - run: npm run typecheck
-        working-directory: backend
-      - run: npm test
-        working-directory: backend
-      - run: npm run build
-        working-directory: backend
-      - run: npm run build:web
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Generate Prisma client
+        run: npm --prefix backend run db:generate
+
+      - name: Typecheck
+        run: npm --prefix backend run typecheck
+
+      - name: Test
+        run: npm --prefix backend test
+
+      - name: Build
+        run: npm --prefix backend run build
+
+  desktop:
+    name: Desktop
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Build packaged web assets
+        run: npm run build:web
         env:
-          # Leave headroom for the large OfficeParser browser dependency.
           NODE_OPTIONS: --max-old-space-size=4096
-      - run: docker build -t pomodoro-api backend
-      - name: Build the Railway web and API image
-        run: docker build -t viendu-railway .
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+
+      - name: Typecheck desktop
+        run: npm --prefix desktop run typecheck
+
+      - name: Test desktop
+        run: npm --prefix desktop test
+
+  containers:
+    name: Containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [frontend, backend]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t viendu-api-ci backend
+
+      - name: Build Railway image
+        run: docker build -t viendu-railway-ci .

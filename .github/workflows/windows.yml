@@ -1,59 +1,78 @@
 name: Build Windows app
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
     tags: ["desktop-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-package-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  windows:
+  package:
+    name: Package Windows
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:web
-      - run: npm run build:web
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Lint web
+        run: npm run lint
+
+      - name: Typecheck web
+        run: npm run typecheck
+
+      - name: Test web
+        run: npm run test:web
+
+      - name: Build web
+        run: npm run build:web
         env:
-          # Leave headroom for the large OfficeParser browser dependency.
           NODE_OPTIONS: --max-old-space-size=4096
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://viendu.up.railway.app/api/v1' }}
-      - run: npm ci --prefix desktop
-      - run: npm --prefix desktop run typecheck
-      - run: npm --prefix desktop test
-      - run: npm --prefix desktop run package:win
-      - name: Package the matching web build
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+
+      - name: Typecheck desktop
+        run: npm --prefix desktop run typecheck
+
+      - name: Test desktop
+        run: npm --prefix desktop test
+
+      - name: Package Windows installer
+        run: npm --prefix desktop run package:win
+
+      - name: Package matching web build
         shell: pwsh
         run: |
           $version = node -p "require('./desktop/package.json').version"
           Compress-Archive -Path dist/* -DestinationPath "desktop/release/Vien-Du-Web-$version.zip"
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: Vien-Du-Windows
           path: |
             desktop/release/*.exe
             desktop/release/*.zip
           if-no-files-found: error
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            backend/package-lock.json
-      - run: npm ci
-      - run: npm ci --prefix backend
-      - run: npm --prefix backend run db:generate
-      - run: npm --prefix backend run typecheck
-      - run: npm --prefix backend test
+          retention-days: 14
