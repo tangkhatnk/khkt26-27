@@ -6,14 +6,42 @@ updates:
       interval: weekly
       day: monday
       timezone: Asia/Ho_Chi_Minh
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     groups:
-      root-minor-patch:
+      root-patch:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+      root-minor:
         patterns:
           - "*"
         update-types:
           - minor
-          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "pdfjs-dist"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: "officeparser"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: "tesseract.js"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: "@tesseract.js-data/*"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /backend
@@ -21,14 +49,35 @@ updates:
       interval: weekly
       day: monday
       timezone: Asia/Ho_Chi_Minh
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     groups:
-      backend-minor-patch:
+      backend-prisma:
+        patterns:
+          - prisma
+          - "@prisma/client"
+        update-types:
+          - patch
+          - minor
+      backend-patch:
         patterns:
           - "*"
+        exclude-patterns:
+          - prisma
+          - "@prisma/client"
+        update-types:
+          - patch
+      backend-minor:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - prisma
+          - "@prisma/client"
         update-types:
           - minor
-          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /desktop
@@ -36,14 +85,22 @@ updates:
       interval: weekly
       day: monday
       timezone: Asia/Ho_Chi_Minh
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
     groups:
-      desktop-minor-patch:
+      desktop-patch:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+      desktop-minor:
         patterns:
           - "*"
         update-types:
           - minor
-          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
@@ -51,4 +108,8 @@ updates:
       interval: weekly
       day: monday
       timezone: Asia/Ho_Chi_Minh
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"
