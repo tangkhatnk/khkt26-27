@@ -88,6 +88,22 @@ function parseMask(markup) {
   const [, travelRaw] = routeClearance.attrs["stroke-dasharray"].split(/\s+/u);
   const traveled = Number(routeClearance.attrs["stroke-dasharray"].split(/\s+/u)[0]);
   assert.ok(Number.isFinite(traveled));
+  const routeGuard = entries.find(({ attrs }) => attrs.class === "map-fog-unexplored-route-guard");
+  assert.ok(routeGuard, "fog mask guards its untraveled route suffix");
+  const [guardDashRaw, guardGapRaw] = routeGuard.attrs["stroke-dasharray"].split(/\s+/u);
+  const guardDashLength = Number(guardDashRaw);
+  const guardGapLength = Number(guardGapRaw);
+  const guardPathLength = Number(routeGuard.attrs.pathLength);
+  const guardDashOffset = Number(routeGuard.attrs["stroke-dashoffset"]);
+  assert.equal(guardDashLength, guardPathLength,
+    "the untraveled-route pattern uses one dash as long as the complete path");
+  assert.equal(guardGapLength, guardPathLength,
+    "the matching full-path gap keeps the guard to one suffix dash");
+  assert.ok(Math.abs(guardDashOffset + traveled) <= 0.006,
+    "the negative dash offset starts the guard where the rendered traveled prefix ends");
+  // SVG's negative dash offset shifts this full-length dash forward by -offset.
+  const guardStart = Math.max(0, Math.min(guardPathLength, -guardDashOffset));
+  const guardEnd = Math.min(guardPathLength, guardStart + guardDashLength);
   const layer = markup.match(/<g class="map-fog-layer"[^>]*style="opacity:([\d.]+)"/u);
   assert.ok(layer, "fog layer exposes its current fade opacity");
   return {
@@ -96,6 +112,8 @@ function parseMask(markup) {
     distances,
     traveled,
     total: Number(travelRaw),
+    guardStart,
+    guardEnd,
     layerOpacity: Number(layer[1]),
   };
 }
@@ -126,6 +144,30 @@ function distanceToTraveledPrefix(point, mask) {
   return nearest;
 }
 
+function distanceToUntraveledSuffix(point, mask) {
+  let nearest = Infinity;
+  for (let index = 1; index < mask.route.length; index++) {
+    const startDistance = Math.max(mask.guardStart, mask.distances[index - 1]);
+    const endDistance = Math.min(mask.guardEnd, mask.distances[index]);
+    if (startDistance >= endDistance) continue;
+    const fullStart = mask.route[index - 1];
+    const end = mask.route[index];
+    const length = mask.distances[index] - mask.distances[index - 1];
+    const fraction = (startDistance - mask.distances[index - 1]) / length;
+    const endFraction = (endDistance - mask.distances[index - 1]) / length;
+    const start = [
+      fullStart[0] + (end[0] - fullStart[0]) * fraction,
+      fullStart[1] + (end[1] - fullStart[1]) * fraction,
+    ];
+    const intervalEnd = [
+      fullStart[0] + (end[0] - fullStart[0]) * endFraction,
+      fullStart[1] + (end[1] - fullStart[1]) * endFraction,
+    ];
+    nearest = Math.min(nearest, distanceToSegment(point, start, intervalEnd));
+  }
+  return nearest;
+}
+
 function fogMaskAt(point, mask) {
   let luminance = 1;
   for (const { tag, attrs } of mask.entries) {
@@ -135,6 +177,9 @@ function fogMaskAt(point, mask) {
       }
     } else if (tag === "circle" && attrs.class === "map-fog-hidden-station-guard") {
       if (Math.hypot(point.x - Number(attrs.cx), point.y - Number(attrs.cy)) <= Number(attrs.r))
+        luminance = 1;
+    } else if (tag === "path" && attrs.class === "map-fog-unexplored-route-guard") {
+      if (distanceToUntraveledSuffix(point, mask) <= Number(attrs["stroke-width"]) / 2)
         luminance = 1;
     } else if (tag === "path" && attrs.class === "map-fog-route-clearance") {
       if (distanceToTraveledPrefix(point, mask) <= Number(attrs["stroke-width"]) / 2)
@@ -236,17 +281,32 @@ test("real train footprints remain inside traveled clear mask on both routes and
   }
 });
 
+test("expanded route reveal triples both the clear corridor and each feather stroke", () => {
+  const mask = parseMask(renderMap("mountain", 0.15, []));
+  const clear = mask.entries.find(({ attrs }) => attrs.class === "map-fog-route-clearance");
+  const featherWidths = mask.entries
+    .filter(({ attrs }) => attrs.class?.startsWith("map-fog-route-feather"))
+    .map(({ attrs }) => Number(attrs["stroke-width"]));
+
+  assert.equal(Number(clear.attrs["stroke-width"]), 252,
+    "the route's fully clear width is three times the previous 84px width");
+  assert.deepEqual(featherWidths, [408, 336, 288],
+    "the graduated soft edge keeps the same proportions at three times the size");
+  assert.equal(maximumFeatherRadius(mask), 204);
+});
+
 test("far future self-approach regions stay fogged until the train is spatially nearby", () => {
   for (const branch of ["mountain", "coast"]) {
     const farFuture = branch === "mountain" ? { x: 844, y: 320 } : { x: 569.47, y: 320 };
     for (const progress of [0, 0.08, 0.15]) {
       const markup = renderMap(branch, progress);
       const mask = parseMask(markup);
-      const distance = distanceToTraveledPrefix(farFuture, mask);
-      assert.ok(distance > maximumFeatherRadius(mask),
-        `${branch} at ${progress}: fixture is outside all route-feather neighborhoods (distance ${distance.toFixed(1)})`);
+      const futureRouteGuard = mask.entries.find(({ attrs }) => attrs.class === "map-fog-unexplored-route-guard");
+      assert.ok(futureRouteGuard, `${branch} at ${progress}: the untraveled route has an opaque guard`);
+      assert.ok(distanceToUntraveledSuffix(farFuture, mask) <= Number(futureRouteGuard.attrs["stroke-width"]) / 2,
+        `${branch} at ${progress}: distant route point is covered by the untraveled-route guard`);
       assert.ok(fogMaskAt(farFuture, mask) >= 0.9,
-        `${branch} at ${progress}: far future point remains covered`);
+        `${branch} at ${progress}: widened feather does not reveal the far future point`);
       if (progress === 0.15) {
         const guardTags = [...markup.matchAll(/<circle\b[^>]*class="map-fog-hidden-station-guard"[^>]*>/gu)];
         assert.equal(guardTags.length, 4, `${branch}: all four future stations are guarded`);
@@ -264,10 +324,15 @@ test("far future self-approach regions stay fogged until the train is spatially 
       (geometry.distances[stopIndices[2]] - geometry.distances[stopIndices[1]])) / 4;
     const nearStationMask = parseMask(renderMap(branch, journeyProgress));
     const farLoopPoint = { x: 569.47, y: 320 };
-    assert.ok(distanceToTraveledPrefix(farLoopPoint, nearStationMask) > maximumFeatherRadius(nearStationMask),
-      `${branch}: the later loop is outside the train/feather neighborhood after the first bend`);
+    const futureRouteGuard = nearStationMask.entries.find(({ attrs }) => attrs.class === "map-fog-unexplored-route-guard");
+    assert.ok(futureRouteGuard, `${branch}: the untraveled route has an opaque guard`);
+    const suffixDistance = distanceToUntraveledSuffix(farLoopPoint, nearStationMask);
+    assert.ok(suffixDistance <= Number(futureRouteGuard.attrs["stroke-width"]) / 2,
+      `${branch}: the later loop is covered by the untraveled-route guard (distance ${suffixDistance}, radius ${Number(futureRouteGuard.attrs["stroke-width"]) / 2}, traveled ${nearStationMask.traveled})`);
+    assert.ok(distanceToTraveledPrefix(farLoopPoint, nearStationMask) <= maximumFeatherRadius(nearStationMask),
+      `${branch}: the fixture overlaps a widened feather from a traveled bend`);
     assert.ok(fogMaskAt(farLoopPoint, nearStationMask) >= 0.9,
-      `${branch}: distant later-loop point remains fogged even when its route is spatially near elsewhere`);
+      `${branch}: the later loop stays fogged despite that spatial overlap`);
   }
 });
 

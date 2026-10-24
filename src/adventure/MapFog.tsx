@@ -4,6 +4,7 @@ import {
   mapFogMotionShouldRun,
   mapFogRouteDashArray,
   MAP_FOG_ROUTE_CLEARANCE_WIDTH,
+  MAP_FOG_ROUTE_FEATHER_WIDTHS,
   MAP_FOG_STATION_GUARD_RADIUS,
 } from "./mapFogGeometry";
 
@@ -28,6 +29,7 @@ export function MapFog({
   const fogOpacity = mapFogLayerOpacity(progress);
   const shouldAnimate = motionActive && fogOpacity > 0;
   const traveledRoute = mapFogRouteDashArray(distance, total);
+  const [wideFeatherWidth, midFeatherWidth, innerFeatherWidth] = MAP_FOG_ROUTE_FEATHER_WIDTHS;
 
   useEffect(() => {
     const element = layer.current;
@@ -190,7 +192,7 @@ export function MapFog({
           style={{ maskType: "luminance" }}
         >
           <rect x="0" y="0" width="1100" height="650" rx="24" fill="#fff" />
-          {/* Graduated mask strokes soften the edge; the inner 84px stays clear for the full train. */}
+          {/* Graduated mask strokes soften the expanded edge while keeping the route interior clear. */}
           <path
             className="map-fog-route-feather map-fog-route-feather--wide"
             d={path}
@@ -198,7 +200,7 @@ export function MapFog({
             fill="none"
             stroke="#000"
             strokeOpacity=".18"
-            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH + 52}
+            strokeWidth={wideFeatherWidth}
             strokeDasharray={traveledRoute}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -210,7 +212,7 @@ export function MapFog({
             fill="none"
             stroke="#000"
             strokeOpacity=".3"
-            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH + 28}
+            strokeWidth={midFeatherWidth}
             strokeDasharray={traveledRoute}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -222,7 +224,7 @@ export function MapFog({
             fill="none"
             stroke="#000"
             strokeOpacity=".45"
-            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH + 12}
+            strokeWidth={innerFeatherWidth}
             strokeDasharray={traveledRoute}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -239,6 +241,19 @@ export function MapFog({
                 fill="#fff"
               />
             ))}
+          {/* Keep the untraveled rail under fog when nearby traveled bends get a wider feather. */}
+          <path
+            className="map-fog-unexplored-route-guard"
+            d={path}
+            pathLength={total}
+            fill="none"
+            stroke="#fff"
+            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH}
+            strokeDasharray={`${total} ${total}`}
+            strokeDashoffset={-distance}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
           <path
             className="map-fog-route-clearance"
             d={path}

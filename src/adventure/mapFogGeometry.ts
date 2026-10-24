@@ -1,5 +1,11 @@
-/** A 42px half-width contains the engine's 37px nose and each carriage body. */
-export const MAP_FOG_ROUTE_CLEARANCE_WIDTH = 84;
+/** Triples the original 42px half-width reveal corridor around the traveled route. */
+export const MAP_FOG_ROUTE_CLEARANCE_WIDTH = 84 * 3;
+/** Scale each graduated feather stroke with the clear corridor to keep the same edge profile. */
+export const MAP_FOG_ROUTE_FEATHER_WIDTHS = [
+  MAP_FOG_ROUTE_CLEARANCE_WIDTH + 52 * 3,
+  MAP_FOG_ROUTE_CLEARANCE_WIDTH + 28 * 3,
+  MAP_FOG_ROUTE_CLEARANCE_WIDTH + 12 * 3,
+] as const;
 export const MAP_FOG_STATION_GUARD_RADIUS = 125;
 
 /** Keep only the traveled prefix of the route transparent in the fog mask. */

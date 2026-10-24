@@ -134,7 +134,8 @@ test("route fog mask clamps progress and keeps a full-train clear corridor", () 
   assert.equal(mapFogRouteDashArray(150, 100), "100.00 100.00");
   assert.equal(mapFogRouteDashArray(Number.NaN, 100), "0.00 100.00");
   assert.equal(mapFogRouteDashArray(50, Number.NaN), "0.00 0.00");
-  assert.equal(MAP_FOG_ROUTE_CLEARANCE_WIDTH, 84);
+  assert.equal(MAP_FOG_ROUTE_CLEARANCE_WIDTH, 252);
+  assert.equal(MAP_FOG_ROUTE_CLEARANCE_WIDTH / 2, 126, "the 42px reveal radius is tripled");
   assert.ok(MAP_FOG_ROUTE_CLEARANCE_WIDTH / 2 >= 37, "the corridor contains the engine's 37px front reach");
   assert.equal(MAP_FOG_STATION_GUARD_RADIUS, 125);
 });
@@ -189,10 +190,16 @@ test("overview fog clears the traveled rail with train clearance and guards futu
     }),
   );
   const clearance = markup.match(/<path class="map-fog-route-clearance"[^>]*>/u)?.[0];
+  const unexplored = markup.match(/<path class="map-fog-unexplored-route-guard"[^>]*>/u)?.[0];
 
   assert.ok(clearance, "the mask has an explicit traveled-route clearance path");
+  assert.ok(unexplored, "the mask protects the remaining route from widened-feather spill");
+  assert.match(unexplored, /stroke-width="252"/u);
+  assert.match(unexplored, /stroke-dashoffset="-315"/u, "the guard begins where the traveled prefix ends");
+  const [guardStart, guardGap] = unexplored.match(/stroke-dasharray="([\d.]+) ([\d.]+)"/u).slice(1);
+  assert.equal(guardStart, guardGap, "the dashed stroke covers the route suffix after its offset");
   assert.match(clearance, /d="M35 505 L350 505 L630 505 L810 410 L810 220 L650 140 L430 140 L280 230 L360 320 L610 320 L965 320"/u);
-  assert.match(clearance, /stroke-width="84"/u, "the fully clear band covers the train's 74px nose-to-tail footprint");
+  assert.match(clearance, /stroke-width="252"/u, "the fully clear band triples the prior 84px route reveal width");
   assert.match(clearance, /stroke-linecap="round"/u, "the current-position end cap covers the whole engine");
   assert.match(clearance, /stroke-dasharray="315\.00 2287\.76"/u, "only the route traveled through the current station is clear");
   assert.doesNotMatch(markup, /class="map-fog-aperture"/u, "independent cloud holes cannot expose a future route bend");
