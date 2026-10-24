@@ -3,9 +3,12 @@ import {
   mapFogLayerOpacity,
   mapFogMotionShouldRun,
   mapFogRouteDashArray,
+  mapFogRouteGuardDashOffset,
+  MAP_FOG_ROUTE_COLLAR_PROFILE,
   MAP_FOG_ROUTE_CLEARANCE_WIDTH,
-  MAP_FOG_ROUTE_FEATHER_WIDTHS,
-  MAP_FOG_STATION_GUARD_RADIUS,
+  MAP_FOG_ROUTE_GUARD_PROFILE,
+  MAP_FOG_ROUTE_UNDERLAY_PROFILE,
+  MAP_FOG_STATION_GUARD_PROFILE,
 } from "./mapFogGeometry";
 
 export function MapFog({
@@ -29,7 +32,6 @@ export function MapFog({
   const fogOpacity = mapFogLayerOpacity(progress);
   const shouldAnimate = motionActive && fogOpacity > 0;
   const traveledRoute = mapFogRouteDashArray(distance, total);
-  const [wideFeatherWidth, midFeatherWidth, innerFeatherWidth] = MAP_FOG_ROUTE_FEATHER_WIDTHS;
 
   useEffect(() => {
     const element = layer.current;
@@ -192,68 +194,68 @@ export function MapFog({
           style={{ maskType: "luminance" }}
         >
           <rect x="0" y="0" width="1100" height="650" rx="24" fill="#fff" />
-          {/* Graduated mask strokes soften the expanded edge while keeping the route interior clear. */}
-          <path
-            className="map-fog-route-feather map-fog-route-feather--wide"
-            d={path}
-            pathLength={total}
-            fill="none"
-            stroke="#000"
-            strokeOpacity=".18"
-            strokeWidth={wideFeatherWidth}
-            strokeDasharray={traveledRoute}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            className="map-fog-route-feather map-fog-route-feather--mid"
-            d={path}
-            pathLength={total}
-            fill="none"
-            stroke="#000"
-            strokeOpacity=".3"
-            strokeWidth={midFeatherWidth}
-            strokeDasharray={traveledRoute}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            className="map-fog-route-feather map-fog-route-feather--inner"
-            d={path}
-            pathLength={total}
-            fill="none"
-            stroke="#000"
-            strokeOpacity=".45"
-            strokeWidth={innerFeatherWidth}
-            strokeDasharray={traveledRoute}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+          {/* Nested translucent strokes create a bounded, continuous route edge. */}
+          {MAP_FOG_ROUTE_UNDERLAY_PROFILE.map(({ radius, opacity }, index) => (
+            <path
+              key={`underlay-${index}`}
+              className="map-fog-route-soft-underlay"
+              d={path}
+              pathLength={total}
+              fill="none"
+              stroke="#000"
+              strokeWidth={radius * 2}
+              strokeOpacity={opacity}
+              strokeDasharray={traveledRoute}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
           {stations
             .filter((station) => station.distance > distance)
-            .map((station) => (
+            .flatMap((station) => MAP_FOG_STATION_GUARD_PROFILE.map(({ radius, opacity }, index) => (
               <circle
-                key={`${station.x}-${station.y}`}
+                key={`${station.x}-${station.y}-guard-${index}`}
                 className="map-fog-hidden-station-guard"
                 cx={station.x}
                 cy={station.y}
-                r={MAP_FOG_STATION_GUARD_RADIUS}
+                r={radius}
                 fill="#fff"
+                fillOpacity={opacity}
               />
-            ))}
-          {/* Keep the untraveled rail under fog when nearby traveled bends get a wider feather. */}
-          <path
-            className="map-fog-unexplored-route-guard"
-            d={path}
-            pathLength={total}
-            fill="none"
-            stroke="#fff"
-            strokeWidth={MAP_FOG_ROUTE_CLEARANCE_WIDTH}
-            strokeDasharray={`${total} ${total}`}
-            strokeDashoffset={-distance}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+            )))}
+          {/* White graduated strokes protect the unexplored suffix and hidden stations. */}
+          {MAP_FOG_ROUTE_GUARD_PROFILE.map(({ radius, opacity }, index) => (
+            <path
+              key={`guard-${index}`}
+              className="map-fog-unexplored-route-guard"
+              d={path}
+              pathLength={total}
+              fill="none"
+              stroke="#fff"
+              strokeWidth={radius * 2}
+              strokeOpacity={opacity}
+              strokeDasharray={`${total} ${total}`}
+              strokeDashoffset={mapFogRouteGuardDashOffset(distance, total)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {/* This profile re-clears guard overlaps before the crisp core is applied. */}
+          {MAP_FOG_ROUTE_COLLAR_PROFILE.map(({ radius, opacity }, index) => (
+            <path
+              key={`collar-${index}`}
+              className="map-fog-route-clearance-collar"
+              d={path}
+              pathLength={total}
+              fill="none"
+              stroke="#000"
+              strokeWidth={radius * 2}
+              strokeOpacity={opacity}
+              strokeDasharray={traveledRoute}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
           <path
             className="map-fog-route-clearance"
             d={path}

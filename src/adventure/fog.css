@@ -49,25 +49,9 @@
   transform-origin: center;
 }
 
-.map-fog-flow--slow.is-active {
-  animation: map-fog-drift-slow 86s ease-in-out infinite alternate;
-}
-
-.map-fog-flow--quick.is-active {
-  animation: map-fog-drift-quick 63s ease-in-out infinite alternate;
-}
-
-/* Keep dashboard fog static from first paint to avoid a costly pause on form focus. */
-.dashboard-grid .map-fog-flow.is-active {
-  animation-play-state: paused;
-}
-
-@keyframes map-fog-drift-slow {
-  to { transform: translate(30px, -18px) scale(1.015); }
-}
-
-@keyframes map-fog-drift-quick {
-  to { transform: translate(-20px, 13px) scale(1.02); }
+/* These full-map turbulence and blur layers stay static to avoid per-frame filter work. */
+.map-fog-flow.is-active {
+  animation: none;
 }
 
 .cartoon-cloud-shape {
