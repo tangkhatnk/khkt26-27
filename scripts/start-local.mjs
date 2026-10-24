@@ -114,13 +114,15 @@ async function waitForReady(child, addresses, port, path, label, isHealthy, requ
   }
 }
 
-function frontendEnvironment(environment, apiPort) {
+function frontendEnvironment(environment) {
   const env = { ...environment };
   for (const key of Object.keys(env)) {
     if (/^(GEMINI_API_KEY|OPENAI_API_KEY|JWT_SECRET|METRICS_TOKEN|DATABASE_URL|REDIS_URL|S3_|AWS_|GOOGLE_CLIENT_ID|APPLE_CLIENT_ID)/.test(key))
       delete env[key];
   }
-  env.VITE_API_URL = environment.VITE_API_URL?.trim() || `http://localhost:${apiPort}/api/v1`;
+  const apiUrl = environment.VITE_API_URL?.trim();
+  if (apiUrl) env.VITE_API_URL = apiUrl;
+  else delete env.VITE_API_URL;
   return env;
 }
 
@@ -192,7 +194,7 @@ export async function startLocalStack({
       console.log(`Starting Viễn Du web app on port ${ports.web}...`);
       const web = spawnChild(process.execPath, [viteCli, "--host", "localhost", "--port", String(ports.web), "--strictPort"], {
         cwd: root,
-        env: frontendEnvironment(environment, ports.api),
+        env: frontendEnvironment(environment),
         stdio: "inherit",
         detached: true,
         windowsHide: true,
@@ -208,7 +210,7 @@ export async function startLocalStack({
   }
 }
 
-async function main() {
+export async function runLocalStartup() {
   const controller = new AbortController();
   let signal = null;
   let ended = false;
@@ -258,7 +260,7 @@ async function main() {
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
-    await main();
+    await runLocalStartup();
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

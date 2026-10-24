@@ -1,0 +1,141 @@
+.duration-breaks {
+  margin: 1rem 0 0.7rem;
+  border: 1px solid #cbd9cb;
+  border-radius: 14px;
+  padding: 0.9rem 1rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+  background: #f8fbf6;
+  min-width: 0;
+}
+
+.duration-breaks legend {
+  padding: 0 0.35rem;
+  font-weight: 650;
+  color: #365b4b;
+}
+
+.duration-break-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.duration-break-field {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #344b3e;
+}
+
+.duration-break-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #b9c9bb;
+  border-radius: 9px;
+  padding: 0.6rem 0.7rem;
+  background: #fff;
+  color: var(--ink, #26352d);
+  font: inherit;
+}
+
+.duration-break-field input:focus-visible {
+  outline: 3px solid #8ab7a0;
+  outline-offset: 2px;
+}
+
+.duration-break-field input:disabled {
+  background: #edf1ec;
+  color: #68766d;
+}
+
+.duration-break-field input[aria-invalid="true"] {
+  border-color: #a34837;
+}
+
+.duration-breaks > small {
+  display: block;
+  line-height: 1.5;
+  color: #59685e;
+}
+
+.duration-breaks .duration-error {
+  margin: 0;
+}
+
+.duration-total {
+  margin: 0.7rem 0 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #b7d2bd;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #edf7ed, #f3f8f0 65%, #eef5e8);
+  color: #294b3b;
+}
+
+.duration-total-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.duration-total-heading strong {
+  color: #246543;
+  font-size: 1.12rem;
+  white-space: nowrap;
+}
+
+.duration-total-summary {
+  min-width: 0;
+}
+
+.duration-total-detail {
+  margin: 0.25rem 0 0;
+  color: #53665a;
+  font-size: 0.84rem;
+}
+
+.duration-total-explanation {
+  margin: 0.25rem 0 0;
+  color: #53665a;
+  font-size: 0.84rem;
+}
+
+.duration-details {
+  margin: 0.7rem 0 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid #d3e2d4;
+}
+
+.duration-details summary {
+  color: #365b4b;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.55;
+  cursor: pointer;
+}
+
+.duration-details summary:focus-visible {
+  outline: 3px solid #8ab7a0;
+  outline-offset: 2px;
+}
+
+.duration-timeline {
+  margin: 0.55rem 0 0;
+  color: #365b4b;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.duration-total-invalid {
+  margin: 0;
+  color: #80513d;
+  line-height: 1.5;
+}

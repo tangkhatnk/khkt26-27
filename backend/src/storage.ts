@@ -15,6 +15,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { Document } from "@prisma/client";
 import { config } from "./config.js";
+import { ApiError } from "./errors.js";
 export const s3 = new S3Client({
   region: config.S3_REGION,
   endpoint: config.S3_ENDPOINT,
@@ -41,8 +42,11 @@ const signingClient = config.S3_PUBLIC_ENDPOINT
           : undefined,
     })
   : s3;
-export const uploadFile = (key: string, body: Buffer, mime: string) =>
-  config.STORAGE_DRIVER === "local"
+const disabledStorageError = () => new ApiError(503, "document-storage-disabled",
+  "Máy chủ chưa bật lưu tệp. Bạn vẫn có thể nhập tài liệu trực tiếp trên web để tạo quiz.");
+export const uploadFile = async (key: string, body: Buffer, mime: string) => {
+  if (config.STORAGE_DRIVER === "disabled") throw disabledStorageError();
+  return config.STORAGE_DRIVER === "local"
     ? localUpload(key, body)
     : s3.send(
         new PutObjectCommand({
@@ -52,15 +56,21 @@ export const uploadFile = (key: string, body: Buffer, mime: string) =>
           ContentType: mime,
         }),
       );
-export const deleteFile = (key: string) =>
-  config.STORAGE_DRIVER === "local"
+};
+export const deleteFile = async (key: string) => {
+  if (config.STORAGE_DRIVER === "disabled") throw disabledStorageError();
+  return config.STORAGE_DRIVER === "local"
     ? localDelete(key)
     : s3.send(new DeleteObjectCommand({ Bucket: config.S3_BUCKET, Key: key }));
-export const storageHealth = () =>
-  config.STORAGE_DRIVER === "local"
+};
+export const storageHealth = async () => {
+  if (config.STORAGE_DRIVER === "disabled") return { status: "disabled" };
+  return config.STORAGE_DRIVER === "local"
     ? localHealth()
     : s3.send(new HeadBucketCommand({ Bucket: config.S3_BUCKET }));
+};
 export async function documentDto(doc: Document) {
+  if (config.STORAGE_DRIVER === "disabled") throw disabledStorageError();
   const url =
     config.STORAGE_DRIVER === "local"
       ? localUrl(doc.id)
@@ -83,6 +93,7 @@ export async function documentDto(doc: Document) {
   };
 }
 export async function readFile(key: string) {
+  if (config.STORAGE_DRIVER === "disabled") throw disabledStorageError();
   if (config.STORAGE_DRIVER === "local") return localRead(key);
   const result = await s3.send(
     new GetObjectCommand({ Bucket: config.S3_BUCKET, Key: key }),

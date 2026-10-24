@@ -47,8 +47,11 @@ else {
       }
       const result = await net.fetch(pathToFileURL(file).toString());
       const headers = new Headers(result.headers);
-      // Module workers require a JavaScript MIME type on the custom protocol.
-      if (extname(file) === ".mjs") headers.set("Content-Type", "text/javascript; charset=utf-8");
+      // PDF/OCR workers and WebAssembly use the same sandboxed app origin.
+      const extension = extname(file).toLowerCase();
+      if (extension === ".mjs" || extension === ".js")
+        headers.set("Content-Type", "text/javascript; charset=utf-8");
+      if (extension === ".wasm") headers.set("Content-Type", "application/wasm");
       headers.set("Content-Security-Policy", buildContentSecurityPolicy(apiOrigin));
       return new Response(result.body, { status: result.status, headers });
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { experimentRecord, publicExperiment, experimentCsv } from "../src/experiments.js";
+import { experimentRecord, experimentCsv } from "../src/experiments.js";
 import type { Session } from "../src/adventure/domain.js";
 
 const session: Session = {
@@ -26,21 +26,118 @@ describe("public experiment projections", () => {
     expect(experimentRecord({ ...session, ended: 31000 }, session.userId, "secret", null))
       .toMatchObject({ completed: false, elapsedSeconds: 30, completionPercent: null });
   });
-  it("only exposes explicitly selected public columns even if database row has private extras", () => {
-    const row = { id: "public-id", tester_code: "T-1234567890", topic: "biology", target_seconds: 60,
-      elapsed_seconds: 60, focused_seconds: 40, distractions: 1, completion_percent: 75,
-      completed: true, quiz_score: 2, quiz_total: 3, recorded_at: new Date(61000),
-      published_at: new Date(71000), user_id: "secret-user", session_id: "secret-session", email: "secret@example.com" };
-    const dto = publicExperiment(row);
-    expect(dto).toMatchObject({ id: "public-id", focusedSeconds: 40, quizScore: 2 });
-    for (const secret of ["secret-user", "secret-session", "secret@example.com"]) expect(JSON.stringify(dto)).not.toContain(secret);
-    const csv = experimentCsv([dto]);
+  it("keeps private goals out of the public CSV and escapes formula-leading topics", () => {
+    const record = experimentRecord({ ...session, topic: "=1+1" }, session.userId, "server-secret", null);
+    const csv = experimentCsv([{ ...record, publishedAt: record.recordedAt }]);
     expect(csv).toContain("tester_code");
-    expect(csv).toContain("T-1234567890");
-    expect(csv).not.toContain("secret");
-    for (const topic of ["=1+1", "\t=1+1", "\r\n@SUM(1)", "  +SUM(1)"]) {
-      const injected = experimentCsv([{ ...dto, topic }]);
-      expect(injected).toContain('"\'');
-    }
+    expect(csv).toContain("T-");
+    expect(csv).not.toContain(session.goal);
+    expect(csv).not.toContain("goal_summary");
+    expect(csv).toContain("'=");
+  });
+});
+
+describe("public trip history projections", () => {
+  it("derives stable tester and unique per-trip pseudonyms without exposing source IDs", () => {
+    const record = experimentRecord(session, session.userId, "server-secret", null);
+    const otherTrip = experimentRecord({ ...session, id: "c0d3e52c-08e6-4f36-a33e-004c26c90b47" }, session.userId, "server-secret", null);
+
+    expect(record).toMatchObject({
+      topic: "biology", targetSeconds: 60, elapsedSeconds: 60, focusedSeconds: 40,
+      distractions: 1, completed: true, quizScore: 2, quizTotal: 3,
+      startedAt: "1970-01-01T00:00:01.000Z", endedAt: "1970-01-01T00:01:01.000Z",
+      recordedAt: "1970-01-01T00:01:01.000Z",
+    });
+    expect(record.id).toMatch(/^[a-f0-9]{64}$/);
+    expect(record.tripCode).toBe(`V-${record.id.slice(0, 12).toUpperCase()}`);
+    expect(record.tripCode).toMatch(/^V-[A-F0-9]{12}$/);
+    expect(record.testerCode).toMatch(/^T-[A-F0-9]{10}$/);
+    expect(otherTrip.id).not.toBe(record.id);
+    expect(otherTrip.tripCode).not.toBe(record.tripCode);
+    expect(otherTrip.testerCode).toBe(record.testerCode);
+    for (const privateValue of [session.id, session.userId, "owner@example.com"])
+      expect(JSON.stringify(record)).not.toContain(privateValue);
+    expect(JSON.stringify(record)).not.toContain(session.goal);
+    expect(record).not.toHaveProperty("goalSummary");
+  });
+
+  it("keeps early-ended timer results incomplete and guards CSV formula cells", () => {
+    const record = experimentRecord({
+      ...session,
+      goal: "=HYPERLINK(\"https://example.invalid\",\"open\")",
+      ended: 31000,
+      quiz: undefined,
+    }, session.userId, "server-secret", null);
+    expect(record).toMatchObject({ elapsedSeconds: 30, completed: false, quizScore: null, quizTotal: null });
+
+    const csv = experimentCsv([{ ...record, publishedAt: record.recordedAt }]);
+    expect(csv).toContain("trip_code");
+    expect(csv).not.toContain("goal_summary");
+    expect(csv).toContain("started_at");
+    expect(csv).toContain("ended_at");
+    expect(csv).toContain("target_seconds");
+    expect(csv).toContain(record.tripCode);
+    expect(csv).not.toContain("HYPERLINK");
+    expect(csv).not.toContain(session.id);
+    expect(csv).not.toContain(session.userId);
+  });
+
+  it("records planned rest separately and completes against study wallbudget", () => {
+    const completed = experimentRecord({
+      ...session,
+      started: 1000,
+      ended: 661000,
+      target: 600,
+      breakPlan: { count: 1, seconds: 60 },
+      segments: [
+        { start: 1000, end: 301000, kind: "focus" },
+        { start: 301000, end: 361000, kind: "break" },
+        { start: 361000, end: 661000, kind: "focus" },
+      ],
+      seconds: 600,
+    }, session.userId, "server-secret", null);
+    const early = experimentRecord({
+      ...session,
+      started: 1000,
+      ended: 331000,
+      target: 600,
+      breakPlan: { count: 1, seconds: 60 },
+      segments: [
+        { start: 1000, end: 301000, kind: "focus" },
+        { start: 301000, end: 331000, kind: "break" },
+      ],
+      seconds: 300,
+    }, session.userId, "server-secret", null);
+
+    expect(completed).toMatchObject({
+      elapsedSeconds: 660,
+      studyElapsedSeconds: 600,
+      breakSeconds: 60,
+      plannedBreakSeconds: 60,
+      completed: true,
+    });
+    expect(early).toMatchObject({
+      elapsedSeconds: 330,
+      studyElapsedSeconds: 300,
+      breakSeconds: 30,
+      plannedBreakSeconds: 60,
+      completed: false,
+    });
+    const csv = experimentCsv([{ ...completed, publishedAt: completed.recordedAt }]);
+    expect(csv).toContain("study_elapsed_seconds");
+    expect(csv).toContain("planned_break_seconds");
+    expect(csv).toContain("break_seconds");
+  });
+
+  it("publishes only the coarse device category and labels legacy records as missing", () => {
+    const current = experimentRecord({ ...session, deviceCategory: "tablet" }, session.userId, "server-secret", null);
+    const legacy = experimentRecord(session, session.userId, "server-secret", null);
+
+    expect(current.deviceCategory).toBe("tablet");
+    expect(legacy.deviceCategory).toBeNull();
+    expect(JSON.stringify(current)).not.toContain("userAgent");
+    const csv = experimentCsv([{ ...current, publishedAt: current.recordedAt }]);
+    expect(csv).toContain("device_category");
+    expect(csv).toContain('"tablet"');
   });
 });

@@ -1,0 +1,50 @@
+.study-notes-input {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 20px 0;
+}
+
+.study-notes-input__intro {
+  display: grid;
+  gap: 5px;
+}
+
+.study-notes-input .study-notes-input__intro h3 {
+  margin: 0;
+}
+
+.study-notes-input .study-notes-input__intro p,
+.study-notes-input .study-notes-input__help {
+  margin: 0;
+  color: #6d756c;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.study-notes-input .study-notes-input__intro .study-notes-input__example {
+  color: #526858;
+}
+
+.study-notes-input .study-notes-input__field {
+  display: grid;
+  gap: 6px;
+}
+
+.study-notes-input__help {
+  padding: 10px 12px;
+  background: #f3efe6;
+  border-left: 3px solid #bd6b46;
+  border-radius: 0 8px 8px 0;
+}
+
+.study-notes-input textarea {
+  width: 100%;
+}
+
+@media (max-width: 520px) {
+  .study-notes-input {
+    gap: 10px;
+    margin: 16px 0;
+  }
+}

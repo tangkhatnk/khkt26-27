@@ -1,0 +1,86 @@
+name: Enhancement
+description: Propose a product or engineering improvement
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the problem or user need. Avoid prescribing a large implementation before the desired behavior is clear.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Web UI / UX
+        - Focus / session
+        - Quiz / learning journal
+        - Material import / OCR
+        - Authentication / sync
+        - Groups / journey
+        - Admin / experiment history
+        - Backend / API
+        - Desktop / Electron
+        - Build / CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or user need
+      description: What limitation, friction, or unmet need should be addressed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired behavior
+      description: Describe the observable outcome, not an implementation transcript.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why this matters
+      description: Explain the user/product/engineering value briefly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the conditions that should be true when the work is complete.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: Optional. State nearby work that is intentionally out of scope.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Relevant existing behavior
+      description: Optional links, screenshots, code paths, or related issues.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched for an existing issue before opening this one.
+          required: true
+        - label: I removed secrets, credentials, private study materials, and personal data from this issue.
+          required: true

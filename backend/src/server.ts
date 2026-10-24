@@ -26,6 +26,11 @@ async function start() {
     logStep("0.1. Loading backend modules...");
     const { buildApp } = await import("./app.js");
     app = await buildApp({ onStartupStep: logStep });
+    if (config.WEB_DIST_DIR) {
+      logStep("2.5. Registering the built Viễn Du web app...");
+      const { registerWebAssets } = await import("./webAssets.js");
+      await registerWebAssets(app, config.WEB_DIST_DIR);
+    }
     logStep(`3. Starting Fastify server on ${config.HOST}:${config.PORT}...`);
     const address = await app.listen({ port: config.PORT, host: config.HOST });
     console.log(`Server is running on port ${config.PORT}: ${address}`);

@@ -70,6 +70,63 @@ describe("API account boundaries", () => {
     await expect(api.post("/auth/register", {}, false)).rejects.toThrow(/Email.*đăng ký.*đăng nhập/);
   });
 
+  it("reports a plain-text gateway failure as API unavailable without exposing its body", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("Bad Gateway from local proxy", {
+      status: 502,
+      headers: { "Content-Type": "text/plain" },
+    }));
+    const error = await api.post("/auth/login", {}, false).catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(api.ApiError);
+    expect(error).toMatchObject({ status: 502 });
+    expect((error as Error).message).toMatch(/không khả dụng.*502.*thử lại/i);
+    expect((error as Error).message).not.toContain("Bad Gateway");
+  });
+
+  it("keeps a null JSON 401 refresh envelope on the authentication error path", async () => {
+    await api.acceptTokens(tokens("old"));
+    const expired = vi.fn();
+    api.setExpiredHandler(expired);
+    fetchMock.mockResolvedValueOnce(response(null, 401));
+
+    const error = await api.restoreTokens().catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(api.ApiError);
+    expect(error).toMatchObject({ status: 401 });
+    expect(storage.value).toBeNull();
+    expect(expired).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a successful non-JSON response distinct from an unavailable API", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("<html>unexpected</html>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    }));
+    const error = await api.post("/auth/login", {}, false).catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(api.ApiError);
+    expect(error).toMatchObject({ status: 200 });
+    expect((error as Error).message).toBe("Máy chủ trả về dữ liệu không hợp lệ.");
+  });
+
+  it("preserves JSON problem details when an API request fails", async () => {
+    fetchMock.mockResolvedValueOnce(response({ detail: "Invalid email or password" }, 401));
+    const error = await api.post("/auth/login", {}, false).catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(api.ApiError);
+    expect(error).toMatchObject({ status: 401 });
+    expect((error as Error).message).toBe("Invalid email or password");
+  });
+
+  it("falls back safely for a malformed registration error envelope", async () => {
+    fetchMock.mockResolvedValueOnce(response({ detail: null, errors: [null] }, 400));
+    const error = await api.post("/auth/register", {}, false).catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(api.ApiError);
+    expect(error).toMatchObject({ status: 400 });
+    expect((error as Error).message).toBe("Yêu cầu thất bại.");
+  });
+
   it("does not overwrite a new login with an old refresh response", async () => {
     await api.acceptTokens(tokens("old"));
     const pending = deferred<Response>();

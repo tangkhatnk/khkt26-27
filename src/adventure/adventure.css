@@ -8,20 +8,14 @@
 .journey-view {
   min-width: 0;
 }
-.camera-switch {
-  padding: 12px 16px;
-  margin: 0;
-  flex-wrap: wrap;
-}
-.adventure .camera-switch button {
-  padding: 8px 14px;
-  font-size: 13px;
-}
 .adventure .overhead-map {
   padding: 18px;
   margin: 0;
   overflow: hidden;
   border-radius: 20px;
+  border: 1px solid #e5dac0;
+  background: linear-gradient(145deg, #fff9e7, #f3eedc 72%);
+  box-shadow: 0 12px 34px #556a4820, inset 0 1px #fffdf1;
 }
 .overhead-toolbar {
   display: flex;
@@ -60,14 +54,27 @@
 .overhead-viewport {
   overflow: auto;
   border-radius: 16px;
-  max-height: 620px;
+  max-height: min(55vh, 520px);
+  border: 1px solid #d4c7a8;
+  background: #d8e8b7;
+  box-shadow: inset 0 2px 8px #65754d22, 0 5px 13px #605c3920;
   scrollbar-color: #91ad8d #e6ebdb;
   scrollbar-width: thin;
 }
 .overhead-world {
   display: block;
   height: auto;
+  border-radius: 16px;
+  filter: saturate(1.05);
 }
+.map-rail-layer { pointer-events: none; }
+.map-rail-bed { opacity: .56; }
+.map-rail-sleepers { opacity: .92; }
+.map-rail-runner { opacity: .98; }
+.map-rail-progress { filter: drop-shadow(0 1px 1px #684b3b75); }
+.map-landmarks { filter: drop-shadow(0 3px 2px #53684438); }
+.map-engine { filter: drop-shadow(0 3px 2px #40583f45); }
+.map-station-marker { filter: drop-shadow(0 2px 1px #66533b45); }
 .overhead-region {
   fill: #66896e;
   font-size: 12px;
@@ -626,7 +633,7 @@ body,
   color: #8c8e7f;
 }
 .adventure textarea,
-.adventure input:not([type="radio"]),
+.adventure input:not([type="radio"]):not([type="checkbox"]),
 .adventure select {
   width: 100%;
   border: 1px solid #e0e3d9;
@@ -692,11 +699,42 @@ body,
   text-align: center;
   color: #9b9b89;
 }
+.boarding-preparation {
+  margin-top: 24px;
+  align-items: start;
+}
+.ticket-editor {
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 18px;
+}
+.ticket-editor > summary,
+.trip-rules > summary {
+  cursor: pointer;
+  color: #365b4b;
+  font-weight: 650;
+  line-height: 1.6;
+}
+.ticket-editor > summary:focus-visible,
+.trip-rules > summary:focus-visible {
+  outline: 3px solid #8ab7a0;
+  outline-offset: 4px;
+}
+.ticket-editor-fields {
+  display: grid;
+  gap: 16px;
+  padding-top: 20px;
+}
+.trip-rules[open] > summary {
+  margin-bottom: 12px;
+}
 .stat-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   margin: 23px 0 31px;
+}
+.summary-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .stat {
   display: flex;
@@ -902,6 +940,10 @@ body,
   color: #7d927d;
   margin: 12px;
 }
+.focus-phase-label { text-align: center; color: #355e4a; font-size: 13px; font-weight: 700; margin: 0 20px 8px; }
+.summary-arrival { max-width: 1000px; margin: 0 auto 24px; }
+.focus-next { text-align: center; color: #355e4a; font-size: 13px; margin: 10px 20px; line-height: 1.6; }
+.focus-plan-total { text-align: center; margin: 12px 24px 16px; padding: 10px 14px; color: #355342; background: #e2eadd; border-radius: 10px; font-size: 12px; line-height: 1.6; }
 .focus-controls {
   padding: 24px;
   display: flex;
@@ -1153,6 +1195,91 @@ body,
   padding: 0 8px;
   font-size: 14px;
 }
+.quiz-panel {
+  margin-top: 18px;
+  padding-top: 4px;
+}
+.quiz-panel-heading h2 {
+  margin: 2px 0 8px;
+}
+.quiz-panel > p,
+.quiz-result > p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.quiz-count-label {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  gap: 12px;
+  margin: 8px 14px 8px 0;
+  font-size: 13px;
+}
+.departure-settings label.quiz-count-label {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+.adventure .quiz-count-label input:not([type="radio"]):not([type="checkbox"]) {
+  flex-shrink: 0;
+  width: 90px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: white;
+  color: var(--ink);
+}
+.quiz-replace-hint,
+.quiz-error {
+  font-size: 12px !important;
+}
+.quiz-error {
+  color: #a34837;
+}
+.quiz-result {
+  border: 1px solid #dce3d6;
+  border-radius: 12px;
+  background: #f6f8f2;
+  padding: 18px;
+}
+.quiz-result h3 {
+  margin-top: 0;
+}
+.quiz-result h4 {
+  margin-bottom: 4px;
+}
+.quiz-result li {
+  margin: 6px 0;
+}
+.quiz-feedback-list {
+  padding-left: 24px;
+}
+.quiz-answer-correct {
+  color: #377566;
+}
+.quiz-answer-wrong {
+  color: #a34837;
+}
+.session-row-content {
+  min-width: 0;
+  flex: 1;
+}
+.session-analysis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.session-analysis small {
+  flex-basis: 100%;
+  line-height: 1.45;
+}
 .answer {
   display: flex;
   align-items: center;
@@ -1303,6 +1430,9 @@ body,
   .stat-row {
     gap: 10px;
   }
+  .summary-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .stat {
     padding: 14px;
   }
@@ -1432,6 +1562,9 @@ body,
   .stat-row {
     gap: 8px;
   }
+  .summary-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .stat {
     padding: 11px 8px;
   }
@@ -1487,93 +1620,8 @@ body,
     animation: none !important;
   }
 }
-/* Cartoon motion uses only transform/opacity; canvas owns the 3D world. */
-.scene-3d {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  border-radius: 16px;
-  background: linear-gradient(145deg, #d7eced, #bde0d4);
-  aspect-ratio: 1.95;
-  min-height: 220px;
-}
-.train-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: pan-y;
-}
-.scene-vignette {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse at 50% 45%,
-    transparent 50%,
-    #6b977518 100%
-  );
-}
-.adventure button.scene-motion {
-  position: absolute;
-  bottom: 13px;
-  right: 14px;
-  border: 1px solid #ffffff70;
-  background: #fff9;
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  padding: 5px 10px;
-  color: #466457;
-  opacity: 0.55;
-}
-.adventure button.scene-motion:hover,
-.adventure button.scene-motion:focus-visible {
-  opacity: 1;
-  background: #fff;
-}
-.scene-fog-label {
-  position: absolute;
-  top: 45%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  padding: 10px 20px;
-  border-radius: 20px;
-  background: #f8fbf3c9;
-  color: #537264;
-  white-space: nowrap;
-  backdrop-filter: blur(8px);
-  font-size: 12px;
-}
-.exploration-fog {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(ellipse at 50% 60%, transparent var(--reveal-radius), #e5eeead1 calc(var(--reveal-radius) + 20%), #dbe7e3f7 100%);
-}
-.scene-exploration-label {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  right: 12px;
-  color: #39594a;
-  font-size: 12px;
-  text-align: center;
-}
-.hero-card > .scene-3d {
-  border-radius: 0;
-  margin-top: 0;
-  min-height: 270px;
-}
 .hero-label {
   pointer-events: none;
-}
-.focus-card > .scene-3d {
-  border-radius: 0;
-  aspect-ratio: 2.7;
-  min-height: 240px;
 }
 .view-entrance {
   animation: arrive-at-station 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
@@ -1669,19 +1717,6 @@ body,
   }
 }
 @media (max-width: 740px) {
-  .hero-card > .scene-3d {
-    min-height: 240px;
-  }
-  .scene-3d {
-    aspect-ratio: 1.75;
-  }
-  .focus-card > .scene-3d {
-    aspect-ratio: 1.8;
-    min-height: 220px;
-  }
-  .scene-motion span {
-    display: none;
-  }
   .hero-caption {
     padding-top: 22px;
   }
@@ -1707,18 +1742,44 @@ body {
   overflow-x: hidden;
 }
 
-.travel-scene { overflow: hidden; border-radius: 20px; background: #f4f6eb; text-align: left; }
+.travel-scene { overflow: hidden; border: 1px solid #d8ddc6; border-radius: 20px; background: linear-gradient(150deg, #f5f2dc, #dce9cc); box-shadow: 0 12px 32px #455b4220; text-align: left; }
 .travel-toolbar, .travel-caption { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 12px 16px; font-size: 12px; color: #617565; }
-.travel-world { display: block; width: 100%; height: auto; min-height: 190px; }
-.travel-landscape { animation: travel-landscape 55s linear infinite; }
+.travel-world { position: relative; display: block; width: 100%; height: auto; min-height: 210px; aspect-ratio: 900 / 420; }
+.travel-parallax-layer { animation-timing-function: linear; animation-iteration-count: infinite; }
+.travel-far-layer { animation-name: travel-far; animation-duration: 86s; }
+.travel-mid-layer { animation-name: travel-mid; animation-duration: 54s; }
+.travel-near-layer { animation-name: travel-near; animation-duration: 32s; }
+.travel-cloud-cover { animation-name: travel-cloud-drift; animation-duration: 70s; }
 .travel-track { animation: travel-track 1.6s linear infinite; }
-.travel-scene[data-moving="false"] .travel-landscape, .travel-scene[data-moving="false"] .travel-track { animation-play-state: paused; }
+.travel-train-motion { transform-box: fill-box; transform-origin: center; animation: travel-train-bob 2.6s ease-in-out infinite; }
+.travel-wheel { transform-box: fill-box; transform-origin: center; animation: travel-wheel-turn .9s linear infinite; }
+.train-steam-puff { fill: #fff8e5; opacity: 0; transform-box: fill-box; transform-origin: center; animation: travel-steam-rise 2.5s ease-out infinite; }
+.train-steam-puff.puff-two { animation-delay: .8s; }
+.train-steam-puff.puff-three { animation-delay: 1.55s; }
+.travel-scene[data-moving="false"] .travel-parallax-layer,
+.travel-scene[data-moving="false"] .travel-track,
+.travel-scene[data-moving="false"] .travel-train-motion,
+.travel-scene[data-moving="false"] .travel-wheel,
+.travel-scene[data-moving="false"] .train-steam-puff { animation-play-state: paused; }
 .travel-fog { transition: opacity 1s linear; }
 .travel-caption { background: #eef2e5; }
-@keyframes travel-landscape { to { transform: translateX(-900px); } }
+@keyframes travel-far { to { transform: translateX(-900px); } }
+@keyframes travel-mid { to { transform: translateX(-900px); } }
+@keyframes travel-near { to { transform: translateX(-900px); } }
+@keyframes travel-cloud-drift { to { transform: translateX(-900px); } }
 @keyframes travel-track { to { transform: translateX(-30px); } }
+@keyframes travel-train-bob {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-2px) rotate(.15deg); }
+}
+@keyframes travel-wheel-turn { to { transform: rotate(360deg); } }
+@keyframes travel-steam-rise {
+  0% { opacity: 0; transform: translateY(5px) scale(.7); }
+  28% { opacity: .78; }
+  100% { opacity: 0; transform: translateY(-13px) scale(1.16); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .travel-landscape, .travel-track { animation: none; }
+  .travel-parallax-layer, .travel-track, .travel-train-motion, .travel-wheel, .train-steam-puff { animation: none !important; }
   .travel-fog { transition: none; }
 }
 .experiment-table-wrap { overflow-x: auto; margin: 20px 0; border: 1px solid var(--line); border-radius: 12px; }
@@ -1728,3 +1789,20 @@ body {
 .experiment-table th { background: #eaf0e7; color: #30463f; }
 .experiment-export { display: inline-flex; align-items: center; padding: 12px 16px; border: 1px solid #d7e0d5; border-radius: 8px; color: #30463f; text-decoration: none; }
 .experiment-share { margin: 24px 0; }
+.experiment-goal { min-width: 220px; max-width: 340px; overflow-wrap: anywhere; }
+.experiment-results .page-heading { display: block; }
+.experiment-table time { white-space: nowrap; }
+.experiment-table td { vertical-align: top; }
+.material-progress { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #eef3e9; }
+.material-progress p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.material-progress progress { display: block; width: 100%; height: 12px; margin-bottom: 12px; accent-color: var(--green); }
+
+.material-source { padding: 1rem; margin: .8rem 0; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.material-source summary { cursor: pointer; font-weight: 650; margin-bottom: .75rem; overflow-wrap: anywhere; }
+.material-source label { display: grid; gap: .6rem; }
+.material-source textarea { width: 100%; line-height: 1.6; }
+.material-source .choice-row { flex-wrap: wrap; margin-top: .7rem; }
+.material-title { margin: .5rem 0 0; font-size: 16px; }
+.form .material-ai-option { flex-direction: row; align-items: flex-start; gap: .6rem; line-height: 1.5; }
+.adventure .material-ai-option input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 1px 0 0; padding: 0; flex: 0 0 18px; accent-color: var(--green); }
+.form #notes-help, .form #material-ai-help { margin-top: -8px; color: #596c60; line-height: 1.65; }

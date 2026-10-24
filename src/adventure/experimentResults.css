@@ -1,0 +1,307 @@
+.experiment-results .experiment-table-wrap {
+  max-width: 100%;
+  margin: 20px 0;
+  overflow-x: auto;
+  border: 1px solid #d8dfd4;
+  border-radius: 14px;
+  background: #fff;
+  scrollbar-width: thin;
+  scrollbar-color: #8da58e #edf1e9;
+}
+
+.experiment-results .experiment-table-wrap:focus-visible {
+  outline: 3px solid #d88a54;
+  outline-offset: 3px;
+}
+
+.experiment-results .experiment-table {
+  width: 100%;
+  min-width: 1020px;
+  border-collapse: collapse;
+  color: #30463f;
+  font-size: 13px;
+}
+
+.experiment-results .experiment-table caption {
+  padding: 14px 16px;
+  color: #30463f;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.experiment-results .experiment-table th,
+.experiment-results .experiment-table td {
+  padding: 13px 14px;
+  border-top: 1px solid #e1e7df;
+  text-align: left;
+  vertical-align: top;
+}
+
+.experiment-results .experiment-table th {
+  background: #edf3e9;
+  color: #355342;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.experiment-results .experiment-table tbody tr:nth-child(even) {
+  background: #fafbf8;
+}
+
+.experiment-results .experiment-table tbody tr:hover {
+  background: #f3f7ef;
+}
+
+.experiment-results .experiment-code-cell {
+  width: 230px;
+}
+
+.experiment-results .experiment-trip-code {
+  display: inline-block;
+  max-width: 250px;
+  overflow-x: auto;
+  color: #2e4b3b;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  vertical-align: bottom;
+  scrollbar-width: thin;
+}
+
+.experiment-results .experiment-started-cell time {
+  display: grid;
+  gap: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.experiment-results .experiment-started-cell small {
+  color: #5d6c60;
+  font-size: 11px;
+}
+
+.experiment-results .experiment-topic {
+  width: 180px;
+  max-width: 210px;
+  overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-topic strong {
+  display: block;
+  line-height: 1.5;
+}
+
+.experiment-results .experiment-completion-summary {
+  display: grid;
+  min-width: 170px;
+  gap: 4px;
+  line-height: 1.45;
+}
+
+.experiment-results .experiment-time-summary,
+.experiment-results .experiment-rest-summary {
+  display: grid;
+  min-width: 170px;
+  gap: 4px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.experiment-results .experiment-time-summary strong,
+.experiment-results .experiment-rest-summary strong {
+  color: #2d4f3d;
+  white-space: nowrap;
+}
+
+.experiment-results .experiment-run-card__meta {
+  color: #5d6c60;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.experiment-results .experiment-quiz-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.experiment-results .experiment-quiz-badge--scored {
+  background: #e3f0e4;
+  color: #2f6242;
+}
+
+.experiment-results .experiment-quiz-badge--pending {
+  background: #f0f1eb;
+  color: #647064;
+}
+
+.experiment-results .experiment-details {
+  margin-top: 8px;
+  color: #455a4b;
+  font-size: 11px;
+}
+
+.experiment-results .experiment-details summary {
+  width: fit-content;
+  color: #426b52;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.experiment-results .experiment-details summary:focus-visible {
+  outline: 2px solid #d88a54;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.experiment-results .experiment-details dl {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  min-width: 190px;
+}
+
+.experiment-results .experiment-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) 1fr;
+  gap: 9px;
+  align-items: baseline;
+}
+
+.experiment-results .experiment-details dt {
+  color: #5d6c60;
+}
+
+.experiment-results .experiment-details dd {
+  min-width: 0;
+  margin: 0;
+  color: #344b3e;
+  overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-details dd code {
+  overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-run-cards {
+  display: none;
+}
+
+.experiment-results .experiment-run-card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid #d8dfd4;
+  border-radius: 14px;
+  background: #fff;
+  color: #30463f;
+  box-shadow: 0 5px 16px #263b3210;
+}
+
+.experiment-results .experiment-run-card__header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.experiment-results .experiment-run-card__header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.experiment-results .experiment-run-card__header time {
+  flex: 0 0 auto;
+  color: #4d6152;
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.experiment-results .experiment-run-card__header time small {
+  display: block;
+  color: #5d6c60;
+}
+
+.experiment-results .experiment-run-card h3 {
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-run-card__topic {
+  margin: 3px 0 14px;
+  color: #68786b;
+  font-size: 12px;
+}
+
+.experiment-results .experiment-run-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  padding-top: 13px;
+  border-top: 1px solid #e1e7df;
+}
+
+.experiment-results .experiment-run-card__metrics > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.experiment-results .experiment-run-card__metric-label {
+  color: #5d6c60;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.experiment-results .experiment-run-card .experiment-time-summary,
+.experiment-results .experiment-run-card .experiment-rest-summary {
+  min-width: 0;
+}
+
+.experiment-results .experiment-run-card .experiment-trip-code {
+  max-width: 100%;
+}
+
+.experiment-results .experiment-run-card .experiment-details {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e7df;
+}
+
+@media (max-width: 760px) {
+  .experiment-results .experiment-table-wrap {
+    display: none;
+  }
+
+  .experiment-results .experiment-run-cards {
+    display: grid;
+    gap: 12px;
+    margin: 18px 0;
+  }
+}
+
+@media (max-width: 390px) {
+  .experiment-results .experiment-run-card {
+    padding: 13px;
+  }
+
+  .experiment-results .experiment-run-card__metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

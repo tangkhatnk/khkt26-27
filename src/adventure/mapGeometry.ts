@@ -1,5 +1,6 @@
 type Point = readonly [number, number];
 export const stopIndices = [1, 3, 5, 7, 10];
+
 export function mapGeometry(branch: "mountain" | "coast" = "mountain") {
   const route: Point[] = [
     [35, 505],

@@ -1,0 +1,63 @@
+.boarding-preparation {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, .85fr);
+  gap: 24px;
+  margin: 28px 0;
+  align-items: start;
+}
+.boarding-preparation > .panel { min-width: 0; margin-bottom: 0; }
+.departure-settings { position: sticky; top: 24px; }
+.departure-intro { color: #66756b; line-height: 1.65; }
+.departure-source-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 5px; border-radius: 12px; background: #f0f1e9; }
+.departure-source-options button { padding: 11px 7px; font-size: 12px; border: 1px solid transparent; background: transparent; border-radius: 9px; }
+.departure-source-options button[aria-pressed="true"] { background: #fffdf7; border-color: #bccfbe; color: #28513c; box-shadow: 0 2px 6px #304c3410; }
+.departure-source-panel { min-width: 0; display: grid; gap: 14px; }
+.departure-source-panel[hidden] { display: none; }
+.departure-materials .study-notes-input { margin: 0; }
+.departure-materials .study-notes-input h3 { margin: 0; font-size: 17px; }
+.departure-materials .material-title { margin: 0; }
+.departure-settings .departure-companion-title { margin: 2px 0 0; font-size: 16px; }
+.departure-settings .choice-row { margin: 0; }
+.departure-settings .primary { width: 100%; }
+.departure-settings .ticket-editor-fields { gap: 14px; }
+.departure-settings .duration-presets { flex-wrap: wrap; }
+.departure-settings .departure-quiz-hint { display: block; margin: -4px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.material-formats summary { color: #52695a; cursor: pointer; font-size: 12px; }
+.material-formats p { margin: 10px 0 0; }
+.quick-topic-field { display: grid; gap: 8px; }
+.quick-topic-field .field-label { margin: 0; }
+.quick-topic-field small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.adventure .ticket-editor {
+  padding: 0;
+  border: 1px solid #adc8b9;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #f3f7ef;
+}
+.adventure .ticket-editor > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  list-style: none;
+  color: var(--ink);
+  background: #eaf1e5;
+}
+.ticket-editor > summary::-webkit-details-marker { display: none; }
+.adventure .ticket-editor > summary:hover { background: #e1eddc; }
+.adventure .ticket-editor > summary:focus-visible { outline-offset: -4px; }
+.ticket-editor-icon { display: grid; place-items: center; flex: 0 0 36px; height: 36px; border-radius: 10px; background: #fffdf4; color: #377566; font-size: 24px; }
+.ticket-editor-copy { display: grid; gap: 2px; min-width: 0; }
+.ticket-editor-copy strong { font-size: 15px; }
+.ticket-editor-copy small { color: var(--muted); font-size: 11px; font-weight: 400; }
+.ticket-editor-action { margin-left: auto; color: #36705e; font-size: 11px; white-space: nowrap; }
+.adventure .ticket-editor-fields { padding: 18px; }
+@media (max-width: 1100px) {
+  .boarding-preparation { grid-template-columns: minmax(0, 1fr); }
+  .departure-settings { position: static; }
+}
+@media (max-width: 520px) {
+  .boarding-preparation { gap: 18px; margin-top: 20px; }
+  .boarding-preparation > .panel { padding: 20px; }
+  .departure-source-options button { font-size: 11px; padding: 10px 4px; }
+}

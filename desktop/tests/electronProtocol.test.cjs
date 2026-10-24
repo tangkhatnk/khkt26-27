@@ -29,6 +29,9 @@ test('Electron serves its bundled shell with only the configured API origin in C
   writeFileSync(join(webDist, 'index.html'), 'bundled shell');
   writeFileSync(join(webDist, '..preview.png'), 'asset name beginning with two dots');
   writeFileSync(join(webDist, 'pdf.worker.min.mjs'), 'export const worker = true;');
+  mkdirSync(join(webDist, 'ocr'), { recursive: true });
+  writeFileSync(join(webDist, 'ocr', 'worker.min.js'), 'self.ocr = true;');
+  writeFileSync(join(webDist, 'ocr', 'engine.wasm'), Buffer.from([0, 97, 115, 109]));
   writeFileSync(
     join(webDist, 'desktop-config.json'),
     JSON.stringify({ apiOrigin: 'http://192.168.1.50:3000' }),
@@ -113,6 +116,13 @@ test('Electron serves its bundled shell with only the configured API origin in C
   const workerResponse = await protocolHandler({ url: 'viendu://app/pdf.worker.min.mjs', method: 'GET' });
   assert.match(workerResponse.headers.get('content-type'), /javascript/);
   assert.match(csp, /worker-src 'self' blob:/);
-  assert.equal(fetches.length, 3);
+  assert.match(csp, /script-src 'self' 'wasm-unsafe-eval'/);
+  assert.doesNotMatch(csp, /(?:^|\s)'unsafe-eval'/);
+  const ocrWorker = await protocolHandler({ url: 'viendu://app/ocr/worker.min.js', method: 'GET' });
+  assert.match(ocrWorker.headers.get('content-type'), /javascript/);
+  const wasm = await protocolHandler({ url: 'viendu://app/ocr/engine.wasm', method: 'GET' });
+  assert.equal(wasm.headers.get('content-type'), 'application/wasm');
+  assert.deepEqual([...new Uint8Array(await wasm.arrayBuffer())], [0, 97, 115, 109]);
+  assert.equal(fetches.length, 5);
   assert.match(fetches[1], /web-dist[\\/]index\.html/);
 });

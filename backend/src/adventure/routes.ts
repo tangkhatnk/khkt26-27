@@ -3,7 +3,9 @@ import type { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
-import { journey, person, settle, snapshot, type World } from "./domain.js";
+import { config } from "../config.js";
+import { tripIdentity } from "../experiments.js";
+import { DEVICE_CATEGORIES, journey, person, settle, snapshot, type World } from "./domain.js";
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 const text = z.string().trim().min(1).max(60);
@@ -15,6 +17,8 @@ const sessionSchema = z.object({
   started: z.number().int().nonnegative(),
   ended: z.number().int().nonnegative(),
   target: z.number().int().min(60).max(14400),
+  breakPlan: z.object({count:z.number().int().min(0).max(10),seconds:z.number().int().min(60).max(1800)}).strict().optional(),
+  deviceCategory: z.enum(DEVICE_CATEGORIES).optional(),
   distractions: z.number().int().min(0).max(10000).optional(),
   segments: z
     .array(
@@ -52,6 +56,18 @@ export function adventureRoutes(
       { timeout: 15000 },
     );
   const opts = { preHandler: authenticate };
+  app.post("/api/v1/adventure/trip-code", {
+    bodyLimit: 512,
+    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+  }, async req => {
+    const { id } = z.object({ id: z.uuid() }).strict().parse(req.body);
+    const authenticated = req.headers.authorization !== undefined;
+    if (authenticated) await authenticate(req);
+    const owner = authenticated ? req.userId : `guest:${id}`;
+    // Preview only: the same identity is used when the session is later saved.
+    // Nothing is published and no progress is awarded by issuing this code.
+    return { tripCode: tripIdentity(owner, id, config.JWT_SECRET).tripCode };
+  });
   app.get("/api/v1/adventure", opts, (req) =>
     atomic((w) => snapshot(w, req.userId, Date.now())),
   );
@@ -249,6 +265,24 @@ export function adventureRoutes(
       return snapshot(w, req.userId, Date.now());
     });
   });
+  app.post("/api/v1/adventure/guest-sessions", {
+    bodyLimit: 256 * 1024,
+    config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+  }, async req => {
+    const input = sessionSchema.parse(req.body);
+    const owner = `guest:${input.id}`;
+    return atomic(world => {
+      const prior = world.sessions[input.id];
+      if (prior && prior.userId !== owner)
+        throw new ApiError(409, "conflict", "Mã phiên đã được sử dụng.");
+      try {
+        const session = settle(world, { ...input, userId: owner, groupId: null }, Date.now());
+        return { tripCode: tripIdentity(session.userId, session.id, config.JWT_SECRET).tripCode };
+      } catch (error) {
+        throw new ApiError(400, "validation-error", error instanceof Error ? error.message : "Không lưu được phiên.");
+      }
+    });
+  });
   app.post("/api/v1/adventure/quiz", opts, async (req) => {
     const value = z
       .object({
@@ -261,7 +295,7 @@ export function adventureRoutes(
             }),
           )
           .min(1)
-          .max(10),
+          .max(30),
       })
       .parse(req.body);
     if (new Set(value.answers.map((a) => a.id)).size !== value.answers.length)
@@ -269,7 +303,8 @@ export function adventureRoutes(
     const questions = await db.quizQuestion.findMany({
       where: {
         id: { in: value.answers.map((a) => a.id) },
-        OR: [{ owner_id: null }, { owner_id: req.userId }],
+        owner_id: req.userId,
+        source: { in: ["gemini_generated", "ai_generated"] },
       },
     });
     if (questions.length !== value.answers.length)
@@ -286,10 +321,24 @@ export function adventureRoutes(
         );
       s.quiz ??= {
         score: value.answers.filter(
-          (a) =>
-            questions.find((q) => q.id === a.id)?.correct_index === a.selected,
+          (answer) =>
+            questions.find((question) => question.id === answer.id)?.correct_index === answer.selected,
         ).length,
         total: value.answers.length,
+        feedback: value.answers.map((answer) => {
+          const question = questions.find((item) => item.id === answer.id)!;
+          const options = z.array(z.string()).parse(question.options);
+          return {
+            questionId: question.id,
+            question: question.question,
+            options,
+            selected: answer.selected,
+            correctIndex: question.correct_index,
+            correct: question.correct_index === answer.selected,
+            explanation: question.explanation,
+            knowledgePoint: question.knowledge_point ?? question.question,
+          };
+        }),
       };
       return snapshot(w, req.userId, Date.now());
     });

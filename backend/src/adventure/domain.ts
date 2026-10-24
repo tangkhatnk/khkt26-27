@@ -1,4 +1,89 @@
+import type { QuizAssessment } from "./quizAssessment.js";
 export const RULES = "train-v1";
+export const DEVICE_CATEGORIES = ["pc", "ios", "android", "tablet", "unknown"] as const;
+export type DeviceCategory = (typeof DEVICE_CATEGORIES)[number];
+export type BreakPlan = { count: number; seconds: number };
+export const MAX_BREAK_COUNT = 10;
+export const MIN_BREAK_SECONDS = 60;
+export const MAX_BREAK_SECONDS = 1800;
+export type BreakWindow = { index: number; start: number; end: number };
+
+export function isValidBreakPlan(value: unknown, target: unknown): value is BreakPlan {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const plan = value as Record<string, unknown>;
+  return typeof target === "number" && Number.isSafeInteger(target) && target >= 60 &&
+    typeof plan.count === "number" && Number.isSafeInteger(plan.count) && plan.count >= 0 &&
+    plan.count <= MAX_BREAK_COUNT &&
+    typeof plan.seconds === "number" && Number.isSafeInteger(plan.seconds) && plan.seconds >= MIN_BREAK_SECONDS &&
+    plan.seconds <= MAX_BREAK_SECONDS && plan.count < Math.floor(target / 60);
+}
+
+export function totalDurationSeconds(target: number, plan?: BreakPlan): number {
+  const safeTarget = Number.isFinite(target) && target > 0 ? target : 0;
+  return safeTarget + (plan && isValidBreakPlan(plan, safeTarget) ? plan.count * plan.seconds : 0);
+}
+
+export function breakWindows(started: number, target: number, plan?: BreakPlan): BreakWindow[] {
+  if (!Number.isFinite(started) || !plan || !isValidBreakPlan(plan, target)) return [];
+  return Array.from({ length: plan.count }, (_, offset) => {
+    const index = offset + 1;
+    const studyOffset = Math.round((index * target * 1000) / (plan.count + 1));
+    const start = started + studyOffset + offset * plan.seconds * 1000;
+    return { index, start, end: start + plan.seconds * 1000 };
+  });
+}
+
+export function breakElapsedSeconds(
+  started: number,
+  target: number,
+  plan: BreakPlan | undefined,
+  at: number,
+): number {
+  if (!Number.isFinite(at)) return 0;
+  return breakWindows(started, target, plan).reduce(
+    (sum, window) => sum + Math.max(0, Math.min(at, window.end) - window.start) / 1000,
+    0,
+  );
+}
+
+export function studyElapsedSeconds(
+  started: number,
+  target: number,
+  plan: BreakPlan | undefined,
+  at: number,
+): number {
+  if (!Number.isFinite(started) || !Number.isFinite(at) || !Number.isFinite(target)) return 0;
+  const wallSeconds = Math.max(0, Math.max(at, started) - started) / 1000;
+  return Math.min(target, Math.max(0, wallSeconds - breakElapsedSeconds(started, target, plan, at)));
+}
+
+export function breakWindowAt(
+  started: number,
+  target: number,
+  plan: BreakPlan | undefined,
+  at: number,
+): BreakWindow | null {
+  return breakWindows(started, target, plan).find((window) => at >= window.start && at < window.end) ?? null;
+}
+
+export function breakStatus(
+  started: number,
+  target: number,
+  plan: BreakPlan | undefined,
+  at: number,
+) {
+  const window = breakWindowAt(started, target, plan, at);
+  return window
+    ? {
+        index: window.index,
+        count: plan!.count,
+        startedAt: window.start,
+        endsAt: window.end,
+        remainingSeconds: Math.max(0, Math.ceil((window.end - at) / 1000)),
+      }
+    : null;
+}
+
 export type Segment = {
   start: number;
   end: number;
@@ -49,7 +134,11 @@ export type Session = {
   rules: string;
   /** Distinct departures from focus, including departures shorter than one millisecond. */
   distractions?: number;
-  quiz?: { score: number; total: number };
+  /** Coarse category captured when the trip began; absent on legacy trips. */
+  deviceCategory?: DeviceCategory;
+  /** Fixed wall-clock rest schedule; absent on legacy trips. */
+  breakPlan?: BreakPlan;
+  quiz?: QuizAssessment;
 };
 export type World = {
   revision?: number;
@@ -172,6 +261,40 @@ export function settle(
     throw new Error(
       "Thời gian phiên không hợp lệ (đồng bộ trong 30 ngày từ lúc bắt đầu).",
     );
+  if (input.breakPlan !== undefined) {
+    if (!isValidBreakPlan(input.breakPlan, input.target))
+      throw new Error("Kế hoạch nghỉ không hợp lệ.");
+    const deadline = input.started + totalDurationSeconds(input.target, input.breakPlan) * 1000;
+    if (input.ended > deadline)
+      throw new Error("Thời gian phiên vượt thời lượng nghỉ đã chọn.");
+    const windows = breakWindows(input.started, input.target, input.breakPlan);
+    for (const segment of input.segments) {
+      if (segment.kind === "break") {
+        if (!windows.some(
+          (window) => segment.start >= window.start && segment.end <= window.end,
+        )) throw new Error("Khoảng nghỉ không theo kế hoạch đã chọn.");
+      } else if (windows.some(
+        (window) => segment.start < window.end && segment.end > window.start,
+      )) {
+        throw new Error("Khoảng học hoặc rời phiên trùng thời gian nghỉ theo kế hoạch.");
+      }
+    }
+    const breakSegments = input.segments.filter((segment) => segment.kind === "break")
+      .slice().sort((a, b) => a.start - b.start);
+    for (const window of windows) {
+      const requiredEnd = Math.min(input.ended, window.end);
+      if (requiredEnd <= window.start) continue;
+      let coveredUntil = window.start;
+      for (const segment of breakSegments) {
+        if (segment.end <= coveredUntil) continue;
+        if (segment.start > coveredUntil) break;
+        coveredUntil = Math.min(requiredEnd, segment.end);
+        if (coveredUntil >= requiredEnd) break;
+      }
+      if (coveredUntil < requiredEnd)
+        throw new Error("Khoảng nghỉ theo kế hoạch chưa được ghi nhận.");
+    }
+  }
   if (
     input.distractions !== undefined &&
     (!Number.isSafeInteger(input.distractions) || input.distractions < 0)

@@ -1,12 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as focus from '../src/adventure/focus.ts';
+import { isDeviceClockBehind } from '../src/adventure/focus.ts';
 
 const { tick, depart, returnFromBackground, leaveFocusView, restore, focused, elapsedSeconds, sessionEndAt } = focus;
 const trip = (target = 600) => ({
   id: 'test', owner: 'guest', goal: 'Read biology', topic: 'biology', document: '',
   target, groupId: null, started: 1000, lastAt: 1000, segments: [], state: 'focus',
   reconnect: 0, distractions: 0,
+});
+
+test('scene timing exposes study distance and fixed rest anchors while retaining wall duration', () => {
+  const scheduled = { ...trip(120), breakPlan: { count: 1, seconds: 60 } };
+  const start = focus.tripSceneTiming(scheduled, 1000);
+  const breakStart = focus.tripSceneTiming(scheduled, 61000);
+  const breakMiddle = focus.tripSceneTiming(scheduled, 91000);
+  const afterBreak = focus.tripSceneTiming(scheduled, 121000);
+  const end = focus.tripSceneTiming(scheduled, 181000);
+
+  assert.equal(start.elapsedSeconds, 0);
+  assert.equal(start.remainingSeconds, 180);
+  assert.equal(start.elapsedStudySeconds, 0);
+  assert.equal(start.targetStudySeconds, 120);
+  assert.deepEqual(start.restAnchors, [{ index: 1, count: 1, elapsedStudySeconds: 60 }]);
+
+  assert.equal(breakStart.elapsedSeconds, 60);
+  assert.equal(breakStart.remainingSeconds, 120);
+  assert.equal(breakStart.elapsedStudySeconds, 60);
+  assert.equal(breakMiddle.elapsedStudySeconds, 60);
+  assert.equal(afterBreak.elapsedStudySeconds, 60);
+  assert.equal(end.elapsedStudySeconds, 120);
+  assert.equal(end.remainingSeconds, 0);
+
+  const beforeTrip = focus.tripSceneTiming(scheduled, 0);
+  assert.equal(beforeTrip.elapsedStudySeconds, 0);
+  assert.equal(beforeTrip.remainingSeconds, 180);
 });
 
 test('blur, visibility, pagehide, and route departure record one distraction', () => {
@@ -25,6 +53,15 @@ test('blur, visibility, pagehide, and route departure record one distraction', (
     ['focus', 1000, 11000],
     ['distraction', 11000, 31000],
   ]);
+});
+
+test('captured device category survives focus ticks, departure, and reload restoration', () => {
+  const captured = { ...trip(), deviceCategory: 'ios' };
+  const saved = tick(depart(captured, 11000), 21000);
+  const restored = restore(saved, 61000);
+
+  assert.equal(saved.deviceCategory, 'ios');
+  assert.equal(restored.deviceCategory, 'ios');
 });
 
 test('the wall clock continues while away while focused time remains separate', () => {
@@ -135,4 +172,28 @@ test('clock rollback does not create negative time or clear an active departure'
   assert.equal(back.distractions, 1);
   assert.equal(focused(back), 10);
   assert.equal(elapsedSeconds(back, 5000), 10);
+});
+
+test('a current clock sample clears the stale warning after a normal checkpoint', () => {
+  const checkpointed = tick(trip(), 5005);
+  const staleRenderSample = 5000;
+  const clockSamples = [5006, 5004, 5006];
+  let clockReads = 0;
+  const readClock = () => clockSamples[clockReads++];
+
+  assert.equal(staleRenderSample < checkpointed.lastAt, true);
+  assert.equal(isDeviceClockBehind(checkpointed.lastAt, readClock), false);
+  assert.equal(clockReads, 1);
+  assert.equal(isDeviceClockBehind(checkpointed.lastAt, readClock), true);
+  assert.equal(clockReads, 2);
+  assert.equal(isDeviceClockBehind(checkpointed.lastAt, readClock), false);
+  assert.equal(clockReads, 3);
+});
+
+test('normal focus return timestamps are not mistaken for a clock rollback', () => {
+  const away = depart(trip(), 5000);
+  const returned = returnFromBackground(away, 10005);
+
+  assert.equal(returned.lastAt, 10005);
+  assert.equal(isDeviceClockBehind(returned.lastAt, () => 10006), false);
 });

@@ -1,5 +1,6 @@
 import { adventureRoutes } from "./adventure/routes.js";
 import { experimentRoutes } from "./experiments.js";
+import { adminRoutes } from "./admin.js";
 import { localRead, verifyLocalUrl } from "./localStorage.js";
 import { Metrics } from "./metrics.js";
 import Fastify, { type FastifyRequest } from "fastify";
@@ -19,7 +20,7 @@ import {
   hashToken,
   issueTokens,
   rotateToken,
-  verifyAccess,
+  verifyActiveAccess,
   verifyOAuth,
   publicUser,
   userSelect,
@@ -46,6 +47,10 @@ import {
 } from "./storage.js";
 import { generateQuestions } from "./ai.js";
 import { generateOwnedQuiz } from "./quizGeneration.js";
+import { materialReadRequestSchema, MATERIAL_READ_BODY_LIMIT_BYTES, type MaterialReadInput } from "./materialReadingSchemas.js";
+import { readMaterialDocument } from "./materialReading.js";
+import { STUDY_GUIDE_BODY_LIMIT_BYTES, studyGuideRequestSchema } from "./studyGuideSchemas.js";
+import { generateStudyGuide } from "./studyGuide.js";
 import { geminiRequestSchema } from "./geminiSchemas.js";
 import { realtime } from "./realtime.js";
 
@@ -60,9 +65,11 @@ export async function buildApp(deps?: {
   logger?: boolean;
   storageHealth?: () => Promise<unknown>;
   onStartupStep?: (step: string) => void;
+  verifyOAuth?: typeof verifyOAuth;
 }) {
   deps?.onStartupStep?.("1. Initializing DB client...");
   const db = deps?.db ?? new PrismaClient();
+  const verifyOAuthIdentity = deps?.verifyOAuth ?? verifyOAuth;
   deps?.onStartupStep?.("1.1. Initializing Redis client...");
   const redis = deps?.redis ?? createRedis(config.REDIS_URL);
   const app = Fastify({
@@ -219,23 +226,13 @@ export async function buildApp(deps?: {
   );
   deps?.onStartupStep?.("2.4. Registering API routes...");
   const authenticate = async (req: FastifyRequest) => {
-    req.userId = await verifyAccess(
+    req.userId = await verifyActiveAccess(db,
       req.headers.authorization?.startsWith("Bearer ")
         ? req.headers.authorization.slice(7)
         : undefined,
     );
-    if (
-      !(await db.user.findUnique({
-        where: { id: req.userId },
-        select: { id: true },
-      }))
-    )
-      throw new ApiError(
-        401,
-        "authentication-error",
-        "Account no longer exists",
-      );
   };
+  adminRoutes(app, db, authenticate);
   adventureRoutes(app, db, authenticate);
   experimentRoutes(app, db, authenticate);
   const authLimits = { rateLimit: { max: 10, timeWindow: "1 minute" } };
@@ -295,14 +292,15 @@ export async function buildApp(deps?: {
     const checks = await Promise.allSettled([
       db.$queryRaw`SELECT 1`,
       redis.ping(),
-      (deps?.storageHealth ?? storageHealth)(),
+      config.STORAGE_DRIVER === "disabled" ? Promise.resolve() : (deps?.storageHealth ?? storageHealth)(),
     ]);
     const services = Object.fromEntries(
       [
         "database",
         "redis",
-        config.STORAGE_DRIVER === "local" ? "local_storage" : "s3",
-      ].map((k, i) => [k, checks[i].status === "fulfilled" ? "up" : "down"]),
+        config.STORAGE_DRIVER === "local" ? "local_storage" : config.STORAGE_DRIVER === "disabled" ? "document_storage" : "s3",
+      ].map((k, i) => [k, i === 2 && config.STORAGE_DRIVER === "disabled"
+        ? "disabled" : checks[i].status === "fulfilled" ? "up" : "down"]),
     );
     const healthy = checks.every((c) => c.status === "fulfilled");
     return reply.code(healthy ? 200 : 503).send({
@@ -367,7 +365,7 @@ export async function buildApp(deps?: {
       const { id_token } = z
         .object({ id_token: z.string().min(1).max(16000) })
         .parse(req.body);
-      const identity = await verifyOAuth(provider, id_token);
+      const identity = await verifyOAuthIdentity(provider, id_token);
       let user = await db.user.findUnique({
         where: {
           auth_provider_auth_provider_id: {
@@ -587,7 +585,8 @@ export async function buildApp(deps?: {
           where: {
             topic_id: q.topic_id,
             difficulty: q.difficulty,
-            OR: [{ owner_id: null }, { owner_id: req.userId }],
+            owner_id: req.userId,
+            source: { in: ["gemini_generated", "ai_generated"] },
           },
           take: q.limit,
           orderBy: { created_at: "desc" },
@@ -615,7 +614,8 @@ export async function buildApp(deps?: {
             where: {
               id: body.question_id,
               topic_id: session.topic_id,
-              OR: [{ owner_id: null }, { owner_id: req.userId }],
+              owner_id: req.userId,
+              source: { in: ["gemini_generated", "ai_generated"] },
             },
           });
           if (!question) missing("Question not found");
@@ -657,6 +657,39 @@ export async function buildApp(deps?: {
           return row;
         });
         return reply.code(201).send(answer);
+      });
+      api.post("/materials/read", {
+        bodyLimit: MATERIAL_READ_BODY_LIMIT_BYTES,
+        config: { rateLimit: { max: 3, timeWindow: "1 minute" } },
+      }, async (req, reply) => {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const closed = () => { if (!reply.raw.writableEnded) abort(); };
+        req.raw.once("aborted", abort);
+        reply.raw.once("close", closed);
+        try {
+          const body = req.body as MaterialReadInput;
+          materialReadRequestSchema.parse(body);
+          return await readMaterialDocument(body, controller.signal);
+        }
+        finally { req.raw.off("aborted", abort); reply.raw.off("close", closed); }
+      });
+      api.post("/materials/generate", {
+        bodyLimit: STUDY_GUIDE_BODY_LIMIT_BYTES,
+        config: { rateLimit: { max: 3, timeWindow: "1 minute" } },
+      }, async (req, reply) => {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const closed = () => { if (!reply.raw.writableEnded) abort(); };
+        req.raw.once("aborted", abort);
+        reply.raw.once("close", closed);
+        try {
+          const body = studyGuideRequestSchema.parse(req.body);
+          return await generateStudyGuide(body, controller.signal);
+        } finally {
+          req.raw.off("aborted", abort);
+          reply.raw.off("close", closed);
+        }
       });
       api.post("/quiz/generate", {
         bodyLimit: 256 * 1024,

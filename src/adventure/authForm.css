@@ -1,0 +1,53 @@
+.adventure .auth-shell { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); padding: 0; overflow: hidden; margin-bottom: 28px; }
+.auth-intro { padding: 42px 34px; background: #e9eee1; border-right: 1px solid #d7dfd1; }
+.auth-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .16em; color: #586e53; }
+.adventure .auth-intro h2 { font-size: clamp(23px, 2.5vw, 32px); line-height: 1.3; margin: 32px 0 14px; }
+.adventure .auth-intro p, .adventure .auth-form-heading p { font-size: 14px; line-height: 1.75; color: #5e6e62; }
+.auth-benefits { display: grid; gap: 14px; padding: 0; list-style: none; margin: 28px 0; font-size: 13px; }
+.auth-benefits li::before { content: "✓"; margin-right: 10px; color: #39735d; font-weight: 700; }
+.auth-ticket-art { display: flex; align-items: center; gap: 16px; width: fit-content; margin-top: 34px; padding: 18px; border: 1px solid #b8c7ad; border-radius: 12px; background: #fcfaed; color: #345345; transform: rotate(-5deg); box-shadow: 0 5px 0 #d6ddc8; }
+.auth-ticket-art > span:first-child { font-size: 13px; font-weight: 800; letter-spacing: .1em; }
+.auth-ticket-art > span:nth-child(2) { font-size: 30px; color: #b77c42; }
+.auth-ticket-art > span:last-child { padding-left: 14px; border-left: 1px dashed #b8c7ad; font-size: 8px; line-height: 1.8; letter-spacing: .12em; font-weight: 700; }
+.adventure .auth-intro .auth-guest-link { border: 0; background: transparent; padding: 8px 0; font-size: 12px; color: #355c4a; text-align: left; }
+.adventure .auth-shell .auth-form { width: 100%; max-width: none; padding: 32px; margin: 0; gap: 18px; }
+.auth-tabs { display: flex; gap: 5px; background: #eef0e7; padding: 5px; border-radius: 12px; }
+.adventure .auth-tabs button { flex: 1; padding: 10px 8px; font-size: 13px; border: 1px solid transparent; border-radius: 8px; background: transparent; }
+.adventure .auth-tabs button.selected { background: #fffdf6; color: #285b43; border-color: #ced8c7; box-shadow: 0 2px 5px #213d2310; }
+.adventure .auth-form-heading h3 { margin: 7px 0; font-size: 20px; }
+.adventure .auth-form-heading p { margin: 0; font-size: 12px; }
+.auth-form label { font-size: 13px; line-height: 1.5; }
+.adventure .auth-form input { margin: 0; min-width: 0; padding: 12px 14px; font-size: 14px; }
+.auth-password-input { display: flex; position: relative; }
+.auth-password-field { display: grid; gap: 8px; }
+.adventure .auth-password-input input { padding-right: 65px; }
+.adventure .auth-password-input button { position: absolute; right: 5px; top: 5px; bottom: 5px; width: 54px; border: 0; border-radius: 7px; font-size: 11px; background: #edf1e9; color: #395b49; padding: 0; }
+.auth-password-checks { display: grid; gap: 7px; margin: -5px 0 0; padding: 0; list-style: none; }
+.auth-password-checks li { display: flex; gap: 8px; font-size: 11px; line-height: 1.5; color: #657364; }
+.auth-password-checks li[data-met="true"] { color: #2c6e4c; }
+.auth-password-checks li > span:first-child { width: 12px; flex-shrink: 0; }
+.adventure .auth-form .auth-field-error { color: #983e2f; font-size: 11px; line-height: 1.6; }
+.adventure .auth-form input[aria-invalid="true"] { border-color: #ba6350; background: #fff9f4; }
+.adventure .auth-lock-note { font-size: 12px; line-height: 1.6; color: #74552e; margin: 0; }
+.adventure .auth-privacy-note { font-size: 11px; line-height: 1.7; color: #627260; margin: -3px 0 0; }
+.adventure .auth-submit { width: 100%; font-size: 14px; padding: 15px 12px; }
+.auth-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+html[data-theme="dark"] .adventure .auth-intro { background: #293d30; border-color: #485447; }
+html[data-theme="dark"] .adventure .auth-eyebrow, html[data-theme="dark"] .adventure .auth-password-checks li { color: #b7c8b4; }
+html[data-theme="dark"] .adventure .auth-intro p, html[data-theme="dark"] .adventure .auth-form-heading p, html[data-theme="dark"] .adventure .auth-privacy-note { color: #b8c4b5; }
+html[data-theme="dark"] .adventure .auth-benefits li::before, html[data-theme="dark"] .adventure .auth-password-checks li[data-met="true"] { color: #9ed9ae; }
+html[data-theme="dark"] .adventure .auth-tabs { background: #16251b; }
+html[data-theme="dark"] .adventure .auth-tabs button.selected { background: #39523f; border-color: #738967; color: #eff5e8; }
+html[data-theme="dark"] .adventure .auth-form .auth-field-error { color: #ffc1b3; }
+html[data-theme="dark"] .adventure .auth-form input[aria-invalid="true"] { background: #382a26; border-color: #d58b78; }
+html[data-theme="dark"] .adventure .auth-lock-note { color: #e6c799; }
+html[data-theme="dark"] .adventure .auth-intro .auth-guest-link { color: #c2dabf; background: transparent; }
+@media (max-width: 1060px) { .auth-intro { padding: 32px 24px; } .adventure .auth-shell .auth-form { padding: 26px; } }
+@media (max-width: 700px) {
+  .adventure .auth-shell { grid-template-columns: 1fr; }
+  .auth-intro { padding: 24px; border-right: 0; border-bottom: 1px solid #d7dfd1; }
+  .auth-ticket-art, .auth-benefits { display: none; }
+  .adventure .auth-intro h2 { margin: 14px 0 8px; font-size: 24px; }
+  .adventure .auth-intro p { margin: 0; }
+  .adventure .auth-shell .auth-form { padding: 24px 20px; }
+}

@@ -1,5 +1,7 @@
-export const MAX_FILE_BYTES = 20 * 1024 * 1024;
+export const MAX_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_TEXT_CHARS = 50_000;
+
+import { extractImageWithOcr, extractPdfWithOcr } from './ocrMaterial.mjs';
 
 const OFFICE_FORMATS = new Map([
   ['docx', 'docx'],
@@ -23,6 +25,7 @@ const PLAIN_TEXT_EXTENSIONS = new Set([
 ]);
 
 const LEGACY_OFFICE_EXTENSIONS = new Set(['doc', 'ppt']);
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'bmp']);
 const PARSE_TIMEOUT_MS = 15_000;
 
 function extensionOf(name) {
@@ -32,12 +35,15 @@ function extensionOf(name) {
 
 function formatFromFile(file) {
   const extension = extensionOf(file.name);
+  if (IMAGE_EXTENSIONS.has(extension)) return { kind: 'image', format: 'image' };
   if (OFFICE_FORMATS.has(extension)) return { kind: 'office', format: OFFICE_FORMATS.get(extension) };
   if (extension === 'xls') return { kind: 'xls' };
   if (PLAIN_TEXT_EXTENSIONS.has(extension)) return { kind: 'text', format: extension };
   if (LEGACY_OFFICE_EXTENSIONS.has(extension)) return { kind: 'unsupported-legacy' };
 
   const mime = String(file.type || '').split(';', 1)[0].trim().toLowerCase();
+  if (['image/png', 'image/jpeg', 'image/webp', 'image/bmp'].includes(mime)) return { kind: 'image', format: 'image' };
+  if (mime.startsWith('image/')) return { kind: 'unsupported-image' };
   if (mime === 'application/pdf') return { kind: 'office', format: 'pdf' };
   if (mime === 'application/json' || mime === 'application/ld+json' || mime.endsWith('+json')) return { kind: 'text', format: 'json' };
   if (mime === 'text/html' || mime === 'application/xhtml+xml') return { kind: 'office', format: 'html' };
@@ -49,7 +55,11 @@ function formatFromFile(file) {
 function messageFor(status, format = '') {
   if (status === 'extracted') return 'Đã trích xuất nội dung từ tệp.';
   if (status === 'truncated') return 'Đã trích xuất một phần nội dung theo giới hạn dung lượng bài quiz.';
-  if (status === 'too-large') return 'Tệp vượt quá giới hạn 20 MB nên chưa được đọc.';
+  if (status === 'too-large') {
+    return format === 'image'
+      ? 'Hình ảnh vượt giới hạn kích thước hoặc số điểm ảnh an toàn nên chưa được giải mã.'
+      : 'Tệp vượt quá giới hạn 32 MB nên chưa được đọc.';
+  }
   if (status === 'metadata-only') {
     return format === 'legacy'
       ? 'Đã giữ thông tin tệp; định dạng Office cũ này chưa được trích xuất nội dung.'
@@ -57,13 +67,16 @@ function messageFor(status, format = '') {
   }
   if (status === 'empty') {
     return format === 'pdf'
-      ? 'Không tìm thấy văn bản trong PDF. Tệp có thể là ảnh quét; ứng dụng chưa hỗ trợ OCR.'
+      ? 'Không tìm thấy văn bản trong PDF, kể cả sau khi thử OCR cục bộ.'
+      : format === 'image'
+        ? 'Không tìm thấy văn bản có thể đọc trong hình ảnh.'
       : 'Tệp không có văn bản có thể đọc.';
   }
+  if (status === 'cancelled') return 'Đã hủy trích xuất nội dung tệp.';
   return 'Không đọc được nội dung tệp. Tệp có thể bị lỗi hoặc sai định dạng.';
 }
 
-function makeResult(file, status, text = '', format = '', message) {
+function makeResult(file, status, text = '', format = '', message, provenance = {}) {
   return {
     name: String(file?.name || 'Tệp không tên'),
     size: Number.isFinite(Number(file?.size)) ? Number(file.size) : 0,
@@ -71,6 +84,11 @@ function makeResult(file, status, text = '', format = '', message) {
     text,
     status,
     message: message ?? messageFor(status, format),
+    ...(provenance.source ? { source: provenance.source } : {}),
+    ...(provenance.quality ? { quality: provenance.quality } : {}),
+    ...(Number.isFinite(provenance.confidence)
+      ? { confidence: Math.max(0, Math.min(100, provenance.confidence)) }
+      : {}),
   };
 }
 
@@ -82,6 +100,10 @@ export function materialExtractionErrorMessage(error) {
     error?.details?.originalError?.message,
     error?.officeIssue?.details?.originalError?.message,
   ].filter(Boolean).join(' ');
+
+  if (/local OCR worker|tesseract|traineddata/i.test(detail)) {
+    return 'Không tải được bộ nhận diện chữ OCR trên thiết bị. Hãy tải lại ứng dụng rồi thử lại.';
+  }
 
   if (code === 'PDF_WORKER_MISSING' ||
       /pdf(?:\.js)? worker|worker.{0,40}(?:failed|missing|load)|(?:failed|missing|load).{0,40}worker|workerSrc/i.test(detail)) {
@@ -96,13 +118,17 @@ export function materialExtractionErrorMessage(error) {
   }
 
   if (['PASSWORD_REQUIRED', 'PASSWORD_INCORRECT', 'DOCUMENT_DECRYPTION_FAILED'].includes(code) ||
-      /password-protected|password required|password incorrect|encrypted document|could not decrypt/i.test(detail)) {
+      /password-protected|password required|password incorrect|no password given|encrypted document|could not decrypt/i.test(detail)) {
     return 'Tệp được bảo vệ bằng mật khẩu hoặc mã hóa; hãy gỡ bảo vệ rồi nhập lại.';
   }
 
   if (['FILE_CORRUPTED', 'IMPROPER_BUFFERS', 'INVALID_INPUT', 'ZIP_NO_ENTRIES_FOUND', 'ZIP_TRUNCATED', 'REQUIRED_PART_MISSING'].includes(code) ||
       /corrupt|malformed|not a zip|invalid (?:pdf|xml|document|file)|pdf.{0,30}(?:corrupt|invalid)|missing its required/i.test(detail)) {
     return 'Tệp bị hỏng, bị cắt hoặc nội dung không khớp với định dạng đã chọn.';
+  }
+
+  if (code === 'INVALID_IMAGE' || /unsupported or malformed image|invalid image dimensions/i.test(detail)) {
+    return 'Hình ảnh bị hỏng hoặc nội dung không khớp với định dạng đã chọn.';
   }
 
   return messageFor('error');
@@ -137,6 +163,15 @@ function decodeText(bytes) {
   return decoded;
 }
 
+function reportProgress(options, event) {
+  if (typeof options?.onProgress !== 'function') return;
+  try {
+    options.onProgress(event);
+  } catch {
+    // Progress reporting is advisory and must not interrupt extraction.
+  }
+}
+
 function pdfWorkerUrl(override) {
   if (override) return String(override);
   const locationHref = globalThis.location?.href;
@@ -162,8 +197,12 @@ async function extractOffice(bytes, format, options) {
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PARSE_TIMEOUT_MS);
+  const abortExternal = () => controller.abort();
+  options.signal?.addEventListener('abort', abortExternal, { once: true });
   try {
+    if (options.signal?.aborted) throw new DOMException('Material extraction was cancelled.', 'AbortError');
     const parser = parserModule.OfficeParser || parserModule.default;
+    reportProgress(options, { phase: 'extracting', progress: 0 });
     const ast = await parser.parseOffice(bytes, {
       fileType: format,
       extractAttachments: false,
@@ -191,9 +230,12 @@ async function extractOffice(bytes, format, options) {
         extractTextColor: false,
       },
     });
+    if (options.signal?.aborted) throw new DOMException('Material extraction was cancelled.', 'AbortError');
+    reportProgress(options, { phase: 'extracting', progress: 1 });
     return (await ast.to('text')).value;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortExternal);
   }
 }
 
@@ -264,6 +306,7 @@ async function extractLegacyXls(bytes, requestedLimit) {
  * @returns {Promise<{name: string, size: number, type: string, text: string, status: 'extracted'|'truncated'|'metadata-only'|'too-large'|'empty'|'error', message: string}>}
  */
 export async function extractMaterialFile(file, options = {}) {
+  if (options.signal?.aborted) return makeResult(file || {}, 'cancelled');
   if (!file || typeof file.arrayBuffer !== 'function') {
     return makeResult(file || {}, 'error');
   }
@@ -272,15 +315,18 @@ export async function extractMaterialFile(file, options = {}) {
   if (Number.isFinite(size) && size > MAX_FILE_BYTES) return makeResult(file, 'too-large');
   const detected = formatFromFile(file);
   if (detected.kind === 'unsupported-legacy') return makeResult(file, 'metadata-only', '', 'legacy');
+  if (detected.kind === 'unsupported-image') return makeResult(file, 'metadata-only');
   if (detected.kind === 'unsupported') return makeResult(file, 'metadata-only');
   if (Number.isFinite(size) && size === 0) return makeResult(file, 'empty', '', detected.format);
 
   const requested = Number.isFinite(Number(options.maxTextChars))
     ? Math.min(MAX_TEXT_CHARS, Math.max(0, Math.floor(Number(options.maxTextChars))))
     : MAX_TEXT_CHARS;
+  if (requested === 0) return makeResult(file, 'truncated', '', detected.format);
 
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
+    if (options.signal?.aborted) return makeResult(file, 'cancelled');
     if (bytes.byteLength > MAX_FILE_BYTES) return makeResult(file, 'too-large');
     if (bytes.byteLength === 0) return makeResult(file, 'empty', '', detected.format);
 
@@ -289,15 +335,39 @@ export async function extractMaterialFile(file, options = {}) {
       extracted = { text: decodeText(bytes), truncated: false };
     } else if (detected.kind === 'xls') {
       extracted = await extractLegacyXls(bytes, requested);
+    } else if (detected.kind === 'image') {
+      extracted = await extractImageWithOcr(bytes, {
+        signal: options.signal,
+        onProgress: options.onProgress,
+        maxTextChars: requested,
+      });
+    } else if (detected.kind === 'office' && detected.format === 'pdf') {
+      extracted = await extractPdfWithOcr(bytes, {
+        signal: options.signal,
+        onProgress: options.onProgress,
+        maxTextChars: requested,
+        pdfWorkerSrc: options.pdfWorkerSrc,
+      });
     } else {
       extracted = { text: await extractOffice(bytes, detected.format, options), truncated: false };
     }
 
     const sourceText = safeText(extracted.text);
     const limited = limitText(sourceText, requested);
-    if (!sourceText) return makeResult(file, 'empty', '', detected.format);
-    return makeResult(file, extracted.truncated || limited.truncated ? 'truncated' : 'extracted', limited.text);
+    if (!sourceText && !extracted.truncated) {
+      return makeResult(file, 'empty', '', detected.format, extracted.message);
+    }
+    return makeResult(
+      file,
+      extracted.truncated || limited.truncated ? 'truncated' : 'extracted',
+      limited.text,
+      detected.format,
+      extracted.message,
+      extracted,
+    );
   } catch (error) {
+    if (options.signal?.aborted || error?.name === 'AbortError') return makeResult(file, 'cancelled');
+    if (error?.code === 'IMAGE_TOO_LARGE') return makeResult(file, 'too-large', '', 'image');
     return makeResult(file, 'error', '', '', materialExtractionErrorMessage(error));
   }
 }

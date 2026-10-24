@@ -1,0 +1,640 @@
+:root[data-theme="light"] {
+  color-scheme: light;
+  --line: #e3e6dd;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page-bg: #121a16;
+  --surface: #1d2922;
+  --surface-raised: #24342b;
+  --surface-inset: #17221c;
+  --line: #3b4c40;
+  --text: #e7eee5;
+  --text-muted: #aab8ac;
+  background: var(--page-bg);
+}
+
+html[data-theme="dark"],
+html[data-theme="dark"] body,
+html[data-theme="dark"] #root {
+  min-height: 100%;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure {
+  --ink: #e7eee5;
+  --muted: #aab8ac;
+  --border: #3b4c40;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .main-area,
+html[data-theme="dark"] .adventure .topbar {
+  background: var(--page-bg);
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .topbar {
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .adventure .topbar strong,
+html[data-theme="dark"] .adventure .field-label,
+html[data-theme="dark"] .adventure .eyebrow,
+html[data-theme="dark"] .adventure .section-heading > span,
+html[data-theme="dark"] .adventure .stat small,
+html[data-theme="dark"] .adventure .station-stop small,
+html[data-theme="dark"] .adventure .station-stop p,
+html[data-theme="dark"] .adventure .page-footer,
+html[data-theme="dark"] .adventure .muted,
+html[data-theme="dark"] .adventure .material-hint,
+html[data-theme="dark"] .adventure .form small {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .slash {
+  color: #66786b;
+}
+
+html[data-theme="dark"] .adventure .sidebar {
+  background: #172b23;
+}
+
+html[data-theme="dark"] .adventure .sidebar button.account {
+  color: #edf4ed;
+  border-radius: 10px;
+  padding: 12px 8px;
+  margin: 10px -8px 0;
+  width: calc(100% + 16px);
+}
+
+html[data-theme="dark"] .adventure .sidebar button.account small,
+html[data-theme="dark"] .adventure .sidebar button.account > span:last-child {
+  color: #bad0c0;
+}
+
+html[data-theme="dark"] .adventure .sidebar button.account:hover:not(:disabled),
+html[data-theme="dark"] .adventure .sidebar button.account:focus-visible {
+  background: #355346;
+  color: #fff;
+}
+
+.adventure .sidebar button.account:hover:not(:disabled),
+.adventure .sidebar button.account:focus-visible {
+  background: #355346;
+  color: #fff;
+  outline-offset: 3px;
+}
+
+.adventure .sidebar button.account:hover:not(:disabled) small,
+.adventure .sidebar button.account:focus-visible small,
+.adventure .sidebar button.account:hover:not(:disabled) > span:last-child,
+.adventure .sidebar button.account:focus-visible > span:last-child {
+  color: #d0e0d1;
+}
+
+.adventure .sidebar button.nav:hover:not(:disabled) {
+  background: #2d483a;
+  color: #f5f8f3;
+}
+
+@media (min-width: 901px) and (max-height: 800px) {
+  .adventure .sidebar {
+    padding-top: 24px;
+    padding-bottom: 20px;
+    overflow-y: auto;
+  }
+
+  .adventure .sidebar .nav-heading { margin-top: 28px; }
+  .adventure .sidebar .sidebar-bottom { padding-top: 24px; }
+}
+
+html[data-theme="dark"] .adventure .panel,
+html[data-theme="dark"] .adventure .ticket-card,
+html[data-theme="dark"] .adventure .focus-card,
+html[data-theme="dark"] .adventure .stat,
+html[data-theme="dark"] .adventure .session-row,
+html[data-theme="dark"] .adventure .member,
+html[data-theme="dark"] .adventure .modal,
+html[data-theme="dark"] .adventure .experiment-run-card {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .hero-card {
+  background: #24372b;
+  border-color: #405546;
+}
+
+html[data-theme="dark"] .adventure .hero-card .pill {
+  background: #26382b;
+  border-color: #52634f;
+  color: #d8e5d5;
+}
+
+html[data-theme="dark"] .adventure .stat-icon,
+html[data-theme="dark"] .adventure .feature-icon,
+html[data-theme="dark"] .adventure .souvenirs > div {
+  background: #2a3a2d;
+  color: #c8d8c3;
+}
+
+html[data-theme="dark"] .adventure .feature-icon.peach {
+  background: #49352b;
+  color: #e6b48d;
+}
+
+html[data-theme="dark"] .adventure .feature-icon.green {
+  background: #2d4432;
+  color: #c2d6b8;
+}
+
+html[data-theme="dark"] .adventure .ticket-card .ticket-divider,
+html[data-theme="dark"] .adventure .ticket-editor,
+html[data-theme="dark"] .adventure .station-stop,
+html[data-theme="dark"] .adventure .session-analysis,
+html[data-theme="dark"] .adventure .page-footer {
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .adventure .ticket-card .field-label,
+html[data-theme="dark"] .adventure .ticket-footnote,
+html[data-theme="dark"] .adventure .session-analysis small {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .date-chip,
+html[data-theme="dark"] .adventure .pill,
+html[data-theme="dark"] .adventure .little-ticket {
+  background: var(--surface-raised);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .little-ticket > span,
+html[data-theme="dark"] .adventure .little-ticket p {
+  color: #c8d5c9;
+}
+
+html[data-theme="dark"] .adventure button:not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]),
+html[data-theme="dark"] .adventure .experiment-export {
+  background: var(--surface-raised);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure button:hover:not(:disabled):not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]),
+html[data-theme="dark"] .adventure .experiment-export:hover {
+  background: #304438;
+}
+
+html[data-theme="dark"] .adventure button.selected {
+  background: #30483a;
+  border-color: #6a9277;
+  color: #d9edda;
+}
+
+html[data-theme="dark"] .adventure .quick-times button.selected,
+html[data-theme="dark"] .adventure .quick-duration button.selected,
+html[data-theme="dark"] .adventure .overhead-carriages button[aria-pressed="true"] {
+  background: #30483a;
+  border-color: #6a9277;
+  color: #d9edda;
+}
+
+html[data-theme="dark"] .adventure .primary {
+  background: #b9653e;
+  border-color: #b9653e;
+  color: #fff7ed;
+}
+
+html[data-theme="dark"] .adventure .primary:hover:not(:disabled) {
+  background: #cf754b;
+}
+
+html[data-theme="dark"] .adventure textarea,
+html[data-theme="dark"] .adventure input:not([type="radio"]):not([type="checkbox"]),
+html[data-theme="dark"] .adventure select,
+html[data-theme="dark"] .adventure .custom-duration input,
+html[data-theme="dark"] .adventure .duration-break-field input {
+  background: #141e18;
+  border-color: #4a5b4d;
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure textarea::placeholder,
+html[data-theme="dark"] .adventure input::placeholder {
+  color: #87998a;
+}
+
+html[data-theme="dark"] .adventure .ticket-card textarea,
+html[data-theme="dark"] .adventure .departure-source-options,
+html[data-theme="dark"] .adventure .duration-break-field input:disabled {
+  background: #1a261e;
+  border-color: var(--line);
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .departure-source-options button[aria-pressed="true"] {
+  background: #344b3a;
+  border-color: #627d66;
+  color: #e5f0e4;
+}
+
+html[data-theme="dark"] .adventure .ticket-editor {
+  background: #1d2b22;
+  border-color: #455b49;
+}
+
+html[data-theme="dark"] .adventure .ticket-editor > summary {
+  background: #293d30;
+  color: #e5efe5;
+}
+
+html[data-theme="dark"] .adventure .ticket-editor > summary:hover {
+  background: #344c3a;
+}
+
+html[data-theme="dark"] .adventure .ticket-editor-icon,
+html[data-theme="dark"] .adventure .ticket-editor-action {
+  background: #355446;
+  color: #eaf2e9;
+}
+
+html[data-theme="dark"] .adventure .ticket-editor-action:hover {
+  background: #41664f;
+}
+
+html[data-theme="dark"] .adventure .info-box,
+html[data-theme="dark"] .adventure .sync-banner,
+html[data-theme="dark"] .adventure .message,
+html[data-theme="dark"] .adventure .material-progress,
+html[data-theme="dark"] .adventure .duration-breaks,
+html[data-theme="dark"] .adventure .study-guide,
+html[data-theme="dark"] .adventure .study-notes-input__help,
+html[data-theme="dark"] .adventure .quiz-result,
+html[data-theme="dark"] .adventure .quiz fieldset,
+html[data-theme="dark"] .adventure .answer,
+html[data-theme="dark"] .adventure .material-list li,
+html[data-theme="dark"] .adventure .material-source,
+html[data-theme="dark"] .adventure .duration-total,
+html[data-theme="dark"] .adventure .focus-plan-total,
+html[data-theme="dark"] .adventure .souvenirs > div {
+  background: var(--surface-raised);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .message.error {
+  background: #402a27;
+  border-color: #755047;
+  color: #f0c7ba;
+}
+
+html[data-theme="dark"] .adventure .quiz-error,
+html[data-theme="dark"] .adventure .duration-total-invalid {
+  color: #f0b6a8;
+}
+
+html[data-theme="dark"] .adventure .duration-total {
+  background: linear-gradient(135deg, #263b2d, #22342a 65%, #293d2c);
+}
+
+html[data-theme="dark"] .adventure .duration-breaks legend,
+html[data-theme="dark"] .adventure .duration-break-field,
+html[data-theme="dark"] .adventure .duration-total,
+html[data-theme="dark"] .adventure .duration-total-heading strong,
+html[data-theme="dark"] .adventure .duration-total-detail,
+html[data-theme="dark"] .adventure .duration-total-explanation,
+html[data-theme="dark"] .adventure .duration-details summary,
+html[data-theme="dark"] .adventure .duration-timeline,
+html[data-theme="dark"] .adventure .study-guide__heading p,
+html[data-theme="dark"] .adventure .study-guide__waiting p,
+html[data-theme="dark"] .adventure .study-notes-input__intro p,
+html[data-theme="dark"] .adventure .study-notes-input__help,
+html[data-theme="dark"] .adventure .quiz-panel > p,
+html[data-theme="dark"] .adventure .quiz-result > p,
+html[data-theme="dark"] .adventure .duration-breaks > small {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .study-guide__draft,
+html[data-theme="dark"] .adventure .quiz-feedback-list,
+html[data-theme="dark"] .adventure .duration-details {
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .adventure .quiz-answer-correct,
+html[data-theme="dark"] .adventure .answer.correct {
+  background: #263e30;
+  border-color: #66846c;
+  color: #e1f1df;
+}
+
+html[data-theme="dark"] .adventure .quiz-answer-wrong,
+html[data-theme="dark"] .adventure .answer.wrong {
+  background: #462b28;
+  border-color: #89594f;
+  color: #f2d5ce;
+}
+
+html[data-theme="dark"] .adventure .quiz-answer-correct {
+  color: #b9e2bf;
+}
+
+html[data-theme="dark"] .adventure .quiz-answer-wrong {
+  color: #f0b4a7;
+}
+
+html[data-theme="dark"] .adventure .boarding-ticket {
+  --ticket-ink: #e7eee5;
+  --ticket-muted: #afbcad;
+  --ticket-green: #42674f;
+  --ticket-green-dark: #294536;
+  --ticket-paper: #26332a;
+  --ticket-stub: #202c24;
+  --ticket-line: #536151;
+  border-color: #4a5c4c;
+  box-shadow: 0 12px 26px rgb(0 0 0 / 28%);
+}
+
+html[data-theme="dark"] .adventure .boarding-ticket__topic,
+html[data-theme="dark"] .adventure .boarding-ticket__route-stop strong,
+html[data-theme="dark"] .adventure .boarding-ticket__carriage strong,
+html[data-theme="dark"] .adventure .boarding-ticket__trip-code code,
+html[data-theme="dark"] .adventure .boarding-ticket__pending-code,
+html[data-theme="dark"] .adventure .boarding-ticket__stats,
+html[data-theme="dark"] .adventure .boarding-ticket__stats dt {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .boarding-ticket__stats dd {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .boarding-ticket__total dd {
+  color: #efb889;
+}
+
+html[data-theme="dark"] .adventure .boarding-ticket__stats,
+html[data-theme="dark"] .adventure .boarding-ticket__stats .boarding-ticket__total {
+  border-color: var(--ticket-line);
+}
+
+html[data-theme="dark"] .adventure .boarding-ticket__barcode {
+  opacity: 0.8;
+  background: repeating-linear-gradient(0deg, #a9c3ac 0 1px, transparent 1px 3px, #a9c3ac 3px 5px, transparent 5px 7px, #a9c3ac 7px 8px, transparent 8px 10px);
+}
+
+html[data-theme="dark"] .adventure .timer.flip-clock {
+  color: #eaf1e7;
+  background: linear-gradient(180deg, #2c3b30, #202d25);
+  border-color: #536553;
+  box-shadow: inset 0 2px 0 #ffffff0a, 0 4px 0 #0004;
+}
+
+html[data-theme="dark"] .adventure .flip-clock-digit {
+  background: #19241d;
+  border-color: #455647;
+  box-shadow: 0 2px 0 #101710;
+}
+
+html[data-theme="dark"] .adventure .flip-clock-half {
+  background: linear-gradient(110deg, #303f33, #202e25);
+}
+
+html[data-theme="dark"] .adventure .flip-clock-upper {
+  border-color: #465747;
+}
+
+html[data-theme="dark"] .adventure .flip-clock-lower {
+  background: linear-gradient(110deg, #26352a, #1c2a21);
+}
+
+html[data-theme="dark"] .adventure .flip-clock-unit,
+html[data-theme="dark"] .adventure .timer-label,
+html[data-theme="dark"] .adventure .focus-next,
+html[data-theme="dark"] .adventure .focus-phase-label {
+  color: #b7c8b7;
+}
+
+html[data-theme="dark"] .adventure .focus-plan-total {
+  background: #283b2d;
+  color: #d9e8d8;
+}
+
+html[data-theme="dark"] .adventure .travel-scene {
+  background: #1d2a22;
+  border-color: #465849;
+}
+
+html[data-theme="dark"] .adventure .travel-toolbar,
+html[data-theme="dark"] .adventure .travel-caption {
+  background: #202e25;
+  color: #c3d0c3;
+}
+
+html[data-theme="dark"] .adventure .overhead-map {
+  background: linear-gradient(145deg, #263127, #202b23 72%);
+  border-color: #485447;
+  box-shadow: 0 12px 34px #0004, inset 0 1px #ffffff0a;
+}
+
+html[data-theme="dark"] .adventure .overhead-exploration-progress {
+  background: #202d25;
+  border-color: #435343;
+}
+
+html[data-theme="dark"] .adventure .overhead-exploration-progress > div,
+html[data-theme="dark"] .adventure .overhead-exploration-progress > div span,
+html[data-theme="dark"] .adventure .overhead-exploration-progress small {
+  color: #c4d0c2;
+}
+
+html[data-theme="dark"] .adventure .overhead-exploration-progress progress,
+html[data-theme="dark"] .adventure .overhead-exploration-progress progress::-webkit-progress-bar {
+  background: #344536;
+}
+
+html[data-theme="dark"] .adventure .overhead-viewport {
+  border-color: #52624f;
+  scrollbar-color: #617b65 #26352a;
+}
+
+html[data-theme="dark"] .adventure .overhead-carriages button[aria-pressed="true"] {
+  background: #2b4435;
+  border-color: #708b71;
+  color: #e4eee0;
+}
+
+html[data-theme="dark"] .adventure .experiment-table-wrap {
+  background: #1d2922;
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .adventure .experiment-results .experiment-table {
+  background: #1d2922;
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .experiment-results .experiment-table caption {
+  background: #1d2922;
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .experiment-table th {
+  background: #2b4032;
+  color: #e4eee2;
+}
+
+html[data-theme="dark"] .adventure .experiment-table td,
+html[data-theme="dark"] .adventure .experiment-table th,
+html[data-theme="dark"] .adventure .experiment-table caption {
+  border-color: var(--line);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .experiment-run-card__meta,
+html[data-theme="dark"] .adventure .experiment-run-card__metric-label,
+html[data-theme="dark"] .adventure .experiment-details dt {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .experiment-started-cell small,
+html[data-theme="dark"] .adventure .experiment-goal small {
+  color: #b4c9b5;
+}
+
+html[data-theme="dark"] .adventure .connection {
+  color: #b9d0bd;
+}
+
+html[data-theme="dark"] .adventure .connection.offline {
+  color: #f0c184;
+}
+
+html[data-theme="dark"] .adventure .chapter {
+  color: #b4cbb8;
+}
+
+html[data-theme="dark"] .adventure .experiment-results .experiment-table tbody tr:nth-child(even) {
+  background: #202c24;
+}
+
+html[data-theme="dark"] .adventure .experiment-results .experiment-table tbody tr {
+  background: #1d2922;
+}
+
+html[data-theme="dark"] .adventure .experiment-results .experiment-table tbody tr:hover {
+  background: #293b2e;
+}
+
+html[data-theme="dark"] .adventure .experiment-trip-code,
+html[data-theme="dark"] .adventure .experiment-time-summary strong,
+html[data-theme="dark"] .adventure .experiment-rest-summary strong,
+html[data-theme="dark"] .adventure .experiment-run-card__header time,
+html[data-theme="dark"] .adventure .experiment-run-card__topic,
+html[data-theme="dark"] .adventure .experiment-details dd {
+  color: #dce8db;
+}
+
+html[data-theme="dark"] .adventure .experiment-run-card__header time small {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .experiment-details summary {
+  color: #b9d6bd;
+}
+
+html[data-theme="dark"] .adventure .experiment-details,
+html[data-theme="dark"] .adventure .experiment-run-card__metrics {
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .adventure .experiment-quiz-badge--scored {
+  background: #31543c;
+  color: #e0f0db;
+}
+
+html[data-theme="dark"] .adventure .experiment-quiz-badge--pending {
+  background: #364039;
+  color: #d3ddd2;
+}
+
+html[data-theme="dark"] .adventure :is(
+  .study-fullscreen-control button,
+  .theme-toggle
+) {
+  background: #2b4436 !important;
+  border-color: #647e68 !important;
+  color: #e7f0e5 !important;
+}
+
+html[data-theme="dark"] .adventure :is(
+  .study-fullscreen-control button:hover:not(:disabled),
+  .theme-toggle:hover:not(:disabled)
+) {
+  background: #385644 !important;
+}
+
+html[data-theme="dark"] .adventure:fullscreen {
+  background: var(--page-bg);
+}
+
+html[data-theme="dark"] .adventure .station-stop.unlocked,
+html[data-theme="dark"] .adventure .unlocked .station-number {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .station-number {
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .adventure .station-stop.unlocked .station-number {
+  background: #2d4534;
+  color: #d5e7d3;
+}
+
+.adventure .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 7px 12px;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.2;
+  background: #fff;
+  border-color: #d8dfd4;
+  color: #355342;
+}
+
+.adventure .theme-toggle__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.adventure .sidebar .theme-toggle {
+  width: 100%;
+}
+
+html[data-theme="dark"] .adventure .theme-toggle {
+  background: #2b4436;
+  border-color: #647e68;
+  color: #e7f0e5;
+}
+
+html[data-theme="dark"] .adventure .theme-toggle:hover:not(:disabled) {
+  background: #385644;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adventure .theme-toggle {
+    transition: none;
+  }
+}

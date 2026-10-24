@@ -1,17 +1,25 @@
+import { isValidBreakPlan } from "../../backend/src/adventure/domain.ts";
+import { validMaterialSources, type MaterialSource } from "./materialSources.ts";
 import type { ActiveTrip } from "./focus";
+import { isDeviceCategory } from "./device.ts";
+import { isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
 import {
   emptyWorld,
   type Snapshot,
   type World,
   type Session,
-} from "../../backend/src/adventure/domain";
+} from "../../backend/src/adventure/domain.ts";
 export type Saved = {
   active: ActiveTrip | null;
   pending: Session[];
   snapshot: Snapshot | null;
   local: World;
   notes: Record<string, string>;
+  sources?: Record<string, MaterialSource[]>;
   materials?: Record<string, NonNullable<ActiveTrip["materials"]>>;
+  guestPublished?: string[];
+  quizDrafts?: Record<string, QuizDraft>;
+  summarySessionId?: string;
 };
 export const emptySaved = (): Saved => ({
   active: null,
@@ -20,6 +28,9 @@ export const emptySaved = (): Saved => ({
   local: emptyWorld(),
   notes: {},
   materials: {},
+  sources: {},
+  guestPublished: [],
+  quizDrafts: {},
 });
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -27,7 +38,7 @@ const number = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v 
 const count = (v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0;
 const texts = (v: unknown) => Array.isArray(v) && v.every((item) => typeof item === "string");
 const validMaterials = (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 10 &&
-  v.every((file) => record(file) && number(file.size) &&
+  v.every((file) => record(file) && number(file.size) && (file.sourceId === undefined || typeof file.sourceId === "string") &&
     [file.name, file.type, file.status, file.message].every((field) => typeof field === "string")));
 function validJourney(v: unknown) {
   return record(v) && [v.seconds, v.station, v.threshold, v.remaining].every(number) &&
@@ -47,12 +58,22 @@ function validSegments(v: unknown) {
 function validSession(v: unknown) {
   return record(v) && typeof v.id === "string" && typeof v.userId === "string" &&
     typeof v.goal === "string" && typeof v.topic === "string" &&
+    (v.breakPlan === undefined || isValidBreakPlan(v.breakPlan,v.target)) &&
+    (v.deviceCategory === undefined || isDeviceCategory(v.deviceCategory)) &&
     (v.distractions === undefined || count(v.distractions)) &&
+    (v.quiz === undefined || isValidQuizAssessment(v.quiz)) &&
     [v.started, v.ended, v.target, v.seconds, v.contribution].every(number) && validSegments(v.segments);
 }
 function validSaved(v: unknown): v is Saved {
   if (!record(v) || !record(v.local) || !record(v.notes) ||
+      (v.sources !== undefined && (!record(v.sources) || !Object.values(v.sources).every(validMaterialSources))) ||
       (v.materials !== undefined && (!record(v.materials) || !Object.values(v.materials).every(validMaterials))) ||
+      (v.guestPublished !== undefined && (!Array.isArray(v.guestPublished) ||
+        !v.guestPublished.every((id) => typeof id === "string" && id.length > 0) ||
+        new Set(v.guestPublished).size !== v.guestPublished.length)) ||
+      (v.quizDrafts !== undefined && !isValidQuizDraftMap(v.quizDrafts)) ||
+      (v.summarySessionId !== undefined &&
+        (typeof v.summarySessionId !== "string" || v.summarySessionId.length === 0)) ||
       !Object.values(v.notes).every((note) => typeof note === "string") ||
       !Array.isArray(v.pending) || !v.pending.every(validSession)) return false;
   const w = v.local;
@@ -64,7 +85,11 @@ function validSaved(v: unknown): v is Saved {
     if (!record(a) || ![a.started, a.lastAt, a.target, a.reconnect].every(number) ||
         Number(a.target) <= 0 || ![a.id, a.owner, a.goal, a.topic, a.document].every((s) => typeof s === "string") ||
         !["focus", "away", "reconnecting", "paused", "pending"].includes(String(a.state)) ||
+        (a.deviceCategory !== undefined && !isDeviceCategory(a.deviceCategory)) ||
         (a.distractions !== undefined && !count(a.distractions)) ||
+        (a.breakPlan !== undefined && !isValidBreakPlan(a.breakPlan,a.target)) ||
+        (a.awayCounted !== undefined && typeof a.awayCounted !== "boolean") ||
+        (a.sources !== undefined && !validMaterialSources(a.sources)) ||
         !validSegments(a.segments) || !validMaterials(a.materials)) return false;
   }
   if (v.snapshot !== null) {

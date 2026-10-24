@@ -1,0 +1,167 @@
+.map-scenery--overview,
+.map-scenery--travel {
+  --scenery-meadow: #c6dfa0;
+  --scenery-field: #aeca88;
+  --scenery-field-soft: #d9e9b5;
+  --scenery-hill: #8ba987;
+  --scenery-hill-light: #a8c49a;
+  --scenery-outline: #66866b;
+  --scenery-leaf: #73a96d;
+  --scenery-leaf-light: #acd17f;
+  --scenery-leaf-deep: #4f8060;
+  --scenery-water: #65aeb8;
+  --scenery-water-edge: #d7efe0;
+  --scenery-road-bed: #9d805f;
+  --scenery-road: #ead7a9;
+  --scenery-soil: #a07854;
+  --scenery-crop: #577d51;
+  --scenery-fence: #836d4d;
+  pointer-events: none;
+}
+
+.travel-land-tile { isolation: isolate; }
+.travel-meadow { fill: var(--scenery-meadow); }
+.travel-north-meadow { fill: var(--scenery-field-soft); opacity: .72; }
+.travel-south-meadow { fill: var(--scenery-field); opacity: .82; }
+.travel-field-row { fill: none; stroke: var(--scenery-crop); stroke-width: 1.25; stroke-linecap: butt; opacity: .48; }
+.travel-station-tufts { fill: none; stroke: var(--scenery-outline); stroke-width: 1.5; stroke-linecap: round; opacity: .22; }
+.travel-field-flowers .flower { fill: #fff0d2; stroke: #dbb970; stroke-width: 1; }
+.travel-field-flowers .flower--rose { fill: #e99a91; stroke: #bd7976; }
+.travel-field-flowers .flower--halo { fill: #d6e7a9; stroke: none; opacity: .72; }
+
+.travel-stream-bank,
+.travel-stream-water,
+.travel-stream-highlight,
+.travel-road-bed,
+.travel-road-surface,
+.travel-road-inlay,
+.travel-road-shoulder,
+.travel-coast-edge {
+  fill: none;
+  stroke-linecap: butt;
+  stroke-linejoin: round;
+}
+.travel-stream-bank { stroke: #91b17e; stroke-width: 39; opacity: .72; }
+.travel-stream-water { stroke: var(--scenery-water); stroke-width: 32; }
+.travel-stream-highlight { stroke: var(--scenery-water-edge); stroke-width: 4.5; opacity: .9; }
+.travel-stream-shimmer { fill: none; stroke: #e0f2d8; stroke-width: 2.5; stroke-linecap: round; opacity: .82; }
+.travel-stream-shimmer circle { fill: #eaf5d8; stroke: #c1e5d6; stroke-width: 1; }
+
+.travel-road-bed { stroke: var(--scenery-road-bed); stroke-width: 26; opacity: .65; }
+.travel-road-surface { stroke: var(--scenery-road); stroke-width: 18; }
+.travel-road-inlay { stroke: #fff0cc; stroke-width: 2; opacity: .72; }
+.travel-road-shoulder { stroke: #bf9d6d; stroke-width: 1; opacity: .58; }
+.travel-road-stones { fill: #c8b184; stroke: #997b56; stroke-width: 1; opacity: .9; }
+.travel-coast-beach { fill: #e6d4a3; }
+.travel-coast-water { fill: #69b3bd; }
+.travel-coast-edge { stroke: #e3f2d8; stroke-width: 5; }
+.travel-coast-shells { fill: none; stroke: #fff0d1; stroke-width: 2.3; stroke-linecap: round; opacity: .85; }
+.travel-ridge-contour { fill: none; stroke: var(--scenery-hill); stroke-width: 3; stroke-linecap: butt; opacity: .55; }
+
+.overhead-field-patch { stroke: var(--scenery-outline); stroke-width: 3; stroke-linejoin: round; }
+.overhead-field-patch--sage { fill: var(--scenery-hill); }
+.overhead-field-patch--mint { fill: var(--scenery-hill-light); stroke: #779a78; }
+.overhead-field-patch--gold { fill: #cccf8c; stroke: #9cae75; opacity: .74; }
+.overhead-ridge-contour { fill: none; stroke: #cadcae; stroke-width: 3; stroke-linecap: round; opacity: .85; }
+.overhead-road-bed { fill: none; stroke: var(--scenery-road-bed); stroke-width: 19; stroke-linecap: round; stroke-linejoin: round; }
+.overhead-road-center { fill: none; stroke: var(--scenery-road); stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
+.overhead-road-inlay { fill: none; stroke: #fff0cf; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .75; }
+
+.overhead-tree-cluster { filter: drop-shadow(1px 3px 0 #365b4526); }
+.overhead-tree-shadow { fill: #35594729; }
+.overhead-tree-canopy { fill: #4e865f; stroke: #3f7055; stroke-width: 3; }
+.overhead-tree-leaf { fill: var(--scenery-leaf); stroke: #4e815c; stroke-width: 2; }
+.overhead-tree-leaf--deep { fill: var(--scenery-leaf-deep); }
+.overhead-tree-leaf--light { fill: var(--scenery-leaf-light); stroke: #70976a; }
+.overhead-tree-cluster--1 .overhead-tree-leaf { fill: #82ae68; }
+.overhead-tree-cluster--1 .overhead-tree-leaf--deep { fill: #5b8962; }
+.overhead-tree-cluster--2 .overhead-tree-leaf { fill: #70a276; }
+.overhead-tree-cluster--2 .overhead-tree-leaf--deep { fill: #47775f; }
+.overhead-tree-crown { fill: none; stroke: #c3d98b; stroke-width: 2; stroke-linecap: round; opacity: .84; }
+.overhead-tree-fruit { fill: #f1cf79; stroke: #d6a756; stroke-width: 1; }
+.overhead-tree-fruit--warm { fill: #e99577; stroke: #c77668; }
+
+.overhead-farmstead { filter: drop-shadow(0 2px 0 #405d4320); }
+.overhead-yard { fill: #d8dea5; stroke: #9ea979; stroke-width: 2; }
+.overhead-yard-path { fill: none; stroke: #e9dcad; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; }
+.overhead-fence { fill: none; stroke: var(--scenery-fence); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.overhead-fence-post { fill: #d4c18e; stroke: #8a704d; stroke-width: .9; }
+.overhead-garden-bed { fill: var(--scenery-soil); stroke: #765f46; stroke-width: 1.2; }
+.overhead-crop-row { fill: none; stroke: #c6ad7c; stroke-width: 1.4; stroke-linecap: round; }
+.overhead-crop-leaf { fill: #7da56a; stroke: #4d7755; stroke-width: .8; }
+.overhead-crop-leaf--light { fill: #bfd489; }
+.overhead-well { fill: #81b1b1; stroke: #f0e3ba; stroke-width: 1.4; }
+.overhead-yard-flowers { fill: none; stroke: #e99788; stroke-width: 3; stroke-linecap: round; }
+
+.overhead-roof { filter: drop-shadow(1px 3px 0 #4f684331); }
+.overhead-roof-base { fill: #fff0c7; stroke: #7e684e; stroke-width: 3; }
+.overhead-roof-eave { fill: none; stroke: #805f49; stroke-width: 2; }
+.overhead-roof-ridge { fill: none; stroke: #754f3b; stroke-width: 3; }
+.overhead-roof-tiles { fill: none; stroke: #ffe4ad; stroke-width: 1.4; opacity: .9; }
+.overhead-roof-skylight { fill: #a9d4c7; stroke: #f7e9c0; stroke-width: 1.4; }
+.overhead-roof-solar { fill: #687e89; stroke: #f2dfb4; stroke-width: 1.2; }
+.overhead-roof-chimney { fill: #725541; stroke: #fff0ca; stroke-width: 1.5; }
+
+.overview-flower-meadow .flower { fill: #fbefd0; stroke: #dbb766; stroke-width: 1.5; }
+.overview-flower-meadow .flower--rose { fill: #e7a09a; stroke: #c98683; }
+
+.overhead-station-footprint { filter: drop-shadow(0 2px 0 #64784b24); }
+.overhead-station-footprint .station-platform { fill: #e8d7ac; stroke: #8a7656; stroke-width: 2.5; }
+.overhead-station-footprint .station-platform-inset { fill: #f2e6c2; stroke: #c1aa77; stroke-width: 1.2; }
+.overhead-station-footprint .station-platform-edge { fill: none; stroke: #c4ad7e; stroke-width: 1.4; stroke-linecap: round; }
+.overhead-station-footprint .station-tactile { fill: none; stroke: #c2aa78; stroke-width: 1.8; stroke-linecap: round; opacity: .9; }
+.overhead-station-footprint .station-roof-base { fill: #fff1cb; stroke: #825f49; stroke-width: 2.5; }
+.overhead-station-footprint .station-roof { stroke: #825f49; stroke-width: 2.5; }
+.overhead-station-footprint .station-roof-shade { fill: #00000012; pointer-events: none; }
+.overhead-station-footprint .station-roof-seam { fill: none; stroke: #fff0cd; stroke-width: 2; stroke-linecap: round; opacity: .8; }
+.overhead-station-footprint .station-roof-tiles { fill: none; stroke: #f8d9a1; stroke-width: 1.4; stroke-linecap: round; }
+.overhead-station-footprint .station-columns { fill: none; stroke: #805f49; stroke-width: 2.5; stroke-linecap: round; }
+.overhead-station-footprint .station-bench { fill: #a66e4c; stroke: #76543f; stroke-width: 1.2; }
+.overhead-station-footprint .station-bench-legs { fill: none; stroke: #76543f; stroke-width: 1.5; stroke-linecap: round; }
+.overhead-station-footprint .station-planter { fill: #8d664d; stroke: #674d3b; stroke-width: 1; }
+.overhead-station-footprint .station-planter-leaves { fill: none; stroke: #649365; stroke-width: 2; stroke-linecap: round; }
+.overhead-station-footprint .station-lamp-post { fill: none; stroke: #8a7656; stroke-width: 2; }
+.overhead-station-footprint .station-lamp { fill: #f1cc74; stroke: #947449; stroke-width: 1; }
+.overhead-station-footprint .station-title,
+.overhead-station-footprint .station-detail { font-family: inherit; fill: #345345; font-size: 9px; font-weight: 900; letter-spacing: .35px; }
+.overhead-station-footprint .station-detail { fill: #596c57; font-size: 7px; font-weight: 750; }
+.overhead-station-footprint .station-caption { fill: #fff8dc; stroke: #bea877; stroke-width: 1.5; }
+
+html[data-theme="dark"] .adventure .map-scenery--overview,
+html[data-theme="dark"] .adventure .map-scenery--travel {
+  --scenery-meadow: #52694d;
+  --scenery-field: #627b51;
+  --scenery-field-soft: #71895c;
+  --scenery-hill: #657c64;
+  --scenery-hill-light: #718b68;
+  --scenery-outline: #536b58;
+  --scenery-leaf: #7eaa6e;
+  --scenery-leaf-light: #a6c982;
+  --scenery-leaf-deep: #4f7d60;
+  --scenery-water: #4b969f;
+  --scenery-water-edge: #a4d3c6;
+  --scenery-road-bed: #806b52;
+  --scenery-road: #c9b486;
+  --scenery-soil: #705a43;
+  --scenery-crop: #95b377;
+  --scenery-fence: #b7a47b;
+}
+
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-coast-water { fill: #488d9b; }
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-coast-beach { fill: #b5a477; }
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-coast-edge { stroke: #aed8c8; }
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-road-inlay,
+html[data-theme="dark"] .adventure .map-scenery--overview .overhead-road-inlay { stroke: #e7d4a7; }
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-north-meadow { opacity: .55; }
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-field-row { stroke: #87a779; opacity: .62; }
+html[data-theme="dark"] .adventure .map-scenery--travel .travel-station-tufts { stroke: #a9b889; opacity: .25; }
+html[data-theme="dark"] .adventure .map-scenery--overview .overhead-field-patch--gold { fill: #89905f; stroke: #79855d; }
+html[data-theme="dark"] .adventure .map-scenery--overview .overhead-ridge-contour { stroke: #abbc91; }
+html[data-theme="dark"] .adventure .map-scenery--travel .overhead-yard { fill: #89926a; stroke: #a0a97b; }
+html[data-theme="dark"] .adventure .map-scenery--travel .overhead-roof-base,
+html[data-theme="dark"] .adventure .map-scenery--overview .overhead-roof-base { fill: #d4c49f; }
+html[data-theme="dark"] .adventure .overhead-station-footprint .station-platform { fill: #b7aa85; stroke: #d0bd8d; }
+html[data-theme="dark"] .adventure .overhead-station-footprint .station-platform-inset { fill: #cfc096; stroke: #e0ce9e; }
+html[data-theme="dark"] .adventure .overhead-station-footprint .station-caption { fill: #d9cda5; stroke: #e1c78d; }
+html[data-theme="dark"] .adventure .overhead-station-footprint .station-title { fill: #344b3e; }
+html[data-theme="dark"] .adventure .overhead-station-footprint .station-detail { fill: #52604c; }

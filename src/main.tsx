@@ -1,5 +1,9 @@
 import { createRoot } from "react-dom/client";
 import AdventureApp from "./adventure/AdventureApp";
+import { bootstrapThemePreference, ThemeProvider } from "./adventure/theme";
+import "./adventure/theme.css";
+
+bootstrapThemePreference();
 
 if ("serviceWorker" in navigator) {
   if (import.meta.env.PROD &&
@@ -20,4 +24,6 @@ if ("serviceWorker" in navigator) {
   }
 }
 
-createRoot(document.getElementById("root")!).render(<AdventureApp />);
+createRoot(document.getElementById("root")!).render(
+  <ThemeProvider><AdventureApp /></ThemeProvider>,
+);

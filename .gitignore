@@ -43,3 +43,6 @@ desktop/release/
 
 # Generated from the matching installed PDF.js package.
 public/pdf.worker.min.mjs
+
+# Generated same-origin Tesseract worker, WebAssembly cores, and trained data.
+public/ocr/

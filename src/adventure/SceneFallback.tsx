@@ -19,7 +19,7 @@ export function SceneFallback({
       aria-label={
         fog
           ? "Toa tàu giữa làn sương, đang chờ bạn quay lại"
-          : "Toa tàu xanh qua đồng cỏ và dãy núi lúc bình minh"
+          : "Toa tàu qua đồng cỏ và dãy núi lúc bình minh"
       }
     >
       <defs>

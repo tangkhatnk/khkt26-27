@@ -1,0 +1,107 @@
+.travel-world {
+  --scene-ground: #c4dda0;
+  background: var(--scene-ground);
+}
+
+.travel-meadow { shape-rendering: crispEdges; }
+html[data-theme="dark"] .adventure .travel-world { --scene-ground: #52694d; }
+
+.travel-scene .travel-world {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  aspect-ratio: 900 / 420;
+  background: var(--scene-ground);
+}
+
+.travel-scene .travel-rest-stop,
+.travel-scene .travel-arrival-stop,
+.travel-scene .travel-departure-stop {
+  filter: drop-shadow(0 3px 0 #61765020);
+}
+
+.travel-scene .travel-world-motion {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  transform: translate3d(var(--world-camera-offset, 0%), 0, 0);
+  animation: none;
+  transition: none;
+  will-change: transform;
+}
+
+.travel-scene .travel-world-motion[data-world-motion="true"][data-world-interpolate="true"][data-world-animation-frame="a"] {
+  animation: travel-world-sample-a var(--world-animation-duration, 0ms) linear none;
+}
+
+.travel-scene .travel-world-motion[data-world-motion="true"][data-world-interpolate="true"][data-world-animation-frame="b"] {
+  animation: travel-world-sample-b var(--world-animation-duration, 0ms) linear none;
+}
+
+@keyframes travel-world-sample-a {
+  from { transform: translate3d(var(--world-animation-from, var(--world-camera-offset, 0%)), 0, 0); }
+  to { transform: translate3d(var(--world-camera-offset, 0%), 0, 0); }
+}
+
+@keyframes travel-world-sample-b {
+  from { transform: translate3d(var(--world-animation-from, var(--world-camera-offset, 0%)), 0, 0); }
+  to { transform: translate3d(var(--world-camera-offset, 0%), 0, 0); }
+}
+
+.travel-scene .travel-world-map {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  display: block;
+  width: 300%;
+  height: 100%;
+  overflow: visible;
+}
+
+.travel-scene .travel-train-overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.travel-scene .travel-periodic-world,
+.travel-scene .travel-rail-ties {
+  animation: none !important;
+  transition: none !important;
+}
+
+.travel-scene .map-scenery--travel {
+  animation: none !important;
+}
+
+.travel-scene .travel-train-position {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transform: translateX(var(--travel-shift, 0px));
+}
+
+.travel-scene[data-arrival="true"] .travel-train-position {
+  transform: translateX(var(--arrival-shift, 0px));
+  animation: none !important;
+}
+
+.travel-scene[data-moving="false"] .travel-train-motion,
+.travel-scene[data-stop-motion="false"] .travel-train-position,
+.travel-scene[data-stop-motion="false"] .travel-wheel,
+.travel-scene[data-stop-motion="false"] .train-steam-puff {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .travel-scene .travel-world-motion,
+  .travel-scene .travel-train-position,
+  .travel-scene .travel-train-motion,
+  .travel-scene .travel-wheel,
+  .travel-scene .train-steam-puff {
+    animation: none !important;
+    transition: none !important;
+  }
+}

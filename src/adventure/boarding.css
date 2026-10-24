@@ -1,0 +1,361 @@
+.boarding-ticket {
+  --ticket-ink: #283d34;
+  --ticket-muted: #73786f;
+  --ticket-green: #355846;
+  --ticket-green-dark: #203a31;
+  --ticket-paper: #f1ede3;
+  --ticket-stub: #e8e2d7;
+  --ticket-line: #c9c8ba;
+  position: relative;
+  display: grid;
+  width: 100%;
+  max-width: 800px;
+  min-height: 230px;
+  aspect-ratio: 2.5 / 1;
+  grid-template-columns: minmax(0, 2.35fr) minmax(185px, 0.9fr);
+  grid-template-rows: 30px minmax(0, 1fr) 30px;
+  margin: 0 auto;
+  overflow: hidden;
+  color: var(--ticket-ink);
+  background: var(--ticket-paper);
+  border: 1px solid #c6c7ba;
+  border-radius: 15px;
+  box-shadow: 0 12px 26px rgb(39 61 53 / 10%);
+}
+
+.boarding-ticket__band {
+  z-index: 1;
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 18px;
+  color: #f5f1e7;
+  background: var(--ticket-green);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  line-height: 1.2;
+}
+
+.boarding-ticket__band--top {
+  grid-row: 1;
+}
+
+.boarding-ticket__band--bottom {
+  grid-row: 3;
+  background: var(--ticket-green-dark);
+  font-size: 9px;
+  letter-spacing: 0.9px;
+}
+
+.boarding-ticket__brand {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boarding-ticket__mode {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  color: #fff9ef;
+  background: rgb(255 255 255 / 12%);
+  border: 1px solid rgb(255 255 255 / 26%);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+
+.boarding-ticket__main {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-row: 2;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 18px;
+  background: var(--ticket-paper);
+}
+
+.boarding-ticket__details {
+  min-width: 0;
+}
+
+.boarding-ticket__field-label {
+  display: block;
+  margin: 0;
+  color: var(--ticket-muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  line-height: 1.35;
+}
+
+.boarding-ticket__destination h2 {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 3px 0 2px;
+  color: var(--ticket-ink);
+  font-size: clamp(17px, 2.2vw, 22px);
+  font-weight: 750;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.boarding-ticket__topic {
+  overflow: hidden;
+  margin: 0;
+  color: #687269;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boarding-ticket__route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 0.78fr);
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.boarding-ticket__route-stop {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.boarding-ticket__route-stop strong,
+.boarding-ticket__carriage strong {
+  overflow: hidden;
+  color: #344d40;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boarding-ticket__route-arrow {
+  color: #bd6b46;
+  font-size: 16px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.boarding-ticket__carriage {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  margin: 8px 0 0;
+}
+
+.boarding-ticket__carriage .boarding-ticket__field-label {
+  flex: 0 0 auto;
+}
+
+.boarding-ticket__barcode {
+  width: 22px;
+  height: min(100%, 112px);
+  min-height: 76px;
+  justify-self: end;
+  opacity: 0.76;
+  background: repeating-linear-gradient(
+    0deg,
+    #304b3e 0 1px,
+    transparent 1px 3px,
+    #304b3e 3px 5px,
+    transparent 5px 7px,
+    #304b3e 7px 8px,
+    transparent 8px 10px
+  );
+}
+
+.boarding-ticket__stub {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-width: 0;
+  grid-row: 2;
+  align-content: center;
+  gap: 11px;
+  padding: 13px 15px 13px 19px;
+  background: var(--ticket-stub);
+  border-left: 1px dashed #aeb4a7;
+}
+
+.boarding-ticket__trip-code {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.boarding-ticket__trip-code code {
+  overflow-wrap: anywhere;
+  color: var(--ticket-green-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.35px;
+}
+
+.boarding-ticket__pending-code {
+  color: #686e66;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.boarding-ticket__stats {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid #c9c8ba;
+}
+
+.boarding-ticket__stats div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.boarding-ticket__stats dt {
+  color: #687269;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.boarding-ticket__stats dd {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: #334b3f;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.3;
+  text-align: right;
+}
+.boarding-ticket__stats dd small {
+  display: block;
+  color: var(--ticket-muted);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.boarding-ticket__stats .boarding-ticket__total {
+  padding-top: 5px;
+  border-top: 1px solid #c9c8ba;
+}
+
+.boarding-ticket__total dd {
+  color: #a95436;
+}
+
+@media (max-width: 620px) {
+  .boarding-ticket {
+    min-height: 220px;
+    grid-template-columns: minmax(0, 1fr) minmax(145px, 0.42fr);
+    aspect-ratio: auto;
+  }
+
+  .boarding-ticket__main {
+    gap: 9px;
+    padding: 13px 12px;
+  }
+
+  .boarding-ticket__stub {
+    padding-right: 10px;
+    padding-left: 15px;
+  }
+
+  .boarding-ticket__band {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .boarding-ticket__barcode {
+    width: 17px;
+  }
+
+  .boarding-ticket__route {
+    grid-template-columns: minmax(0, 1fr) 13px minmax(0, 0.72fr);
+    gap: 4px;
+  }
+
+  .boarding-ticket__route-stop strong,
+  .boarding-ticket__carriage strong {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  .boarding-ticket {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 28px minmax(145px, auto) auto 28px;
+    aspect-ratio: auto;
+  }
+
+  .boarding-ticket__band {
+    font-size: 9px;
+  }
+
+  .boarding-ticket__band--top {
+    grid-row: 1;
+  }
+
+  .boarding-ticket__band--bottom {
+    grid-row: 4;
+  }
+
+  .boarding-ticket__band--bottom span:last-child {
+    display: none;
+  }
+
+  .boarding-ticket__main {
+    grid-row: 2;
+    padding: 14px 18px;
+  }
+
+  .boarding-ticket__stub {
+    grid-row: 3;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    align-items: start;
+    gap: 8px 12px;
+    padding: 12px 18px 12px;
+    border-top: 1px dashed #aeb4a7;
+    border-left: 0;
+  }
+
+  .boarding-ticket__stats {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .boarding-ticket__stats div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .boarding-ticket__stats dd {
+    text-align: left;
+  }
+
+  .boarding-ticket__stats .boarding-ticket__total {
+    padding-top: 0;
+    border-top: 0;
+  }
+}

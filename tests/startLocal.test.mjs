@@ -102,7 +102,7 @@ test('starts the API before Vite and shuts down both owned processes', async () 
       spawnCalls.push(args);
       return child;
     },
-    environment: { GEMINI_API_KEY: 'server-only-key', VITE_API_URL: '' },
+    environment: { GEMINI_API_KEY: 'server-only-key' },
   });
 
   assert.equal(children.length, 2);
@@ -110,10 +110,36 @@ test('starts the API before Vite and shuts down both owned processes', async () 
   assert.match(spawnCalls[1][1].join(' '), /vite\.js/);
   assert.equal(spawnCalls[0][2].env.GEMINI_API_KEY, 'server-only-key');
   assert.equal(spawnCalls[1][2].env.GEMINI_API_KEY, undefined);
-  assert.equal(spawnCalls[1][2].env.VITE_API_URL, 'http://localhost:0/api/v1');
+  assert.equal(spawnCalls[1][2].env.VITE_API_URL, undefined);
 
   await stack.stop();
   assert.deepEqual(children.map((child) => child.signals), [['SIGTERM'], ['SIGTERM']]);
+});
+
+test('preserves an explicit public API URL for Vite without exposing backend secrets', async () => {
+  const spawnCalls = [];
+  const stack = await startLocalStack({
+    ports: { api: 0, database: 0, web: 0 },
+    portIsAvailable: async () => true,
+    waitForReady: async () => {},
+    spawnChild: (...args) => {
+      const child = new EventEmitter();
+      child.exitCode = null;
+      child.signalCode = null;
+      child.kill = (signal) => { child.signalCode = signal; child.emit('exit', null, signal); };
+      spawnCalls.push(args);
+      return child;
+    },
+    environment: {
+      GEMINI_API_KEY: 'server-only-key',
+      VITE_API_URL: ' https://api.example.com/api/v1/ ',
+    },
+  });
+
+  const webEnvironment = spawnCalls[1][2].env;
+  assert.equal(webEnvironment.VITE_API_URL, 'https://api.example.com/api/v1/');
+  assert.equal(webEnvironment.GEMINI_API_KEY, undefined);
+  await stack.stop();
 });
 
 test('an interrupted startup stops the child it already launched', async () => {

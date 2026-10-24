@@ -2,7 +2,10 @@ import { tokenStorage } from "./tokenStorage";
 import type { Tokens } from "./contracts";
 import { apiConnectionFailure, resolveApiUrl } from "./apiUrl";
 
-export const API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
+export const API_URL = resolveApiUrl(
+  import.meta.env.VITE_API_URL,
+  typeof window === "undefined" ? undefined : window.location.href,
+);
 export const REGISTRATION_PASSWORD_HINT =
   "Mật khẩu cần từ 8 đến 72 ký tự, có chữ hoa, số và ký tự đặc biệt (ví dụ: @, !, #).";
 let accessToken: string | null = null;
@@ -72,8 +75,11 @@ async function fetchWithTimeout(path: string, init: RequestInit) {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    ["/quizzes/generate", "/quiz/generate"].includes(path) ? 100000 : 30000,
+    path === "/materials/read" ? 115000 : ["/quizzes/generate", "/quiz/generate", "/materials/generate"].includes(path) ? 100000 : 30000,
   );
+  const abort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) abort();
+  else init.signal?.addEventListener("abort", abort, { once: true });
   const url = `${API_URL}${path}`;
   try {
     return await fetch(url, {
@@ -100,6 +106,7 @@ async function fetchWithTimeout(path: string, init: RequestInit) {
     throw new ApiError(failure.status, failure.message);
   } finally {
     clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", abort);
   }
 }
 async function decode<T>(response: Response, path?: string): Promise<T> {
@@ -108,22 +115,36 @@ async function decode<T>(response: Response, path?: string): Promise<T> {
   try {
     body = await response.json();
   } catch {
+    if (!response.ok && response.status >= 500)
+      throw new ApiError(
+        response.status,
+        `Máy chủ API tạm thời không khả dụng (HTTP ${response.status}). Hãy thử lại sau.`,
+      );
     throw new ApiError(response.status, "Máy chủ trả về dữ liệu không hợp lệ.");
   }
   if (!response.ok) {
-    const problem = body as { detail?: string; errors?: { field?: string; message?: string }[] };
+    const problem = body && typeof body === "object" && !Array.isArray(body)
+      ? body as { detail?: unknown; errors?: unknown }
+      : {};
     if (path === "/auth/register") {
       if (response.status === 409)
         throw new ApiError(409, "Email này đã được đăng ký. Hãy đăng nhập hoặc dùng email khác.");
       if (response.status === 400 && Array.isArray(problem.errors)) {
-        const passwordErrors = problem.errors.filter((error) => error.field === "password");
+        const passwordErrors = problem.errors.filter((error): error is { field?: unknown; message?: unknown } =>
+          typeof error === "object" && error !== null && "field" in error,
+        ).filter((error) => error.field === "password");
         if (passwordErrors.length)
-          throw new ApiError(400, passwordErrors.some((error) => error.message?.includes("72 UTF-8 bytes"))
+          throw new ApiError(400, passwordErrors.some((error) =>
+            typeof error.message === "string" && error.message.includes("72 UTF-8 bytes"),
+          )
             ? "Mật khẩu quá dài. Hãy rút ngắn mật khẩu, nhất là khi dùng ký tự có dấu."
             : REGISTRATION_PASSWORD_HINT);
       }
     }
-    throw new ApiError(response.status, problem.detail ?? "Yêu cầu thất bại.");
+    throw new ApiError(
+      response.status,
+      typeof problem.detail === "string" ? problem.detail : "Yêu cầu thất bại.",
+    );
   }
   return body as T;
 }

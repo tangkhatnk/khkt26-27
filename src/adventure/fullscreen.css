@@ -1,0 +1,78 @@
+.adventure:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #f6f6f1;
+}
+
+.adventure:fullscreen .sidebar,
+.adventure:fullscreen .topbar {
+  display: none !important;
+}
+
+.adventure:fullscreen .main-area {
+  margin-left: 0 !important;
+}
+
+.adventure:fullscreen main {
+  width: 100%;
+  max-width: 1220px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: clamp(18px, 4vw, 48px);
+}
+
+.adventure:fullscreen .focus-heading {
+  max-width: 1180px;
+  margin: 8px auto 24px;
+}
+
+.adventure:fullscreen .focus-card {
+  max-width: 1180px;
+}
+
+.adventure:fullscreen .timer {
+  font-size: clamp(64px, 10vw, 124px);
+}
+
+.adventure:fullscreen .overhead-viewport {
+  max-height: min(58vh, 680px);
+  overflow: auto;
+}
+
+.adventure .study-fullscreen-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.adventure .study-fullscreen-control button {
+  min-height: 40px;
+  height: auto;
+  padding: 9px 16px !important;
+  border: 1px solid #9bb5a1;
+  border-radius: 999px !important;
+  background: #e2eadd !important;
+  color: #355e4a !important;
+  cursor: pointer;
+}
+
+.adventure .study-fullscreen-control button:hover:not(:disabled) {
+  background: #d8e4d8 !important;
+}
+
+.adventure .study-fullscreen-control button:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.adventure .study-fullscreen-status {
+  max-width: 430px;
+  color: #627267;
+  font-size: 12px;
+  text-align: center;
+}

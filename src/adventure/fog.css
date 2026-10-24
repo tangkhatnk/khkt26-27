@@ -1,0 +1,185 @@
+.overhead-cloud-layer,
+.travel-cloud-cover {
+  pointer-events: none;
+}
+
+.map-fog-layer,
+.map-fog-wisps {
+  pointer-events: none;
+}
+
+.map-fog-layer {
+  --fog-cover-start: #0d3d52;
+  --fog-cover-mid: #195d73;
+  --fog-cover-end: #092f45;
+  --fog-bank-blue: #72c5eb;
+  --fog-bank-highlight: #e6f7ff;
+}
+
+[data-theme="dark"] .map-fog-layer {
+  --fog-cover-start: #0b344b;
+  --fog-cover-mid: #154f67;
+  --fog-cover-end: #07283c;
+  --fog-bank-blue: #75c5e9;
+  --fog-bank-highlight: #e9f8ff;
+}
+
+[data-theme="light"] .map-fog-layer {
+  --fog-cover-start: #10465d;
+  --fog-cover-mid: #21687d;
+  --fog-cover-end: #0c3b51;
+  --fog-bank-blue: #7ac9ec;
+  --fog-bank-highlight: #e9faff;
+}
+
+.map-fog-cover {
+  opacity: .94;
+}
+
+.map-fog-cloud-density {
+  opacity: .76;
+}
+
+.map-fog-eddy-density {
+  opacity: .44;
+}
+
+.map-fog-flow {
+  transform-box: view-box;
+  transform-origin: center;
+}
+
+/* These full-map turbulence and blur layers stay static to avoid per-frame filter work. */
+.map-fog-flow.is-active {
+  animation: none;
+}
+
+.cartoon-cloud-shape {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 650ms cubic-bezier(0.18, 0.8, 0.28, 1);
+}
+
+.cartoon-cloud-shadow {
+  fill: #738a83;
+  stroke: #738a83;
+  stroke-width: 2;
+  opacity: .2;
+}
+
+.cartoon-cloud-depth {
+  fill: #cbd7ce;
+  stroke: #cbd7ce;
+  stroke-width: 3;
+  opacity: .9;
+}
+
+.cartoon-cloud-body {
+  fill: #eef4ef;
+  fill-opacity: 1;
+  stroke: #c4d3cd;
+  stroke-width: 3;
+  stroke-opacity: 1;
+}
+
+.cartoon-cloud-highlight {
+  fill: #fffef7;
+  opacity: .72;
+}
+
+.overhead-exploration-progress {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 15px;
+  padding: 12px 14px;
+  border: 1px solid #dce3d6;
+  border-radius: 12px;
+  background: #f7f8f2;
+}
+
+.overhead-exploration-progress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #42564a;
+  font-size: 12px;
+}
+
+.overhead-exploration-progress > div span,
+.overhead-exploration-progress small {
+  color: #788078;
+}
+
+.overhead-exploration-progress progress {
+  display: block;
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 99px;
+  background: #dfe6da;
+  accent-color: #d67b49;
+}
+
+.overhead-exploration-progress progress::-webkit-progress-bar {
+  border-radius: 99px;
+  background: #dfe6da;
+}
+
+.overhead-exploration-progress progress::-webkit-progress-value {
+  border-radius: 99px;
+  background: #d67b49;
+}
+
+.overhead-exploration-progress progress::-moz-progress-bar {
+  border-radius: 99px;
+  background: #d67b49;
+}
+
+.overhead-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overhead-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.fog-legend-known {
+  background: #dceac3;
+  border: 1px solid #9db28b;
+}
+
+.fog-legend-hidden {
+  background: #bdc9b8;
+  border: 1px solid #95a394;
+}
+
+.fog-legend-route {
+  width: 17px !important;
+  height: 4px !important;
+  border-radius: 99px !important;
+  background: #e4a557;
+}
+
+@media (max-width: 600px) {
+  .overhead-exploration-progress > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cartoon-cloud-shape {
+    transition: none;
+  }
+
+  .map-fog-flow.is-active {
+    animation: none;
+  }
+}
