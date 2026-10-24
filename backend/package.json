@@ -27,7 +27,7 @@
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/websocket": "^11.2.0",
     "@google/genai": "^2.27.0",
-    "@prisma/client": "6.19.0",
+    "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.0",
@@ -42,7 +42,7 @@
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "ioredis-mock": "^8.13.1",
-    "prisma": "6.19.0",
+    "prisma": "6.19.3",
     "tsx": "^4.20.6",
     "typescript": "~6.0.3",
     "vitest": "^3.2.4"
