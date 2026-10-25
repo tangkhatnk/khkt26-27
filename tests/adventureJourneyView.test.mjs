@@ -15,6 +15,7 @@ let tripSceneTiming;
 let StudyGuideComposer;
 let ExperimentShareMineStatus;
 let QuizPanel;
+let SessionCorrectionNotice;
 
 before(async () => {
   vite = await createServer({
@@ -29,6 +30,7 @@ before(async () => {
   ({ StudyGuideComposer } = await vite.ssrLoadModule("/src/adventure/StudyGuideComposer.tsx"));
   ({ ExperimentShareMineStatus } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
   ({ QuizPanel } = await vite.ssrLoadModule("/src/adventure/QuizPanel.tsx"));
+  ({ SessionCorrectionNotice } = await vite.ssrLoadModule("/src/adventure/SessionCorrectionNotice.tsx"));
   ({ tripSceneTiming } = await vite.ssrLoadModule("/src/adventure/focus.ts"));
 });
 
@@ -116,6 +118,34 @@ test("quiz generation exposes a distinct primary action", () => {
   }));
 
   assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
+});
+
+test("corrected summary notice separates effective metrics from the recorded end time", () => {
+  const markup = renderToStaticMarkup(React.createElement(SessionCorrectionNotice, {
+    correctionFlags: {
+      goal: false, topic: false, targetSeconds: false, elapsedSeconds: true,
+      actualStudySeconds: false, focusedSeconds: true, actualBreakSeconds: false,
+      distractions: false, quizResult: false,
+    },
+    recordedEnd: "22/10, 11:30",
+  }));
+
+  assert.match(markup, /Một số nội dung hoặc số liệu phiên này đã được hiệu chỉnh/u);
+  assert.match(markup, /Mốc kết thúc ghi nhận vẫn là thời điểm đã đo: 22\/10, 11:30/u);
+  assert.match(markup, /Thời lượng hiệu lực đã được hiệu chỉnh riêng/u);
+});
+
+test("summary correction notice stays absent when no correction is active", () => {
+  const markup = renderToStaticMarkup(React.createElement(SessionCorrectionNotice, {
+    correctionFlags: {
+      goal: false, topic: false, targetSeconds: false, elapsedSeconds: false,
+      actualStudySeconds: false, focusedSeconds: false, actualBreakSeconds: false,
+      distractions: false, quizResult: false,
+    },
+    recordedEnd: "22/10, 11:30",
+  }));
+
+  assert.equal(markup, "");
 });
 
 test("corrected quiz metrics stay separate from the original grade feedback", () => {

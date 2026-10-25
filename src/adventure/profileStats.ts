@@ -1,4 +1,5 @@
-import type { SessionMetrics } from "../../backend/src/adventure/domain.ts";
+import type { SessionCorrectionFlags, SessionMetrics } from "../../backend/src/adventure/domain.ts";
+import { hasSessionCorrections } from "./learning.ts";
 
 export type ProfileStudySummary = {
   id: string;
@@ -6,6 +7,8 @@ export type ProfileStudySummary = {
   topic: string;
   studiedAt: number;
   focusedSeconds: number;
+  hasCorrections: boolean;
+  elapsedCorrected: boolean;
 };
 
 export type ProfileSessionRecord = {
@@ -16,11 +19,13 @@ export type ProfileSessionRecord = {
   ended: number;
   seconds: number;
   effectiveMetrics?: Pick<SessionMetrics, "focusedSeconds">;
+  correctionFlags?: Partial<SessionCorrectionFlags>;
 };
 
 export type ProfileStats = {
   sessionCount: number;
   focusedSeconds: number;
+  correctedSessionCount: number;
   recentStudies: ProfileStudySummary[];
 };
 
@@ -44,6 +49,8 @@ export function profileStats(
     const seconds = Number.isFinite(measured) ? Math.max(0, measured) : 0;
     return total + seconds;
   }, 0);
+  const correctedSessionCount = ownSessions.filter((session) =>
+    hasSessionCorrections(session.correctionFlags)).length;
   const recentStudies = ownSessions
     .sort((first, second) => second.ended - first.ended)
     .slice(0, 4)
@@ -53,7 +60,9 @@ export function profileStats(
       topic: session.topic,
       studiedAt: session.ended,
       focusedSeconds: session.effectiveMetrics?.focusedSeconds ?? session.seconds,
+      hasCorrections: hasSessionCorrections(session.correctionFlags),
+      elapsedCorrected: Boolean(session.correctionFlags?.elapsedSeconds),
     }));
 
-  return { sessionCount: ownSessions.length, focusedSeconds, recentStudies };
+  return { sessionCount: ownSessions.length, focusedSeconds, correctedSessionCount, recentStudies };
 }

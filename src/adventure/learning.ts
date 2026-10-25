@@ -39,6 +39,10 @@ export type ReviewPlan = {
   materials: MaterialInfo[];
 };
 
+export function hasSessionCorrections(flags?: Partial<SessionCorrectionFlags>): boolean {
+  return Boolean(flags && Object.values(flags).some(Boolean));
+}
+
 function elapsedContext(seconds: number): string {
   const totalSeconds = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(totalSeconds / 60);

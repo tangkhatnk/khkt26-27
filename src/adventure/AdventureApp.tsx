@@ -31,8 +31,9 @@ import { updateQuickTripDraft, type QuickTripDraft } from "./quickTripDraft";
 import { QuizPrefetchCoordinator, quizPrefetchScopeKey, type QuizPrefetchScope } from "./quizPrefetch";
 import { isCurrentQuizPrefetchRequest } from "./quizPrefetchPresentation";
 import { buildQuizGenerationPayload, quizDraftFromQuestions, quizGenerationSourceKey } from "./quizGeneration";
-import { permanentGuestFailure, publishGuestSessions, type GuestPublicationStatus } from "./guestPublication";
+import { guestPublicationNotice, permanentGuestFailure, publishGuestSessions, type GuestPublicationStatus } from "./guestPublication";
 import { GuestHistorySync } from "./GuestHistorySync";
+import { SessionCorrectionNotice } from "./SessionCorrectionNotice";
 import { studyTopics } from "./topics";
 import {
   breakStatus,
@@ -54,15 +55,17 @@ import { isValidBreakPlan, studyElapsedSeconds } from "../../backend/src/adventu
 import {
   emptySaved,
   historySessions,
+  isCurrentOwnerWorkspace,
   readSaved,
   reconcileOwnerSnapshot,
   suppressRemovedSessions,
+  syncOwnerHistory,
   writeSaved,
   type Saved,
   type SessionHistoryEntry,
 } from "./storage";
 import { isQuizCount, isValidQuizDraft, quizPanelDraftState, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
-import { analyzeSession, knowledgeGaps, reviewPlan } from "./learning";
+import { analyzeSession, hasSessionCorrections, knowledgeGaps, reviewPlan } from "./learning";
 import {
   localDayKey,
   millisecondsUntilNextLocalDay,
@@ -150,6 +153,7 @@ function AdventureWorkspace() {
     ownerRef = useRef(owner);
   const workspaceLive = useRef(false);
   const [guestPublication, setGuestPublication] = useState<Record<string, GuestPublicationStatus>>({});
+  const [guestNoticeStatus, setGuestNoticeStatus] = useState<GuestPublicationStatus | null>(null);
   const hasActiveTrip = Boolean(saved.active);
   const studyFullscreen = useStudyFullscreen(view === "focus" && hasActiveTrip);
   const [loaded, setLoaded] = useState(false),
@@ -417,8 +421,13 @@ function AdventureWorkspace() {
     if (syncing.current) return syncing.current;
     const id = ownerRef.current;
     syncing.current = (async () => {
+      const isCurrent = () => isCurrentOwnerWorkspace(
+        id,
+        ownerRef.current,
+        workspaceLive.current,
+        useAuthStore.getState().user?.id,
+      );
       if (id === "guest") {
-        const isCurrent = () => workspaceLive.current && ownerRef.current === id;
         while (isCurrent()) {
           const unpublished = Object.values(current.current.local.sessions).filter(session =>
             session.userId === "guest" && !current.current.guestPublished?.includes(session.id) &&
@@ -434,7 +443,11 @@ function AdventureWorkspace() {
             markPublished: sessionId => commit({ ...current.current,
               guestPublished: [...new Set([...(current.current.guestPublished ?? []), sessionId])] }),
             markRemoved: sessionId => isCurrent() && commit(suppressRemovedSessions(current.current, [sessionId])),
-            onStatus: status => setGuestPublication(value => ({ ...value, [status.sessionId]: status })),
+            onStatus: status => {
+              setGuestPublication(value => ({ ...value, [status.sessionId]: status }));
+              if (status.status === "removed" || status.status === "suppression-failed")
+                setGuestNoticeStatus(status);
+            },
           });
           // Stop on a failed request/save; retain unacknowledged trips for the next retry.
           if (unpublished.some(session => !current.current.guestPublished?.includes(session.id) &&
@@ -442,31 +455,24 @@ function AdventureWorkspace() {
         }
         return;
       }
-      while (current.current.pending.length) {
-        const session = current.current.pending[0];
-        let result: Snapshot;
-        try {
-          result = await post<Snapshot>("/adventure/sessions", session);
-        } catch (cause) {
-          if (ownerRef.current !== id || !workspaceLive.current) return;
-          if (!hasHttpStatus(cause, 410)) throw cause;
-          if (!commit(suppressRemovedSessions(current.current, [session.id]))) return;
+      await syncOwnerHistory({
+        isCurrent,
+        pending: () => current.current.pending,
+        send: session => post<Snapshot>("/adventure/sessions", session),
+        commitPending: (session, result) => commit({
+          ...current.current,
+          pending: current.current.pending.filter((pendingSession) => pendingSession.id !== session.id),
+          snapshot: result,
+        }),
+        handleSendError: (session, cause) => {
+          if (!hasHttpStatus(cause, 410)) return;
+          if (!commit(suppressRemovedSessions(current.current, [session.id]))) return "stop";
           setNotice("Phiên đã được máy chủ gỡ khỏi lịch sử và sẽ không được gửi lại.");
-          continue;
-        }
-        if (ownerRef.current !== id) return;
-        if (
-          !commit({
-            ...current.current,
-            pending: current.current.pending.filter((p) => p.id !== session.id),
-            snapshot: result,
-          })
-        )
-          return;
-      }
-      const result = await request<Snapshot>("/adventure");
-      if (ownerRef.current === id)
-        commit({ ...current.current, snapshot: result });
+          return "continue";
+        },
+        fetchSnapshot: () => request<Snapshot>("/adventure"),
+        commitSnapshot: result => commit({ ...current.current, snapshot: result }),
+      });
     })().finally(() => {
       syncing.current = null;
     });
@@ -483,17 +489,21 @@ function AdventureWorkspace() {
       const interval = setInterval(retry, 60000);
       return () => { disposed = true; clearInterval(interval); };
     }
+    const syncOwner = ownerRef.current;
+    const isCurrent = () => isCurrentOwnerWorkspace(
+      syncOwner,
+      ownerRef.current,
+      workspaceLive.current,
+      useAuthStore.getState().user?.id,
+    );
     void sync()
-      .then(() =>
-        request<{ topics: { id: string; name: string }[] }>("/topics"),
-      )
-      .then((r) => {
-        if (!disposed) {
-          setTopics(r.topics);
-        }
+      .then(async () => {
+        if (disposed || !isCurrent()) return;
+        const result = await request<{ topics: { id: string; name: string }[] }>("/topics");
+        if (!disposed && isCurrent()) setTopics(result.topics);
       })
       .catch((e) => {
-        if (!disposed)
+        if (!disposed && isCurrent())
           setError(e instanceof Error ? e.message : "Chưa đồng bộ được.");
       });
     return () => {
@@ -555,6 +565,7 @@ function AdventureWorkspace() {
   const summarySession = summarySessionId
     ? sessions.find((session) => session.id === summarySessionId && !removedIds.has(session.id)) ?? null
     : null;
+  const guestNotice = guestNoticeStatus ? guestPublicationNotice(guestNoticeStatus) : null;
   const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
     studyElapsedSeconds(
       summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
@@ -1371,6 +1382,14 @@ function AdventureWorkspace() {
           {notice && (
             <div className="message" role="status">
               {notice}
+            </div>
+          )}
+          {guestNotice && guestNoticeStatus && (
+            <div
+              className={guestNoticeStatus.status === "suppression-failed" ? "message error" : "message"}
+              role={guestNoticeStatus.status === "suppression-failed" ? "alert" : "status"}
+            >
+              {guestNotice}
             </div>
           )}
           {needsLogin && <div className="sync-banner"><span>Hành trình đang dùng dữ liệu trên thiết bị. Đăng nhập lại để đồng bộ; bạn vẫn có thể tiếp tục học.</span><button onClick={() => go("account")}>Đăng nhập lại</button></div>}
@@ -2341,13 +2360,17 @@ function AdventureWorkspace() {
                             <div className="session-row-content">
                               <h3>{s.goal}</h3>
                               <p>
-                                {date(s.ended)} ·{" "}
+                                Kết thúc ghi nhận: {date(s.ended)} ·{" "}
                                 {s.groupId ? "Đóng góp cho đoàn" : "Cá nhân"} ·{" "}
                                 {saved.pending.some((p) => p.id === s.id)
                                   ? "Chờ đồng bộ"
                                   : "Đã lưu"}
                               </p>
                               <div className="session-analysis">
+                                {hasSessionCorrections(s.correctionFlags) &&
+                                  <span className="session-correction-badge">Dữ liệu đã hiệu chỉnh</span>}
+                                {s.correctionFlags?.elapsedSeconds &&
+                                  <span className="session-correction-detail">Thời lượng hiệu lực đã chỉnh; mốc kết thúc vẫn giữ nguyên.</span>}
                                 {analysis.breakSeconds > 0 && <p>Giải lao: {clock(analysis.breakSeconds)} · không tính xao nhãng hoặc XP</p>}
                                 <span>{analysis.focusLabel} · {analysis.focusPercent === null ? "—" : `${Math.floor(analysis.focusPercent)}%`} tập trung</span>
                                 <span>Số lần xao nhãng: <b>{analysis.distractions}</b></span>
@@ -2420,6 +2443,10 @@ function AdventureWorkspace() {
                         }}
                       />
                     </div>
+                    <SessionCorrectionNotice
+                      correctionFlags={summarySession.correctionFlags}
+                      recordedEnd={date(summarySession.ended)}
+                    />
                     <div className="stat-row summary-stats">
                       <Stat
                         icon="◷"
@@ -2494,10 +2521,10 @@ function AdventureWorkspace() {
                     {owner === "guest" ? <section className="panel experiment-share">
                       <h2>Đóng góp kết quả thực nghiệm</h2>
                       <p>Phiên khách không được công khai tự động. Hãy bắt đầu phiên sau khi đăng nhập; khi phiên được đồng bộ, bạn có thể chọn công khai từ tổng kết.</p>
-                      <p role="status">{saved.guestPublished?.includes(summarySession.id)
-                        ? "Bản lưu khách đã được máy chủ nhận; phiên này vẫn chưa được công khai."
-                        : guestPublication[summarySession.id]?.status === "suppression-failed"
-                          ? guestPublication[summarySession.id].message ?? "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại."
+                      <p role={guestPublication[summarySession.id]?.status === "suppression-failed" ? "alert" : "status"}>{guestPublication[summarySession.id]?.status === "suppression-failed"
+                        ? guestPublication[summarySession.id].message ?? "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại."
+                        : saved.guestPublished?.includes(summarySession.id)
+                          ? "Bản lưu khách đã được máy chủ nhận; phiên này vẫn chưa được công khai."
                         : guestPublication[summarySession.id]?.status === "save-failed"
                           ? "Máy chủ đã nhận bản lưu khách, nhưng thiết bị chưa lưu xác nhận. Phiên này vẫn chưa được công khai."
                           : guestPublication[summarySession.id]?.status === "sending"

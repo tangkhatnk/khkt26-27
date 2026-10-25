@@ -26,6 +26,62 @@ export type Saved = {
   quizDrafts?: Record<string, QuizDraft>;
   summarySessionId?: string;
 };
+/** A sync continuation may write only while its captured owner, auth identity, and workspace agree. */
+export function isCurrentOwnerWorkspace(
+  expectedOwner: string,
+  currentOwner: string,
+  workspaceLive: boolean,
+  authenticatedOwner?: string,
+): boolean {
+  return expectedOwner === currentOwner && workspaceLive &&
+    (expectedOwner === "guest"
+      ? authenticatedOwner === undefined
+      : authenticatedOwner === expectedOwner);
+}
+type OwnerHistorySyncErrorAction = "continue" | "stop";
+export async function syncOwnerHistory<Session, Response>({
+  isCurrent,
+  pending,
+  send,
+  commitPending,
+  handleSendError,
+  fetchSnapshot,
+  commitSnapshot,
+}: {
+  isCurrent: () => boolean;
+  pending: () => readonly Session[];
+  send: (session: Session) => Promise<Response>;
+  commitPending: (session: Session, response: Response) => boolean;
+  handleSendError: (
+    session: Session,
+    error: unknown,
+  ) => OwnerHistorySyncErrorAction | undefined | Promise<OwnerHistorySyncErrorAction | undefined>;
+  fetchSnapshot: () => Promise<Response>;
+  commitSnapshot: (response: Response) => boolean;
+}): Promise<void> {
+  while (isCurrent()) {
+    const session = pending()[0];
+    if (!session) break;
+
+    let response: Response;
+    try {
+      response = await send(session);
+    } catch (error) {
+      if (!isCurrent()) return;
+      const action = await handleSendError(session, error);
+      if (!isCurrent() || action === "stop") return;
+      if (action === "continue") continue;
+      throw error;
+    }
+
+    if (!isCurrent() || !commitPending(session, response)) return;
+  }
+
+  if (!isCurrent()) return;
+  const response = await fetchSnapshot();
+  if (!isCurrent()) return;
+  commitSnapshot(response);
+}
 export const emptySaved = (): Saved => ({
   active: null,
   pending: [],

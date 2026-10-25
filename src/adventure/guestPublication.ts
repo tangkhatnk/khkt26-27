@@ -5,6 +5,15 @@ export type GuestPublicationStatus = {
   message?: string;
 };
 
+/** Keep removed and failed-suppression explanations available outside the trip summary. */
+export function guestPublicationNotice(status: GuestPublicationStatus): string | null {
+  if (status.status === "removed")
+    return status.message ?? "Phiên này đã được gỡ khỏi lịch sử máy chủ; thiết bị đã ngừng gửi lại.";
+  if (status.status === "suppression-failed")
+    return status.message ?? "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại.";
+  return null;
+}
+
 type GuestPublishAcknowledgement = { tripCode: string };
 
 export async function publishGuestSessions<
