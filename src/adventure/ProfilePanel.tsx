@@ -16,6 +16,7 @@ export type ProfilePanelProps = {
   stats: {
     sessionCount: number;
     focusedSeconds: number;
+    correctedSessionCount?: number;
     recentStudies: readonly ProfileStudySummary[];
   };
   admin: { state: ProfileAdminState; canRefresh: boolean };
@@ -171,10 +172,13 @@ export function ProfilePanel({ account, connectionLabel, journey, stats, admin, 
             <dd>{Math.max(0, Math.floor(stats.sessionCount))}</dd>
           </div>
           <div>
-            <dt>Tổng thời gian đã ghi nhận</dt>
+            <dt>Tổng thời gian tập trung</dt>
             <dd>{formatProfileDuration(stats.focusedSeconds)}</dd>
           </div>
         </dl>
+        {!!stats.correctedSessionCount && <p className="profile-correction-note" role="note">
+          Tổng thời gian tập trung dùng số liệu hiệu lực; {stats.correctedSessionCount} phiên có nội dung hoặc số liệu đã hiệu chỉnh.
+        </p>}
       </section>
     </div>
 
@@ -189,10 +193,12 @@ export function ProfilePanel({ account, connectionLabel, journey, stats, admin, 
       {recentStudies.length
         ? <ol className="profile-recent-list">
           {recentStudies.map((study) => <li key={study.id}>
-            <div className="profile-study-date">{profileDate(study.studiedAt)}</div>
+            <div className="profile-study-date"><span>Kết thúc ghi nhận</span><time>{profileDate(study.studiedAt)}</time></div>
             <div className="profile-study-copy">
               <h3>{study.goal}</h3>
               <p>{study.topic}</p>
+              {study.hasCorrections && <span className="profile-correction-badge">Đã hiệu chỉnh</span>}
+              {study.elapsedCorrected && <p className="profile-correction-note">Thời lượng hiệu lực đã chỉnh; mốc kết thúc vẫn giữ nguyên.</p>}
             </div>
             <span className="profile-study-duration">{formatProfileDuration(study.focusedSeconds)}</span>
           </li>)}

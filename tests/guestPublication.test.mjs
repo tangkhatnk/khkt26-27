@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { publishGuestSessions } from "../src/adventure/guestPublication.ts";
+import { guestPublicationNotice, publishGuestSessions } from "../src/adventure/guestPublication.ts";
 
 const sessions = [
   { id: "trip-1", goal: "Read biology" },
@@ -199,4 +199,47 @@ test("a failed local 410 suppression never reports guest publication success", a
 
   assert.equal(statuses.at(-1).status, "suppression-failed");
   assert.equal(statuses.at(-1).tripCode, undefined);
+});
+
+test("a removed guest trip keeps its explanation available when its summary is hidden", async () => {
+  const statuses = [];
+  const globalNotices = [];
+  const removedIds = [];
+  await publishGuestSessions({
+    sessions: [sessions[0]], publishedIds: [], isCurrent: () => true,
+    send: async () => { throw Object.assign(new Error("removed"), { status: 410 }); },
+    markPublished: async () => { throw new Error("410 must not publish"); },
+    markRemoved: async id => { removedIds.push(id); return true; },
+    onStatus: status => {
+      statuses.push(status);
+      const notice = guestPublicationNotice(status);
+      if (notice) globalNotices.push(notice);
+    },
+  });
+
+  assert.deepEqual(removedIds, ["trip-1"]);
+  assert.equal(statuses.at(-1).status, "removed");
+  assert.match(globalNotices.at(-1), /đã được gỡ khỏi lịch sử máy chủ/u);
+  assert.match(globalNotices.at(-1), /đã ngừng gửi lại/u);
+  assert.doesNotMatch(globalNotices.at(-1), /được công khai|đã nhận/u);
+});
+
+test("failed guest suppression remains a visible failure, never a publication success", async () => {
+  const statuses = [];
+  await publishGuestSessions({
+    sessions: [sessions[0]], publishedIds: [], isCurrent: () => true,
+    send: async () => { throw Object.assign(new Error("removed"), { status: 410 }); },
+    markPublished: async () => { throw new Error("410 must not publish"); },
+    markRemoved: async () => false,
+    onStatus: status => statuses.push(status),
+  });
+
+  const status = statuses.at(-1);
+  assert.equal(status.status, "suppression-failed");
+  const notice = guestPublicationNotice(status);
+  assert.match(notice, /máy chủ đã gỡ chuyến này/iu);
+  assert.match(notice, /thiết bị chưa lưu trạng thái/u);
+  assert.match(notice, /Hãy thử lại/u);
+  assert.doesNotMatch(notice, /đã đồng bộ|đã nhận|đã công khai/u);
+  assert.equal(guestPublicationNotice({ sessionId: "trip-1", status: "failed" }), null);
 });

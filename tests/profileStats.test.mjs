@@ -62,6 +62,9 @@ test("profile stats prefer authoritative corrected owner rows over duplicate pen
     goal: "Corrected goal",
     topic: "history",
     effectiveMetrics: { focusedSeconds: 45 },
+    correctionFlags: { goal: true, topic: false, targetSeconds: false, elapsedSeconds: true,
+      actualStudySeconds: false, focusedSeconds: false, actualBreakSeconds: false,
+      distractions: false, quizResult: false },
   };
   const stats = profileStats("account-a", [serverRow], [
     session("duplicate", "account-a", 700, 700),
@@ -70,7 +73,9 @@ test("profile stats prefer authoritative corrected owner rows over duplicate pen
 
   assert.equal(stats.sessionCount, 1);
   assert.equal(stats.focusedSeconds, 45);
+  assert.equal(stats.correctedSessionCount, 1);
   assert.deepEqual(stats.recentStudies, [{
     id: "duplicate", goal: "Corrected goal", topic: "history", studiedAt: 200, focusedSeconds: 45,
+    hasCorrections: true, elapsedCorrected: true,
   }]);
 });

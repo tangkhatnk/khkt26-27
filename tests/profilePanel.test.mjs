@@ -66,7 +66,7 @@ test("profile shows the account's own journey, study totals, and four newest pri
   assert.match(markup, /Toa Mây/u);
   assert.match(markup, /Rừng Sương mù/u);
   assert.match(markup, /Chặng 2 \/ 5/u);
-  assert.match(markup, /Tổng thời gian đã ghi nhận/u);
+  assert.match(markup, /Tổng thời gian tập trung/u);
   assert.match(markup, /1 giờ 1 phút/u);
   assert.match(markup, /Ôn cấu trúc tế bào/u);
   assert.match(markup, /Read about ecosystems/u);
@@ -120,4 +120,24 @@ test("offline admin status asks the learner to reconnect without claiming the ac
 
   assert.match(markup, /Kết nối lại máy chủ để kiểm tra quyền quản trị/u);
   assert.doesNotMatch(markup, /chưa được cấp quyền quản trị/u);
+});
+
+test("profile labels recorded session end times and marks corrected effective values", () => {
+  const markup = renderPanel({
+    stats: {
+      ...defaultProps.stats,
+      correctedSessionCount: 1,
+      recentStudies: [{
+        id: "corrected-study", goal: "Ôn Sinh học", topic: "Biology",
+        studiedAt: Date.UTC(2026, 9, 22), focusedSeconds: 600,
+        hasCorrections: true, elapsedCorrected: true,
+      }],
+    },
+  });
+
+  assert.match(markup, /Đã hiệu chỉnh/u);
+  assert.match(markup, /Kết thúc ghi nhận/u);
+  assert.match(markup, /Tổng thời gian tập trung dùng số liệu hiệu lực/u);
+  assert.match(markup, /Thời lượng hiệu lực đã chỉnh; mốc kết thúc vẫn giữ nguyên/u);
+  assert.doesNotMatch(markup, /thời điểm kết thúc đã được điều chỉnh/u);
 });

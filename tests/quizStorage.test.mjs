@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptySaved, historySessions, readSaved, reconcileOwnerSnapshot, suppressRemovedSessions, writeSaved } from "../src/adventure/storage.ts";
+import { emptySaved, historySessions, isCurrentOwnerWorkspace, readSaved, reconcileOwnerSnapshot, suppressRemovedSessions, writeSaved } from "../src/adventure/storage.ts";
+import * as storage from "../src/adventure/storage.ts";
 
 const rows = new Map();
 globalThis.localStorage = {
@@ -213,6 +214,113 @@ test("owner snapshots replace pending duplicates and persist tombstones without 
   assert.equal(reconciled.materials.removed[0].name, "Chapter.pdf");
   assert.equal(reconciled.quizDrafts.removed, undefined);
   assert.equal(reconciled.summarySessionId, undefined);
+});
+
+test("a held history POST cannot persist or queue another request after its workspace retires", async () => {
+  const syncOwnerHistory = storage.syncOwnerHistory;
+  assert.equal(typeof syncOwnerHistory, "function", "the app must expose its guarded history sync runner");
+  if (typeof syncOwnerHistory !== "function") return;
+
+  let activeOwner = "account-a";
+  let authenticatedOwner = "account-a";
+  let workspaceLive = true;
+  let lockHeld = true;
+  const pending = [session("first"), session("second")];
+  const posted = [];
+  let persisted = 0;
+  let snapshotRequests = 0;
+  let resolvePost;
+  const postResponse = new Promise(resolve => { resolvePost = resolve; });
+  const sync = syncOwnerHistory({
+    isCurrent: () => lockHeld && isCurrentOwnerWorkspace("account-a", activeOwner, workspaceLive, authenticatedOwner),
+    pending: () => pending,
+    send: async pendingSession => {
+      posted.push(pendingSession.id);
+      return postResponse;
+    },
+    commitPending: () => { persisted++; pending.shift(); return true; },
+    handleSendError: () => undefined,
+    fetchSnapshot: async () => { snapshotRequests++; return { sessions: [] }; },
+    commitSnapshot: () => { persisted++; return true; },
+  });
+
+  assert.deepEqual(posted, ["first"]);
+  workspaceLive = false;
+  lockHeld = false;
+  resolvePost({ sessions: [] });
+  await sync;
+
+  assert.equal(persisted, 0);
+  assert.deepEqual(posted, ["first"]);
+  assert.equal(snapshotRequests, 0);
+  assert.deepEqual(pending.map(({ id }) => id), ["first", "second"]);
+});
+
+test("a held history GET cannot persist after auth identity changes before workspace cleanup", async () => {
+  const syncOwnerHistory = storage.syncOwnerHistory;
+  assert.equal(typeof syncOwnerHistory, "function", "the app must expose its guarded history sync runner");
+  if (typeof syncOwnerHistory !== "function") return;
+
+  rows.clear();
+  let storageWrites = 0;
+  const originalSetItem = globalThis.localStorage.setItem;
+  globalThis.localStorage.setItem = function (key, value) {
+    storageWrites++;
+    originalSetItem.call(this, key, value);
+  };
+  let activeOwner = "account-a";
+  let authenticatedOwner = "account-a";
+  let workspaceLive = true;
+  let lockHeld = true;
+  let snapshotRequests = 0;
+  let saved = emptySaved();
+  let resolveSnapshot;
+  const snapshotResponse = new Promise(resolve => { resolveSnapshot = resolve; });
+  const sync = syncOwnerHistory({
+    isCurrent: () => lockHeld && isCurrentOwnerWorkspace("account-a", activeOwner, workspaceLive, authenticatedOwner),
+    pending: () => saved.pending,
+    send: async () => { throw new Error("no pending session should be posted"); },
+    commitPending: () => { throw new Error("no pending session should be committed"); },
+    handleSendError: () => undefined,
+    fetchSnapshot: async () => {
+      snapshotRequests++;
+      saved.pending = [session("added-during-get")];
+      writeSaved("account-a", saved);
+      return snapshotResponse;
+    },
+    commitSnapshot: response => {
+      saved = reconcileOwnerSnapshot(saved, response);
+      writeSaved("account-a", saved);
+      return true;
+    },
+  });
+
+  try {
+    const requestsBeforeResponse = snapshotRequests;
+    const writesBeforeResponse = storageWrites;
+    authenticatedOwner = "account-b";
+    resolveSnapshot({
+      revision: 2,
+      person: {},
+      group: null,
+      sessions: [],
+      removedSessionIds: ["added-during-get"],
+      rules: "train-v1",
+    });
+    await sync;
+
+    assert.equal(activeOwner, "account-a", "React ownerRef remains on the previous account until cleanup");
+    assert.equal(workspaceLive, true, "the old workspace is still marked live until cleanup");
+    assert.equal(lockHeld, true, "the old lock callback has not completed cleanup yet");
+    assert.equal(requestsBeforeResponse, 1);
+    assert.equal(writesBeforeResponse, 1, "the local pending row is saved before the account transition");
+    assert.equal(storageWrites, writesBeforeResponse, "the foreign tombstone cannot trigger a persisted reconciliation");
+    assert.equal(snapshotRequests, requestsBeforeResponse);
+    assert.deepEqual(saved.pending.map(({ id }) => id), ["added-during-get"]);
+    assert.deepEqual(readSaved("account-a").pending.map(({ id }) => id), ["added-during-get"]);
+  } finally {
+    globalThis.localStorage.setItem = originalSetItem;
+  }
 });
 
 test("a 410 tombstone suppresses queued rows locally and keeps its ID across an older snapshot", () => {

@@ -320,9 +320,44 @@
 }
 
 .profile-study-date {
+  display: grid;
+  gap: 2px;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.profile-study-date > span {
+  font-size: 10px;
+}
+
+.profile-correction-note {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.profile-correction-badge,
+.session-correction-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border: 1px solid #d8e3d7;
+  border-radius: 999px;
+  background: #edf3ea;
+  color: #436650;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.session-correction-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .profile-study-copy {
@@ -424,6 +459,13 @@ html[data-theme="dark"] .profile-recent-count {
 }
 
 html[data-theme="dark"] .profile-connection-label {
+  border-color: #405847;
+  background: #293b2f;
+  color: #c9dec9;
+}
+
+html[data-theme="dark"] .profile-correction-badge,
+html[data-theme="dark"] .session-correction-badge {
   border-color: #405847;
   background: #293b2f;
   color: #c9dec9;
