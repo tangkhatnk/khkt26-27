@@ -1,6 +1,6 @@
 export type GuestPublicationStatus = {
   sessionId: string;
-  status: "sending" | "published" | "failed" | "save-failed";
+  status: "sending" | "published" | "failed" | "save-failed" | "removed" | "suppression-failed";
   tripCode?: string;
   message?: string;
 };
@@ -13,27 +13,32 @@ export async function publishGuestSessions<
 >({
   sessions,
   publishedIds,
+  removedIds = [],
   isCurrent,
   send,
   markPublished,
+  markRemoved = () => false,
   onStatus,
   continueAfterFailure = () => false,
 }: {
   sessions: Session[];
   publishedIds: readonly string[];
+  removedIds?: readonly string[];
   isCurrent: () => boolean;
   send: (session: Session) => Promise<Acknowledgement>;
   markPublished: (
     sessionId: string,
     acknowledgement: Acknowledgement,
   ) => boolean | Promise<boolean>;
+  markRemoved?: (sessionId: string) => boolean | Promise<boolean>;
   onStatus: (status: GuestPublicationStatus) => void;
   continueAfterFailure?: (error: unknown) => boolean;
 }): Promise<void> {
   const published = new Set(publishedIds);
+  const removed = new Set(removedIds);
 
   for (const session of sessions) {
-    if (published.has(session.id)) continue;
+    if (published.has(session.id) || removed.has(session.id)) continue;
     if (!isCurrent()) return;
 
     onStatus({ sessionId: session.id, status: "sending" });
@@ -41,6 +46,30 @@ export async function publishGuestSessions<
     try {
       acknowledgement = await send(session);
     } catch (error) {
+      if (isRemovedSession(error)) {
+        let suppressed = false;
+        try {
+          if (isCurrent()) suppressed = await markRemoved(session.id);
+        } catch {
+          suppressed = false;
+        }
+        if (!isCurrent()) return;
+        if (!suppressed) {
+          onStatus({
+            sessionId: session.id,
+            status: "suppression-failed",
+            message: "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại.",
+          });
+          return;
+        }
+        removed.add(session.id);
+        onStatus({
+          sessionId: session.id,
+          status: "removed",
+          message: "Phiên này đã được gỡ khỏi lịch sử máy chủ; thiết bị đã ngừng gửi lại.",
+        });
+        continue;
+      }
       if (isCurrent()) {
         onStatus({
           sessionId: session.id,
@@ -80,6 +109,11 @@ export async function publishGuestSessions<
       tripCode: acknowledgement.tripCode,
     });
   }
+}
+
+function isRemovedSession(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error &&
+    Number(error.status) === 410;
 }
 
 export function permanentGuestFailure(error: unknown): boolean {

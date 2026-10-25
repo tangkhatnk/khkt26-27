@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { syncGuestBacklog } from "../src/adventure/guestBacklog.ts";
 
-const guest = () => ({ local: { sessions: { one: { id: "one", userId: "guest" } } }, guestPublished: [], notes: { one: "private note" } });
+const guest = () => ({
+  local: { sessions: { one: { id: "one", userId: "guest" } } },
+  pending: [], snapshot: null, quizDrafts: {}, removedSessionIds: [],
+  guestPublished: [], notes: { one: "private note" },
+});
 
 test("account-side retry writes only guest markers and releases the lock during upload", async () => {
   let saved = guest(), locked = false;
@@ -59,4 +63,34 @@ test("account change while publishing cancels the old context before writing mar
     send: async () => { active = false; return { tripCode: "V-ONE" }; },
   });
   assert.deepEqual(saved.guestPublished, []);
+});
+
+test("a guest 410 persists tombstone suppression separately from acknowledged publication", async () => {
+  let saved = guest(), sent = 0;
+  saved.notes.one = "keep this private note";
+  saved.sources = { one: [{ id: "source-one", text: "keep source" }] };
+  saved.materials = { one: [{ name: "Trip.pdf", size: 10, type: "application/pdf", status: "saved", message: "Local" }] };
+  const dependencies = {
+    withGuestLock: async action => action(),
+    read: () => saved,
+    write: value => { saved = value; },
+    isCurrent: () => true,
+    send: async () => {
+      sent++;
+      throw Object.assign(new Error("Phiên học đã được gỡ khỏi lịch sử."), { status: 410 });
+    },
+  };
+
+  await syncGuestBacklog(dependencies);
+  assert.deepEqual(saved.removedSessionIds, ["one"]);
+  assert.equal(saved.local.sessions.one, undefined);
+  await syncGuestBacklog(dependencies);
+
+  assert.equal(sent, 1);
+  assert.deepEqual(saved.removedSessionIds, ["one"]);
+  assert.deepEqual(saved.guestPublished, []);
+  assert.equal(saved.local.sessions.one, undefined);
+  assert.equal(saved.notes.one, "keep this private note");
+  assert.equal(saved.sources.one[0].text, "keep source");
+  assert.equal(saved.materials.one[0].name, "Trip.pdf");
 });

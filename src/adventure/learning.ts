@@ -1,8 +1,18 @@
 import type { QuizAssessment, QuizFeedback } from "../../backend/src/adventure/quizAssessment";
-import { breakElapsedSeconds as scheduledBreakElapsedSeconds, type Session } from "../../backend/src/adventure/domain.ts";
+import {
+  breakElapsedSeconds as scheduledBreakElapsedSeconds,
+  type Session,
+  type SessionCorrectionFlags,
+  type SessionMetrics,
+} from "../../backend/src/adventure/domain.ts";
 import type { ActiveTrip } from "./focus";
 
 export type MaterialInfo = NonNullable<ActiveTrip["materials"]>[number];
+export type LearningSession = Session & {
+  correctionVersion?: number;
+  effectiveMetrics?: SessionMetrics;
+  correctionFlags?: SessionCorrectionFlags;
+};
 export type KnowledgeGap = {
   knowledgePoint: string;
   wrong: number;
@@ -39,30 +49,31 @@ function elapsedContext(seconds: number): string {
     : `${minutes} phút`;
 }
 
-export function distractionCount(session: Session): number {
+export function distractionCount(session: LearningSession): number {
   const explicit = session.distractions;
   if (Number.isSafeInteger(explicit) && explicit! >= 0) return explicit!;
   return session.segments.filter((segment) => segment.kind === "distraction").length;
 }
 
-export function analyzeSession(session: Session): SessionAnalysis {
-  const elapsedSeconds = Number.isFinite(session.started) && Number.isFinite(session.ended)
+export function analyzeSession(session: LearningSession): SessionAnalysis {
+  const metrics = session.effectiveMetrics;
+  const elapsedSeconds = metrics?.elapsedSeconds ?? (Number.isFinite(session.started) && Number.isFinite(session.ended)
     ? Math.max(0, (session.ended - session.started) / 1000)
-    : 0;
+    : 0);
   const recordedBreakSeconds = session.segments.reduce(
     (sum, segment) => sum + (segment.kind === "break" ? Math.max(0, (segment.end - segment.start) / 1000) : 0),
     0,
   );
-  const breakSeconds = session.breakPlan
+  const breakSeconds = metrics?.actualBreakSeconds ?? (session.breakPlan
     ? scheduledBreakElapsedSeconds(session.started, session.target, session.breakPlan, session.ended)
-    : recordedBreakSeconds;
-  const studyElapsedSeconds = Math.max(0, elapsedSeconds - breakSeconds);
+    : recordedBreakSeconds);
+  const studyElapsedSeconds = metrics?.actualStudySeconds ?? Math.max(0, elapsedSeconds - breakSeconds);
   const recordedFocus = Number.isFinite(session.seconds) ? Math.max(0, session.seconds) : 0;
-  const focusedSeconds = Math.min(studyElapsedSeconds, recordedFocus);
+  const focusedSeconds = Math.min(studyElapsedSeconds, metrics?.focusedSeconds ?? recordedFocus);
   const focusPercent = studyElapsedSeconds > 0
     ? Math.min(100, (focusedSeconds / studyElapsedSeconds) * 100)
     : null;
-  const distractions = distractionCount(session);
+  const distractions = metrics?.distractions ?? distractionCount(session);
   const focusContext = `Trong ${elapsedContext(studyElapsedSeconds)} tính cả thời gian rời phiên, ghi nhận ${distractions} lần rời phiên.`;
   const interruptionReminder = distractions > 0
     ? " Bạn có thể thử tắt thông báo trước chuyến tiếp theo."
@@ -84,8 +95,10 @@ export function analyzeSession(session: Session): SessionAnalysis {
   }
 
   const quiz = session.quiz;
-  const quizPercent = quiz && Number.isFinite(quiz.score) && Number.isFinite(quiz.total) && quiz.total > 0
-    ? Math.max(0, Math.min(100, (quiz.score / quiz.total) * 100))
+  const quizScore = metrics ? metrics.quizScore : quiz?.score;
+  const quizTotal = metrics ? metrics.quizTotal : quiz?.total;
+  const quizPercent = Number.isFinite(quizScore) && Number.isFinite(quizTotal) && Number(quizTotal) > 0
+    ? Math.max(0, Math.min(100, (Number(quizScore) / Number(quizTotal)) * 100))
     : null;
   let knowledgeLabel: string;
   if (!quiz) {
@@ -149,7 +162,7 @@ function limitGoal(value: string): string {
 }
 
 export function reviewPlan(
-  session: Session,
+  session: LearningSession,
   notes: string,
   materials: MaterialInfo[] = [],
 ): ReviewPlan {
@@ -158,7 +171,8 @@ export function reviewPlan(
   const goal = reviewTopics.length
     ? `Ôn lại: ${reviewTopics.join(", ")}`
     : `Ôn lại: ${session.goal}`;
-  const target = Number.isFinite(session.target) ? session.target : 60;
+  const targetSeconds = session.effectiveMetrics?.targetSeconds ?? session.target;
+  const target = Number.isFinite(targetSeconds) ? targetSeconds : 60;
 
   return {
     goal: limitGoal(goal),

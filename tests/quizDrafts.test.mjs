@@ -25,6 +25,7 @@ test("valid quiz drafts survive the same JSON round trip used by local storage",
 
 test("quiz panel adopts the current saved draft and selected count without retaining edited-source questions", () => {
   const prefetched = {
+    correctionVersion: 0,
     count: 3,
     requestedCount: 5,
     questions: [question, { ...question, id: "123e4567-e89b-42d3-a456-426614174001" }, { ...question, id: "123e4567-e89b-42d3-a456-426614174002" }],
@@ -42,9 +43,20 @@ test("quiz panel adopts the current saved draft and selected count without retai
   assert.deepEqual(sourceEdited.draft.answers, {});
 
   assert.deepEqual(quizPanelDraftState(undefined), {
-    draft: { count: 3, questions: [], answers: {} },
+    draft: { correctionVersion: 0, count: 3, questions: [], answers: {} },
     countInput: "3",
   });
+});
+
+test("a draft from an older correction version keeps the selected count but drops stale questions and answers", () => {
+  const stale = { correctionVersion: 1, count: 1, requestedCount: 4, questions: [question], answers: { [question.id]: 2 } };
+  const adopted = quizPanelDraftState(stale, 2);
+
+  assert.equal(adopted.countInput, "4");
+  assert.equal(adopted.draft.correctionVersion, 2);
+  assert.equal(adopted.draft.requestedCount, 4);
+  assert.deepEqual(adopted.draft.questions, []);
+  assert.deepEqual(adopted.draft.answers, {});
 });
 
 test("draft updates preserve other sessions and keep the previous saved value immutable", () => {

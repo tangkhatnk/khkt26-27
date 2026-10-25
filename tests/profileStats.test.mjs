@@ -55,3 +55,22 @@ test("profile stats count and total unique sessions for one owner while keeping 
   ]);
   assert.equal(stats.recentStudies.length, 4);
 });
+
+test("profile stats prefer authoritative corrected owner rows over duplicate pending rows", () => {
+  const serverRow = {
+    ...session("duplicate", "account-a", 200, 200),
+    goal: "Corrected goal",
+    topic: "history",
+    effectiveMetrics: { focusedSeconds: 45 },
+  };
+  const stats = profileStats("account-a", [serverRow], [
+    session("duplicate", "account-a", 700, 700),
+    session("removed", "account-a", 800, 800),
+  ], ["removed"]);
+
+  assert.equal(stats.sessionCount, 1);
+  assert.equal(stats.focusedSeconds, 45);
+  assert.deepEqual(stats.recentStudies, [{
+    id: "duplicate", goal: "Corrected goal", topic: "history", studiedAt: 200, focusedSeconds: 45,
+  }]);
+});

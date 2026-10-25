@@ -1,6 +1,7 @@
 export type QuizPrefetchScope = {
   ownerId: string;
   sessionId: string;
+  correctionVersion: number;
   /** Includes the canonical request source and its review state. */
   sourceKey: string;
   count: number;
@@ -19,7 +20,7 @@ type Entry<T> = {
 };
 
 export function quizPrefetchScopeKey(scope: QuizPrefetchScope) {
-  return JSON.stringify([scope.ownerId, scope.sessionId, scope.sourceKey, scope.count]);
+  return JSON.stringify([scope.ownerId, scope.sessionId, scope.correctionVersion, scope.sourceKey, scope.count]);
 }
 
 function abortError() {

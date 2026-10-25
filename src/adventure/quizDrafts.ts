@@ -10,6 +10,8 @@ export type QuizQuestion = {
 };
 
 export type QuizDraft = {
+  /** Version of the server-corrected session projection used to prepare these questions. */
+  correctionVersion?: number;
   /** The number of questions in the saved generation (or the selected count before generation). */
   count: number;
   /** Next generation preference; it may differ from count while saved questions are being reviewed. */
@@ -20,6 +22,10 @@ export type QuizDraft = {
 
 export function isQuizCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 30;
+}
+
+function isCorrectionVersion(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -46,7 +52,8 @@ export function isValidQuizDraft(value: unknown): value is QuizDraft {
       !record(value.answers)) return false;
   const questions: unknown[] = value.questions;
   const answers = value.answers;
-  if ((value.requestedCount !== undefined && !isQuizCount(value.requestedCount)) ||
+  if ((value.correctionVersion !== undefined && !isCorrectionVersion(value.correctionVersion)) ||
+      (value.requestedCount !== undefined && !isQuizCount(value.requestedCount)) ||
       questions.length > 30 || (questions.length > 0 && questions.length !== value.count) ||
       !questions.every(isQuestion)) return false;
   const validatedQuestions = questions as QuizQuestion[];
@@ -107,11 +114,23 @@ export class QuizRequestGuard {
   }
 }
 
-export const emptyQuizDraft = (): QuizDraft => ({ count: 3, questions: [], answers: {} });
+export const emptyQuizDraft = (correctionVersion = 0): QuizDraft => ({
+  correctionVersion,
+  count: 3,
+  questions: [],
+  answers: {},
+});
 
 /** Adopt a persisted/prefetched draft as the panel's controlled state. */
-export function quizPanelDraftState(value: unknown): { draft: QuizDraft; countInput: string } {
-  const draft = isValidQuizDraft(value) ? structuredClone(value) : emptyQuizDraft();
+export function quizPanelDraftState(value: unknown, correctionVersion = 0): { draft: QuizDraft; countInput: string } {
+  const valid = isValidQuizDraft(value) ? structuredClone(value) : null;
+  const savedVersion = valid?.correctionVersion ?? 0;
+  const draft = valid && savedVersion === correctionVersion
+    ? { ...valid, correctionVersion }
+    : {
+        ...emptyQuizDraft(correctionVersion),
+        ...(valid ? { count: valid.requestedCount ?? valid.count, requestedCount: valid.requestedCount ?? valid.count } : {}),
+      };
   return { draft, countInput: String(draft.requestedCount ?? draft.count) };
 }
 

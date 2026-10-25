@@ -1,3 +1,5 @@
+import type { SessionMetrics } from "../../backend/src/adventure/domain.ts";
+
 export type ProfileStudySummary = {
   id: string;
   goal: string;
@@ -13,6 +15,7 @@ export type ProfileSessionRecord = {
   topic: string;
   ended: number;
   seconds: number;
+  effectiveMetrics?: Pick<SessionMetrics, "focusedSeconds">;
 };
 
 export type ProfileStats = {
@@ -26,16 +29,19 @@ export function profileStats(
   ownerId: string,
   snapshotSessions: readonly ProfileSessionRecord[],
   pendingSessions: readonly ProfileSessionRecord[],
+  removedSessionIds: readonly string[] = [],
 ): ProfileStats {
   const byId = new Map<string, ProfileSessionRecord>();
+  const removed = new Set(removedSessionIds);
   for (const session of [...snapshotSessions, ...pendingSessions]) {
-    if (session.userId !== ownerId || byId.has(session.id)) continue;
+    if (session.userId !== ownerId || removed.has(session.id) || byId.has(session.id)) continue;
     byId.set(session.id, session);
   }
 
   const ownSessions = [...byId.values()];
   const focusedSeconds = ownSessions.reduce((total, session) => {
-    const seconds = Number.isFinite(session.seconds) ? Math.max(0, session.seconds) : 0;
+    const measured = session.effectiveMetrics?.focusedSeconds ?? session.seconds;
+    const seconds = Number.isFinite(measured) ? Math.max(0, measured) : 0;
     return total + seconds;
   }, 0);
   const recentStudies = ownSessions
@@ -46,7 +52,7 @@ export function profileStats(
       goal: session.goal,
       topic: session.topic,
       studiedAt: session.ended,
-      focusedSeconds: session.seconds,
+      focusedSeconds: session.effectiveMetrics?.focusedSeconds ?? session.seconds,
     }));
 
   return { sessionCount: ownSessions.length, focusedSeconds, recentStudies };

@@ -7,6 +7,7 @@ import { isCurrentQuizPrefetchRequest, quizPrefetchNotice } from "../src/adventu
 const scope = (overrides = {}) => ({
   ownerId: "owner-a",
   sessionId: "trip-a",
+  correctionVersion: 0,
   sourceKey: "biology|photosynthesis",
   count: 3,
   ...overrides,
@@ -82,6 +83,14 @@ test("a changed source or count aborts the prior request and rejects its late re
   coordinator.dispose();
 });
 
+test("a corrected session version gets a distinct prefetch scope even when source and count are unchanged", () => {
+  const beforeCorrection = scope({ correctionVersion: 2 });
+  const afterCorrection = scope({ correctionVersion: 3 });
+
+  assert.notEqual(quizPrefetchScopeKey(beforeCorrection), quizPrefetchScopeKey(afterCorrection));
+  assert.notEqual(quizPrefetchScopeKey(beforeCorrection), quizPrefetchScopeKey(scope({ correctionVersion: 2, count: 5 })));
+});
+
 test("explicit retry starts a fresh request after a failed prefetch but joins one already in flight", async () => {
   const coordinator = new QuizPrefetchCoordinator();
   const currentScope = scope();
@@ -117,12 +126,14 @@ test("late quiz request status cannot replace a newer request for the same trip 
   const oldRequest = {
     ownerId: "owner-a",
     sessionId: "trip-a",
+    correctionVersion: 2,
     count: 3,
     sourceKey: "source-old",
     requestGeneration: 1,
   };
   const newRequest = {
     ...oldRequest,
+    correctionVersion: 3,
     sourceKey: "source-new",
     requestGeneration: 2,
   };

@@ -51,8 +51,17 @@ import {
   type ActiveTrip,
 } from "./focus";
 import { isValidBreakPlan, studyElapsedSeconds } from "../../backend/src/adventure/domain";
-import { emptySaved, readSaved, writeSaved, type Saved } from "./storage";
-import { isQuizCount, isValidQuizDraft, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
+import {
+  emptySaved,
+  historySessions,
+  readSaved,
+  reconcileOwnerSnapshot,
+  suppressRemovedSessions,
+  writeSaved,
+  type Saved,
+  type SessionHistoryEntry,
+} from "./storage";
+import { isQuizCount, isValidQuizDraft, quizPanelDraftState, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
 import { analyzeSession, knowledgeGaps, reviewPlan } from "./learning";
 import {
   localDayKey,
@@ -108,12 +117,20 @@ type MaterialInfo = { sourceId?: string; name: string; size: number; type: strin
 type QuizPrefetchUiState = {
   ownerId: string;
   sessionId: string;
+  correctionVersion: number;
   count: number;
   sourceKey?: string;
   requestGeneration?: number;
   status: "pending" | "ready" | "failed";
   message?: string;
 };
+type QuizSessionSource = Pick<SessionHistoryEntry, "id" | "topic" | "goal"> &
+  Partial<Pick<SessionHistoryEntry, "correctionVersion" | "effectiveMetrics" | "correctionFlags" | "quiz">>;
+
+function hasHttpStatus(error: unknown, expected: number): boolean {
+  return typeof error === "object" && error !== null && "status" in error &&
+    Number(error.status) === expected;
+}
 export default function AdventureApp() {
   const { user, bootstrap, ready } = useAuthStore();
   useEffect(() => {
@@ -224,6 +241,7 @@ function AdventureWorkspace() {
       value.snapshot.revision < current.current.snapshot.revision
     )
       value = { ...value, snapshot: current.current.snapshot };
+    if (value.snapshot) value = reconcileOwnerSnapshot(value, value.snapshot);
     try {
       writeSaved(ownerRef.current, value);
       current.current = value;
@@ -403,26 +421,39 @@ function AdventureWorkspace() {
         const isCurrent = () => workspaceLive.current && ownerRef.current === id;
         while (isCurrent()) {
           const unpublished = Object.values(current.current.local.sessions).filter(session =>
-            session.userId === "guest" && !current.current.guestPublished?.includes(session.id));
+            session.userId === "guest" && !current.current.guestPublished?.includes(session.id) &&
+            !current.current.removedSessionIds?.includes(session.id));
           if (!unpublished.length) return;
           await publishGuestSessions({
             sessions: unpublished,
             publishedIds: current.current.guestPublished ?? [],
+            removedIds: current.current.removedSessionIds ?? [],
             isCurrent,
             continueAfterFailure: permanentGuestFailure,
             send: session => post<{ tripCode: string }>("/adventure/guest-sessions", session, false),
             markPublished: sessionId => commit({ ...current.current,
               guestPublished: [...new Set([...(current.current.guestPublished ?? []), sessionId])] }),
+            markRemoved: sessionId => isCurrent() && commit(suppressRemovedSessions(current.current, [sessionId])),
             onStatus: status => setGuestPublication(value => ({ ...value, [status.sessionId]: status })),
           });
           // Stop on a failed request/save; retain unacknowledged trips for the next retry.
-          if (unpublished.some(session => !current.current.guestPublished?.includes(session.id))) return;
+          if (unpublished.some(session => !current.current.guestPublished?.includes(session.id) &&
+              !current.current.removedSessionIds?.includes(session.id))) return;
         }
         return;
       }
       while (current.current.pending.length) {
         const session = current.current.pending[0];
-        const result = await post<Snapshot>("/adventure/sessions", session);
+        let result: Snapshot;
+        try {
+          result = await post<Snapshot>("/adventure/sessions", session);
+        } catch (cause) {
+          if (ownerRef.current !== id || !workspaceLive.current) return;
+          if (!hasHttpStatus(cause, 410)) throw cause;
+          if (!commit(suppressRemovedSessions(current.current, [session.id]))) return;
+          setNotice("Phiên đã được máy chủ gỡ khỏi lịch sử và sẽ không được gửi lại.");
+          continue;
+        }
         if (ownerRef.current !== id) return;
         if (
           !commit({
@@ -472,13 +503,18 @@ function AdventureWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, exclusive, owner, online, needsLogin]);
   const data = saved.snapshot;
+  const removedSessionIds = useMemo(() =>
+    [...new Set([...(saved.removedSessionIds ?? []), ...(data?.removedSessionIds ?? [])])],
+  [saved.removedSessionIds, data?.removedSessionIds]);
   const accountStats = useMemo(() => profileStats(owner,
-    owner === "guest" ? Object.values(saved.local.sessions) : data?.sessions ?? [], saved.pending),
-  [owner, saved.local.sessions, data?.sessions, saved.pending]);
+    owner === "guest" ? Object.values(saved.local.sessions) : data?.sessions ?? [], saved.pending, removedSessionIds),
+  [owner, saved.local.sessions, data?.sessions, saved.pending, removedSessionIds]);
   const carriage = data?.person;
   const group = data?.group;
+  const removedIds = new Set(removedSessionIds);
   const pendingSoloSeconds = saved.pending.filter(session => !session.groupId &&
-    session.userId === owner && !data?.sessions.some(stored => stored.id === session.id))
+    session.userId === owner && !removedIds.has(session.id) &&
+    !data?.sessions.some(stored => stored.id === session.id))
     .reduce((total, session) => total + session.seconds, 0);
   const personalJourney = useMemo(() => {
     if (!carriage?.journey || pendingSoloSeconds <= 0) return carriage?.journey;
@@ -514,77 +550,106 @@ function AdventureWorkspace() {
   const studyStage = active ? studyStageStatus(active, displayAt) : null;
   const mapActive = active && !(mode === "group" && group) && active.groupId === null ? active : null;
   const mapProgress = explorationProgress(journey, mapActive ? focused(mapActive) : 0, mapActive?.target);
-  const sessions = [...saved.pending, ...(data?.sessions ?? [])];
-  const summarySession = summary
-    ? sessions.find((session) => session.id === summary.id) ?? summary
-    : view === "summary"
-      ? sessions.find((session) => session.id === saved.summarySessionId) ?? null
-      : null;
-  const summaryCompleted = Boolean(summarySession && studyElapsedSeconds(
-    summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
-  ) >= summarySession.target);
-  const summaryQuizDraft = summarySession ? saved.quizDrafts?.[summarySession.id] : undefined;
-  const summaryQuizCount = summaryQuizDraft?.requestedCount ?? summaryQuizDraft?.count ?? 3;
+  const sessions = historySessions(saved, owner);
+  const summarySessionId = summary?.id ?? (view === "summary" ? saved.summarySessionId : undefined);
+  const summarySession = summarySessionId
+    ? sessions.find((session) => session.id === summarySessionId && !removedIds.has(session.id)) ?? null
+    : null;
+  const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
+    studyElapsedSeconds(
+      summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
+    ) >= summarySession.target));
+  const summaryAnalysis = summarySession ? analyzeSession(summarySession) : null;
+  const savedSummaryQuizDraft = summarySession ? saved.quizDrafts?.[summarySession.id] : undefined;
+  const summaryCorrectionVersion = summarySession?.correctionVersion ?? 0;
+  const summaryQuizDraft = useMemo(() => savedSummaryQuizDraft &&
+    (savedSummaryQuizDraft.correctionVersion ?? 0) === summaryCorrectionVersion
+      ? savedSummaryQuizDraft
+      : savedSummaryQuizDraft
+        ? quizPanelDraftState(savedSummaryQuizDraft, summaryCorrectionVersion).draft
+        : undefined,
+  [savedSummaryQuizDraft, summaryCorrectionVersion]);
+  const summaryQuizCount = summaryQuizDraft?.requestedCount ?? summaryQuizDraft?.count ??
+    savedSummaryQuizDraft?.requestedCount ?? savedSummaryQuizDraft?.count ?? 3;
   const summaryQuizPrefetch = quizPrefetchUi?.ownerId === owner &&
-    quizPrefetchUi.sessionId === summarySession?.id && quizPrefetchUi.count === summaryQuizCount
+    quizPrefetchUi.sessionId === summarySession?.id &&
+    quizPrefetchUi.correctionVersion === summaryCorrectionVersion && quizPrefetchUi.count === summaryQuizCount
     ? quizPrefetchUi
     : null;
-  const readQuizGenerationSource = useCallback((session: Pick<Session, "id" | "topic" | "goal">) => {
+  const resolveCurrentQuizSession = useCallback((sessionId: string): QuizSessionSource => {
+    const value = current.current;
+    const trip = value.active?.id === sessionId ? value.active : null;
+    if (trip) {
+      if (trip.owner !== ownerRef.current)
+        throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần ôn tập.");
+      return trip;
+    }
+    if (value.summarySessionId !== sessionId)
+      throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần ôn tập.");
+    const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
+    if (removed.has(sessionId))
+      throw new Error("Chuyến này đã được gỡ khỏi lịch sử và không thể tạo câu hỏi.");
+    const canonical = value.snapshot?.sessions.find((item) => item.id === sessionId);
+    if (!canonical || canonical.userId !== ownerRef.current)
+      throw new Error("Chuyến chưa được máy chủ xác nhận. Hãy đồng bộ rồi thử lại.");
+    return canonical;
+  }, []);
+  const readQuizGenerationSource = useCallback((session: QuizSessionSource) => {
     const value = current.current;
     const trip = value.active?.id === session.id ? value.active : null;
-    if (!trip && value.summarySessionId !== session.id)
-      throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần ôn tập.");
+    const canonical = resolveCurrentQuizSession(session.id);
     return {
-      topic: trip?.topic ?? session.topic,
-      goal: trip?.goal ?? session.goal,
+      topic: trip?.topic ?? canonical.topic,
+      goal: trip?.goal ?? canonical.goal,
       notes: trip?.document ?? value.notes[session.id] ?? "",
       sources: trip?.sources ?? value.sources?.[session.id] ?? [],
       materials: trip?.materials ?? value.materials?.[session.id] ?? [],
     };
-  }, []);
-  const buildQuizScope = useCallback((session: Pick<Session, "id" | "topic" | "goal">, count: number) => {
+  }, [resolveCurrentQuizSession]);
+  const buildQuizScope = useCallback((session: QuizSessionSource, count: number) => {
     if (!isQuizCount(count)) throw new Error("Số câu hỏi cần là số nguyên từ 1 đến 30.");
-    const payload = buildQuizGenerationPayload(readQuizGenerationSource(session), count);
+    const canonical = resolveCurrentQuizSession(session.id);
+    const payload = buildQuizGenerationPayload(readQuizGenerationSource(canonical), count);
     const scope: QuizPrefetchScope = {
       ownerId: ownerRef.current,
       sessionId: session.id,
+      correctionVersion: canonical.correctionVersion ?? 0,
       sourceKey: quizGenerationSourceKey(payload),
       count,
     };
     return { scope, payload };
-  }, [readQuizGenerationSource]);
+  }, [readQuizGenerationSource, resolveCurrentQuizSession]);
   const requestQuizQuestions = useCallback(async (
-    session: Pick<Session, "id" | "topic" | "goal">,
+    session: QuizSessionSource,
     count: number,
     requestedScope: QuizPrefetchScope,
     signal: AbortSignal,
   ): Promise<QuizQuestion[]> => {
     if (ownerRef.current !== requestedScope.ownerId || !workspaceLive.current || signal.aborted)
       throw new DOMException("Chuyến học đã đổi.", "AbortError");
-    const initial = buildQuizScope(session, count);
-    const keyFor = (scope: QuizPrefetchScope) => JSON.stringify([
-      scope.ownerId, scope.sessionId, scope.sourceKey, scope.count,
-    ]);
-    if (keyFor(initial.scope) !== keyFor(requestedScope))
+    const initialSession = resolveCurrentQuizSession(session.id);
+    const initial = buildQuizScope(initialSession, count);
+    if (quizPrefetchScopeKey(initial.scope) !== quizPrefetchScopeKey(requestedScope))
       throw new DOMException("Nguồn học đã đổi.", "AbortError");
     const result = await request<QuizQuestion[]>("/quiz/generate", {
       method: "POST",
       body: JSON.stringify(initial.payload),
       signal,
     });
-    if (ownerRef.current !== requestedScope.ownerId || !workspaceLive.current || signal.aborted ||
-        (current.current.active?.id !== session.id && current.current.summarySessionId !== session.id))
+    if (ownerRef.current !== requestedScope.ownerId || !workspaceLive.current || signal.aborted)
       throw new DOMException("Chuyến học đã đổi.", "AbortError");
-    const latest = buildQuizScope(session, count);
-    if (keyFor(latest.scope) !== keyFor(requestedScope))
+    const latestSession = resolveCurrentQuizSession(session.id);
+    const latest = buildQuizScope(latestSession, count);
+    if (quizPrefetchScopeKey(latest.scope) !== quizPrefetchScopeKey(requestedScope))
       throw new DOMException("Nguồn học đã đổi.", "AbortError");
     return result;
-  }, [buildQuizScope]);
+  }, [buildQuizScope, resolveCurrentQuizSession]);
   const recordQuizPrefetchFailure = useCallback((scope: QuizPrefetchScope, error: unknown) => {
     if (!quizPrefetch.isCurrent(scope)) return;
     setQuizPrefetchUi({
       ownerId: scope.ownerId,
       sessionId: scope.sessionId,
+      correctionVersion: scope.correctionVersion,
       count: scope.count,
       status: "failed",
       message: error instanceof Error ? error.message : "Chưa chuẩn bị được câu hỏi.",
@@ -592,28 +657,29 @@ function AdventureWorkspace() {
   }, [quizPrefetch]);
   const recordQuizPrefetchResult = useCallback((
     scope: QuizPrefetchScope,
-    session: Pick<Session, "id" | "topic" | "goal">,
+    session: QuizSessionSource,
     questions: QuizQuestion[],
   ) => {
     if (!quizPrefetch.isCurrent(scope) || ownerRef.current !== scope.ownerId || !workspaceLive.current)
       return;
     const value = current.current;
-    if (value.active?.id !== scope.sessionId && value.summarySessionId !== scope.sessionId) return;
-    const currentSession = value.active?.id === scope.sessionId
-      ? value.active
-      : value.pending.find((item) => item.id === scope.sessionId) ??
-        value.snapshot?.sessions.find((item) => item.id === scope.sessionId);
-    if (!currentSession) return;
+    let currentSession: QuizSessionSource;
+    try {
+      currentSession = resolveCurrentQuizSession(scope.sessionId);
+    } catch {
+      return;
+    }
+    if ((currentSession.correctionVersion ?? 0) !== scope.correctionVersion) return;
     const draftPreference = value.quizDrafts?.[scope.sessionId];
     if ((draftPreference?.requestedCount ?? draftPreference?.count ?? 3) !== scope.count) return;
     const latest = buildQuizScope(currentSession ?? session, scope.count);
-    if (latest.scope.sourceKey !== scope.sourceKey) return;
-    const draft = quizDraftFromQuestions(questions, scope.count);
+    if (quizPrefetchScopeKey(latest.scope) !== quizPrefetchScopeKey(scope)) return;
+    const draft = quizDraftFromQuestions(questions, scope.count, scope.correctionVersion);
     if (!isValidQuizDraft(draft) || questions.length !== scope.count) {
       recordQuizPrefetchFailure(scope, new Error("AI chưa tạo đủ số câu hỏi đã chọn. Bạn có thể thử lại."));
       return;
     }
-    const savedKey = JSON.stringify([scope.ownerId, scope.sessionId, scope.sourceKey, scope.count]);
+    const savedKey = quizPrefetchScopeKey(scope);
     if (!quizPrefetchSaved.current.has(savedKey)) {
       const committed = commitRef.current({
         ...current.current,
@@ -628,10 +694,11 @@ function AdventureWorkspace() {
     setQuizPrefetchUi({
       ownerId: scope.ownerId,
       sessionId: scope.sessionId,
+      correctionVersion: scope.correctionVersion,
       count: scope.count,
       status: "ready",
     });
-  }, [buildQuizScope, quizPrefetch, recordQuizPrefetchFailure]);
+  }, [buildQuizScope, quizPrefetch, recordQuizPrefetchFailure, resolveCurrentQuizSession]);
   const activeQuizDraft = saved.active ? saved.quizDrafts?.[saved.active.id] : undefined;
   const activeQuizCount = activeQuizDraft?.requestedCount ?? activeQuizDraft?.count ?? 3;
   const activeTripId = saved.active?.id;
@@ -657,6 +724,7 @@ function AdventureWorkspace() {
         scope: {
           ownerId: owner,
           sessionId: activeTripId,
+          correctionVersion: 0,
           sourceKey: quizGenerationSourceKey(payload),
           count: activeQuizCount,
         },
@@ -706,6 +774,7 @@ function AdventureWorkspace() {
       setQuizPrefetchUi({
         ownerId: owner,
         sessionId: trip.id,
+        correctionVersion: 0,
         count: activeQuizCount,
         status: "failed",
         message: activeQuizPrefetch.error ?? "Chưa chuẩn bị được câu hỏi.",
@@ -714,15 +783,16 @@ function AdventureWorkspace() {
     }
 
     const start = (signal: AbortSignal) => requestQuizQuestions(trip, activeQuizCount, scope, signal);
-    setQuizPrefetchUi({ ownerId: owner, sessionId: trip.id, count: activeQuizCount, status: "pending" });
+    setQuizPrefetchUi({ ownerId: owner, sessionId: trip.id, correctionVersion: 0, count: activeQuizCount, status: "pending" });
     const pending = quizPrefetch.getOrStart(scope, start);
     const existingStatus = quizPrefetch.status(scope);
     if (existingStatus?.status === "ready")
-      setQuizPrefetchUi({ ownerId: owner, sessionId: trip.id, count: activeQuizCount, status: "ready" });
+      setQuizPrefetchUi({ ownerId: owner, sessionId: trip.id, correctionVersion: 0, count: activeQuizCount, status: "ready" });
     if (existingStatus?.status === "failed")
       setQuizPrefetchUi({
         ownerId: owner,
         sessionId: trip.id,
+        correctionVersion: 0,
         count: activeQuizCount,
         status: "failed",
         message: existingStatus.error instanceof Error ? existingStatus.error.message : "Chưa chuẩn bị được câu hỏi.",
@@ -1058,15 +1128,23 @@ function AdventureWorkspace() {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  async function generateQuiz(session: Session, count: number): Promise<QuizQuestion[]> {
+  async function generateQuiz(session: SessionHistoryEntry, count: number): Promise<QuizQuestion[]> {
     if (!user || needsLogin) throw new Error("Đăng nhập lại để tạo quiz AI.");
     const id = ownerRef.current;
     if (current.current.summarySessionId !== session.id)
       throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần ôn tập.");
-    const initial = buildQuizScope(session, count);
+    await sync();
+    if (ownerRef.current !== id || !workspaceLive.current ||
+        current.current.summarySessionId !== session.id)
+      throw new Error("Chuyến đã đổi trước khi quiz được tạo.");
+    const canonical = resolveCurrentQuizSession(session.id);
+    if (canonical.quiz)
+      throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
+    const initial = buildQuizScope(canonical, count);
     const requestIdentity = {
       ownerId: id,
       sessionId: session.id,
+      correctionVersion: initial.scope.correctionVersion,
       count,
       sourceKey: initial.scope.sourceKey,
       requestGeneration: ++quizRequestGeneration.current,
@@ -1076,25 +1154,16 @@ function AdventureWorkspace() {
       isCurrentQuizPrefetchRequest(state, requestIdentity);
     setQuizPrefetchUi(pendingState);
     try {
-      const pendingRequest = quizPrefetch.status(initial.scope)?.status === "pending"
-        ? quizPrefetch.retry(initial.scope, (signal) => requestQuizQuestions(session, count, initial.scope, signal))
-        : null;
-      await sync();
-      if (ownerRef.current !== id || !workspaceLive.current ||
-          current.current.summarySessionId !== session.id)
-        throw new Error("Chuyến đã đổi trước khi quiz được tạo.");
-      if (current.current.snapshot?.sessions.find((item) => item.id === session.id)?.quiz)
-        throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
-      let result: QuizQuestion[];
-      if (pendingRequest) result = await pendingRequest;
-      else {
-        const latest = buildQuizScope(session, count);
-        result = await quizPrefetch.retry(latest.scope, (signal) =>
-          requestQuizQuestions(session, count, latest.scope, signal));
-      }
+      const result = await quizPrefetch.retry(initial.scope, (signal) =>
+        requestQuizQuestions(canonical, count, initial.scope, signal));
       if (ownerRef.current !== id || !workspaceLive.current ||
           current.current.summarySessionId !== session.id)
         throw new Error("Chuyến đã đổi trước khi quiz được lưu.");
+      const latest = resolveCurrentQuizSession(session.id);
+      if (latest.quiz)
+        throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
+      if (quizPrefetchScopeKey(buildQuizScope(latest, count).scope) !== quizPrefetchScopeKey(initial.scope))
+        throw new Error("Thông tin chuyến đã thay đổi. Hãy tạo lại câu hỏi theo dữ liệu mới.");
       setQuizPrefetchUi((previous) => isSameRequest(previous)
         ? { ...pendingState, status: "ready" }
         : previous);
@@ -1109,9 +1178,20 @@ function AdventureWorkspace() {
   function saveQuizDraft(ownerId: string, sessionId: string, draft: QuizDraft) {
     if (!workspaceLive.current || ownerRef.current !== ownerId || !isValidQuizDraft(draft) ||
         (current.current.active?.id !== sessionId && current.current.summarySessionId !== sessionId)) return;
+    const activeTrip = current.current.active?.id === sessionId ? current.current.active : null;
+    if (activeTrip && activeTrip.owner !== ownerId) return;
+    const currentSession = activeTrip ??
+      current.current.snapshot?.sessions.find((item) => item.id === sessionId && item.userId === ownerId);
+    if (!currentSession || current.current.removedSessionIds?.includes(sessionId) ||
+        current.current.snapshot?.removedSessionIds?.includes(sessionId)) return;
+    const correctionVersion = "correctionVersion" in currentSession
+      ? currentSession.correctionVersion ?? 0
+      : 0;
+    if ((draft.correctionVersion ?? 0) !== correctionVersion) return;
+    const versionedDraft = { ...draft, correctionVersion };
     const previous = current.current.quizDrafts?.[sessionId];
     const previousCount = previous?.requestedCount ?? previous?.count ?? 3;
-    const nextCount = draft.requestedCount ?? draft.count;
+    const nextCount = versionedDraft.requestedCount ?? versionedDraft.count;
     if (previousCount !== nextCount) {
       quizPrefetch.cancelSession(ownerId, sessionId);
       quizPrefetchSaved.current.clear();
@@ -1119,7 +1199,7 @@ function AdventureWorkspace() {
     }
     commitRef.current({
       ...current.current,
-      quizDrafts: updateQuizDrafts(current.current.quizDrafts, sessionId, draft),
+      quizDrafts: updateQuizDrafts(current.current.quizDrafts, sessionId, versionedDraft),
     });
   }
   function invalidateQuizForSourceEdit(ownerId: string, sessionId: string) {
@@ -1131,7 +1211,9 @@ function AdventureWorkspace() {
   function emptyQuizDraftForSourceEdit(value: Saved, sessionId: string): Record<string, QuizDraft> {
     const previous = value.quizDrafts?.[sessionId];
     const count = previous?.requestedCount ?? previous?.count ?? 3;
-    return updateQuizDrafts(value.quizDrafts, sessionId, quizDraftFromQuestions([], isQuizCount(count) ? count : 3));
+    const correctionVersion = value.snapshot?.sessions.find((item) => item.id === sessionId)?.correctionVersion ?? 0;
+    return updateQuizDrafts(value.quizDrafts, sessionId,
+      quizDraftFromQuestions([], isQuizCount(count) ? count : 3, correctionVersion));
   }
   async function gradeQuiz(sessionId: string, answers: { id: string; selected: number }[]): Promise<Session> {
     if (!user || needsLogin) throw new Error("Đăng nhập lại để chấm quiz.");
@@ -2269,14 +2351,17 @@ function AdventureWorkspace() {
                                 {analysis.breakSeconds > 0 && <p>Giải lao: {clock(analysis.breakSeconds)} · không tính xao nhãng hoặc XP</p>}
                                 <span>{analysis.focusLabel} · {analysis.focusPercent === null ? "—" : `${Math.floor(analysis.focusPercent)}%`} tập trung</span>
                                 <span>Số lần xao nhãng: <b>{analysis.distractions}</b></span>
-                                <span>Điểm {s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}</span>
+                                <span>{s.correctionFlags?.quizResult
+                                  ? `Điểm theo lịch sử đã chỉnh: ${s.effectiveMetrics?.quizScore === null || s.effectiveMetrics?.quizTotal === null
+                                    ? "chưa ghi nhận" : `${s.effectiveMetrics?.quizScore}/${s.effectiveMetrics?.quizTotal}`}`
+                                  : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
                                 <span>{s.quiz?.feedback
                                   ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
                                   : analysis.knowledgeLabel}</span>
                                 <small>{analysis.focusExplanation}</small>
                               </div>
                             </div>
-                            <strong>{Math.floor(s.seconds / 60)} phút ↗</strong>
+                            <strong>{Math.floor(analysis.focusedSeconds / 60)} phút ↗</strong>
                           </button>
                         );
                       })}
@@ -2339,19 +2424,19 @@ function AdventureWorkspace() {
                       <Stat
                         icon="◷"
                         label="THỜI GIAN TẬP TRUNG"
-                        value={clock(summarySession.seconds)}
+                        value={clock(summaryAnalysis!.focusedSeconds)}
                         detail="Đã loại khoảng xao nhãng"
                       />
                       <Stat
                         icon="✦"
                         label="KINH NGHIỆM TOA"
-                        value={`${Math.floor(summarySession.seconds / 60)} XP`}
+                        value={`${Math.floor(summaryAnalysis!.focusedSeconds / 60)} XP`}
                         detail="1 phút tập trung = 1 XP · XP ghi nhận nỗ lực, không đo mức độ thành thạo"
                       />
                       <Stat
                         icon="↗"
                         label="SỐ LẦN XAO NHÃNG"
-                        value={`${summarySession.distractions ?? summarySession.segments.filter(segment => segment.kind === "distraction").length}`}
+                        value={`${summaryAnalysis!.distractions}`}
                         detail="Mỗi lần rời phiên được ghi nhận một lần"
                       />
                       <Stat
@@ -2391,7 +2476,7 @@ function AdventureWorkspace() {
                         } catch(e) {setError(e instanceof Error ? e.message : "Không xác nhận được nguồn.");}}} />
                       </details>)}
                       <QuizPanel
-                        key={`${owner}:${summarySession.id}`}
+                        key={`${owner}:${summarySession.id}:${summaryCorrectionVersion}`}
                         ownerId={owner}
                         session={summarySession}
                         draft={saved.quizDrafts?.[summarySession.id]}
@@ -2411,6 +2496,8 @@ function AdventureWorkspace() {
                       <p>Phiên khách không được công khai tự động. Hãy bắt đầu phiên sau khi đăng nhập; khi phiên được đồng bộ, bạn có thể chọn công khai từ tổng kết.</p>
                       <p role="status">{saved.guestPublished?.includes(summarySession.id)
                         ? "Bản lưu khách đã được máy chủ nhận; phiên này vẫn chưa được công khai."
+                        : guestPublication[summarySession.id]?.status === "suppression-failed"
+                          ? guestPublication[summarySession.id].message ?? "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại."
                         : guestPublication[summarySession.id]?.status === "save-failed"
                           ? "Máy chủ đã nhận bản lưu khách, nhưng thiết bị chưa lưu xác nhận. Phiên này vẫn chưa được công khai."
                           : guestPublication[summarySession.id]?.status === "sending"

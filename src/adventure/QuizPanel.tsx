@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "../../backend/src/adventure/domain";
+import type { SessionHistoryEntry } from "./storage";
 import { knowledgeGaps } from "./learning";
 import { StudyGuideInlineText } from "./StudyGuideRenderer";
 import { quizPrefetchNotice } from "./quizPrefetchPresentation";
@@ -17,7 +18,7 @@ type Assessment = NonNullable<Session["quiz"]>;
 
 type Props = {
   ownerId: string;
-  session: Session;
+  session: SessionHistoryEntry;
   draft?: QuizDraft;
   prefetchStatus?: "pending" | "ready" | "failed";
   prefetchError?: string;
@@ -44,7 +45,8 @@ export function QuizPanel({
   onLogin,
   onStartReview,
 }: Props) {
-  const firstPanelState = quizPanelDraftState(initialDraft);
+  const correctionVersion = session.correctionVersion ?? 0;
+  const firstPanelState = quizPanelDraftState(initialDraft, correctionVersion);
   const [draft, setDraft] = useState<QuizDraft>(() => firstPanelState.draft);
   const [countInput, setCountInput] = useState(() => firstPanelState.countInput);
   const [generating, setGenerating] = useState(false);
@@ -69,12 +71,12 @@ export function QuizPanel({
     if (incomingDraft.current === initialDraft) return;
     incomingDraft.current = initialDraft;
     requests.current.invalidate();
-    const next = quizPanelDraftState(initialDraft);
+    const next = quizPanelDraftState(initialDraft, correctionVersion);
     setDraft(next.draft);
     setCountInput(next.countInput);
     setGenerating(false);
     setError("");
-  }, [initialDraft]);
+  }, [initialDraft, correctionVersion]);
 
   function saveDraft(next: QuizDraft) {
     setDraft(next);
@@ -94,7 +96,7 @@ export function QuizPanel({
       if (result.length !== count) {
         throw new Error("AI chưa tạo đủ số câu hỏi đã chọn. Bạn có thể thử lại.");
       }
-      const next: QuizDraft = { count: result.length, requestedCount: count, questions: result, answers: {} };
+      const next: QuizDraft = { correctionVersion, count: result.length, requestedCount: count, questions: result, answers: {} };
       if (!isValidQuizDraft(next)) throw new Error("AI trả về câu hỏi chưa hợp lệ. Hãy thử lại.");
       saveDraft(next);
     } catch (cause) {
@@ -134,6 +136,9 @@ export function QuizPanel({
 
   const wrongAnswers = assessment?.feedback?.filter((item) => !item.correct) ?? [];
   const gaps = assessment ? knowledgeGaps(assessment) : [];
+  const hasCorrectedQuizResult = session.correctionFlags?.quizResult === true;
+  const correctedScore = session.effectiveMetrics?.quizScore ?? null;
+  const correctedTotal = session.effectiveMetrics?.quizTotal ?? null;
   return (
     <section className="quiz-panel" aria-labelledby="quiz-panel-title">
       <div className="quiz-panel-heading">
@@ -142,9 +147,17 @@ export function QuizPanel({
           <h2 id="quiz-panel-title">Câu hỏi học tập</h2>
         </div>
       </div>
+      {hasCorrectedQuizResult && (
+        <p className="quiz-corrected-result" role="status">
+          Điểm theo lịch sử đã điều chỉnh: {correctedScore === null || correctedTotal === null
+            ? "chưa ghi nhận điểm"
+            : `${correctedScore}/${correctedTotal}`}.
+          {assessment && " Phản hồi bên dưới vẫn giữ nguyên từ lượt chấm ban đầu."}
+        </p>
+      )}
       {assessment ? (
         <div className="quiz-result" role="status">
-          <h3>Điểm: {assessment.score}/{assessment.total}</h3>
+          <h3>{hasCorrectedQuizResult ? "Điểm chấm ban đầu" : "Điểm"}: {assessment.score}/{assessment.total}</h3>
           {assessment.feedback ? (
             <>
               {wrongAnswers.length ? (
@@ -206,8 +219,8 @@ export function QuizPanel({
                     if (isQuizCount(count)) {
                       const selected = draft.requestedCount ?? draft.count;
                       saveDraft(draft.questions.length && selected === count
-                        ? { ...draft, requestedCount: count }
-                        : { count, requestedCount: count, questions: [], answers: {} });
+                        ? { ...draft, correctionVersion, requestedCount: count }
+                        : { correctionVersion, count, requestedCount: count, questions: [], answers: {} });
                     }
                   }}
                 />

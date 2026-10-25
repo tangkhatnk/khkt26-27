@@ -157,3 +157,46 @@ test("a permanently invalid older trip does not block later valid trips", async 
   assert.equal(statuses[1].status, "failed");
   assert.equal(statuses.at(-1).status, "published");
 });
+
+test("a removed guest trip is suppressed separately from successful publication", async () => {
+  const suppressed = [];
+  const published = [];
+  const statuses = [];
+  let sends = 0;
+  const send = async () => {
+    sends++;
+    throw Object.assign(new Error("removed"), { status: 410 });
+  };
+  const options = {
+    sessions: [sessions[0]],
+    publishedIds: published,
+    removedIds: suppressed,
+    isCurrent: () => true,
+    send,
+    markPublished: async () => { throw new Error("410 must not mark success"); },
+    markRemoved: async (sessionId) => { suppressed.push(sessionId); return true; },
+    onStatus: (status) => statuses.push(status),
+  };
+
+  await publishGuestSessions(options);
+  await publishGuestSessions(options);
+
+  assert.equal(sends, 1);
+  assert.deepEqual(suppressed, ["trip-1"]);
+  assert.deepEqual(published, []);
+  assert.equal(statuses.at(-1).status, "removed");
+});
+
+test("a failed local 410 suppression never reports guest publication success", async () => {
+  const statuses = [];
+  await publishGuestSessions({
+    sessions: [sessions[0]], publishedIds: [], isCurrent: () => true,
+    send: async () => { throw Object.assign(new Error("removed"), { status: 410 }); },
+    markPublished: async () => { throw new Error("must not publish a 410"); },
+    markRemoved: async () => false,
+    onStatus: (status) => statuses.push(status),
+  });
+
+  assert.equal(statuses.at(-1).status, "suppression-failed");
+  assert.equal(statuses.at(-1).tripCode, undefined);
+});

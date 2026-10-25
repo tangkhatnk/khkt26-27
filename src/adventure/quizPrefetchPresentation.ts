@@ -6,6 +6,7 @@ export type QuizPrefetchNotice = {
 export type QuizPrefetchRequestIdentity = {
   ownerId: string;
   sessionId: string;
+  correctionVersion: number;
   count: number;
   sourceKey: string;
   requestGeneration: number;
@@ -17,6 +18,7 @@ export function isCurrentQuizPrefetchRequest(
 ): boolean {
   return current?.ownerId === expected.ownerId &&
     current.sessionId === expected.sessionId &&
+    current.correctionVersion === expected.correctionVersion &&
     current.count === expected.count &&
     current.sourceKey === expected.sourceKey &&
     current.requestGeneration === expected.requestGeneration;
