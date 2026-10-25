@@ -48,6 +48,7 @@ export function quizGenerationSourceKey(payload: QuizGenerationPayload): string 
 export function quizDraftFromQuestions(
   questions: QuizQuestion[],
   count: number,
+  correctionVersion = 0,
 ) {
-  return { count, requestedCount: count, questions, answers: {} };
+  return { correctionVersion, count, requestedCount: count, questions, answers: {} };
 }

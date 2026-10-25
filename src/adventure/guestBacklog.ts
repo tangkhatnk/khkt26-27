@@ -1,4 +1,4 @@
-import type { Saved } from "./storage.ts";
+import { suppressRemovedSessions, type Saved } from "./storage.ts";
 import type { Session } from "../../backend/src/adventure/domain.ts";
 import { permanentGuestFailure, publishGuestSessions } from "./guestPublication.ts";
 
@@ -15,11 +15,18 @@ export async function syncGuestBacklog({ withGuestLock, read, write, isCurrent, 
   await publishGuestSessions({
     sessions: Object.values(saved.local.sessions).filter(session => session.userId === "guest"),
     publishedIds: saved.guestPublished ?? [], isCurrent, send,
+    removedIds: saved.removedSessionIds ?? [],
     continueAfterFailure: permanentGuestFailure,
     markPublished: async sessionId => Boolean(await withGuestLock(() => {
       if (!isCurrent()) return false;
       const fresh = read();
       write({ ...fresh, guestPublished: [...new Set([...(fresh.guestPublished ?? []), sessionId])] });
+      return true;
+    })),
+    markRemoved: async sessionId => Boolean(await withGuestLock(() => {
+      if (!isCurrent()) return false;
+      const fresh = read();
+      write(suppressRemovedSessions(fresh, [sessionId]));
       return true;
     })),
     onStatus: () => {},

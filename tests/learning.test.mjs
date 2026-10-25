@@ -205,3 +205,36 @@ test('review goal stays within 500 UTF-16 units without splitting an emoji', () 
 test('review duration never exceeds the maximum supported 240 minutes', () => {
   assert.equal(reviewPlan(session({ target: 20000 }), '').minutes, 240);
 });
+
+test('learning analysis uses corrected metrics while knowledge feedback stays tied to the original grade', () => {
+  const originalFeedback = [
+    { questionId: 'q1', question: 'Q1', options: ['A', 'B'], selected: 0, correctIndex: 1, correct: false, explanation: 'Review this', knowledgePoint: 'Cells' },
+    { questionId: 'q2', question: 'Q2', options: ['A', 'B'], selected: 1, correctIndex: 1, correct: true, explanation: 'Correct', knowledgePoint: 'Cells' },
+  ];
+  const projected = session({
+    goal: 'Corrected goal', topic: 'history', target: 600,
+    quiz: { score: 1, total: 2, feedback: originalFeedback },
+    effectiveMetrics: {
+      targetSeconds: 60, elapsedSeconds: 120, actualStudySeconds: 90, focusedSeconds: 75,
+      plannedBreakSeconds: 0, actualBreakSeconds: 30, distractions: 3, completed: true,
+      quizScore: 2, quizTotal: 3,
+    },
+    correctionVersion: 4,
+  });
+
+  const analysis = analyzeSession(projected);
+  assert.equal(analysis.elapsedSeconds, 120);
+  assert.equal(analysis.studyElapsedSeconds, 90);
+  assert.equal(analysis.breakSeconds, 30);
+  assert.equal(analysis.focusedSeconds, 75);
+  assert.equal(analysis.distractions, 3);
+  assert.ok(Math.abs(analysis.quizPercent - 200 / 3) < 1e-9);
+  assert.equal(analysis.knowledgeLabel, 'Có nội dung cần ôn lại');
+  assert.deepEqual(knowledgeGaps(projected.quiz), [{
+    knowledgePoint: 'Cells', wrong: 1, total: 2, feedback: [originalFeedback[0]],
+  }]);
+  const plan = reviewPlan(projected, 'private note');
+  assert.equal(plan.goal, 'Ôn lại: Cells');
+  assert.equal(plan.topic, 'history');
+  assert.equal(plan.minutes, 1);
+});

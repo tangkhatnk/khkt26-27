@@ -118,6 +118,40 @@ test("quiz generation exposes a distinct primary action", () => {
   assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
 });
 
+test("corrected quiz metrics stay separate from the original grade feedback", () => {
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "owner-a",
+    session: {
+      id: "trip-a",
+      topic: "biology",
+      goal: "Review cells",
+      correctionVersion: 2,
+      effectiveMetrics: {
+        targetSeconds: 60, elapsedSeconds: 60, actualStudySeconds: 60, focusedSeconds: 45,
+        plannedBreakSeconds: 0, actualBreakSeconds: 0, distractions: 1, completed: true,
+        quizScore: 2, quizTotal: 3,
+      },
+      correctionFlags: { goal: false, topic: false, targetSeconds: false, elapsedSeconds: false,
+        actualStudySeconds: false, focusedSeconds: false, actualBreakSeconds: false,
+        distractions: false, quizResult: true },
+      quiz: { score: 0, total: 1, feedback: [{ questionId: "original-q", question: "Original question?",
+        options: ["A", "B"], selected: 0, correctIndex: 1, correct: false,
+        explanation: "Original explanation.", knowledgePoint: "Cells" }] },
+    },
+    canUseAI: true,
+    needsLogin: false,
+    onGenerate: async () => [],
+    onSaveDraft: () => {},
+    onGrade: async () => ({}),
+    onLogin: () => {},
+    onStartReview: () => {},
+  }));
+
+  assert.match(markup, /Điểm theo lịch sử đã điều chỉnh: 2\/3/u);
+  assert.match(markup, /Điểm chấm ban đầu: 0\/1/u);
+  assert.match(markup, /Original explanation\./u);
+});
+
 test("boarding pass shows the honest pending code copy unless given a valid history code", () => {
   for (const tripCode of [undefined, "V-abcdef012345", "V-ABCDEF01234"]) {
     const markup = boardingTicket({ tripCode });

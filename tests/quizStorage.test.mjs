@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptySaved, readSaved, writeSaved } from "../src/adventure/storage.ts";
+import { emptySaved, historySessions, readSaved, reconcileOwnerSnapshot, suppressRemovedSessions, writeSaved } from "../src/adventure/storage.ts";
 
 const rows = new Map();
 globalThis.localStorage = {
@@ -160,4 +160,82 @@ test('verified document sources survive reload independently of erased notes',()
  writeSaved('owner-a',saved);const reloaded=readSaved('owner-a');
  assert.equal(reloaded.notes['source-session'],'');assert.match(reloaded.sources['source-session'][0].text,/principle/);
  assert.equal(readSaved('owner-b').sources?.['source-session'],undefined);
+});
+
+test("owner snapshots replace pending duplicates and persist tombstones without deleting private recovery data", () => {
+  const saved = emptySaved();
+  saved.pending = [
+    session("duplicate"),
+    session("pending-only"),
+    session("removed"),
+  ];
+  saved.local.sessions = {
+    duplicate: session("duplicate"),
+    pendingOnly: session("pending-only"),
+    removed: session("removed"),
+  };
+  saved.notes.removed = "recoverable note";
+  saved.sources = { removed: [{
+    id: "source-removed", name: "Private chapter", text: "recoverable source",
+    source: "embedded-text", requiresReview: true, reviewed: true,
+  }] };
+  saved.materials = { removed: [{ name: "Chapter.pdf", size: 120, type: "application/pdf", status: "saved", message: "Local" }] };
+  saved.quizDrafts = { removed: { count: 1, questions: [], answers: {} } };
+  saved.summarySessionId = "removed";
+  const canonical = {
+    ...session("duplicate"), goal: "Server-corrected goal", topic: "history", target: 90,
+    correctionVersion: 2,
+    effectiveMetrics: { targetSeconds: 90, elapsedSeconds: 80, actualStudySeconds: 70, focusedSeconds: 60,
+      plannedBreakSeconds: 0, actualBreakSeconds: 10, distractions: 3, completed: false, quizScore: 1, quizTotal: 2 },
+    correctionFlags: { goal: true, topic: true, targetSeconds: true, elapsedSeconds: false,
+      actualStudySeconds: false, focusedSeconds: false, actualBreakSeconds: false, distractions: false, quizResult: false },
+  };
+  const serverSnapshot = {
+    revision: 8,
+    person: {},
+    group: null,
+    sessions: [canonical],
+    removedSessionIds: ["removed"],
+    rules: "train-v1",
+  };
+
+  const reconciled = reconcileOwnerSnapshot(saved, serverSnapshot);
+
+  assert.deepEqual(reconciled.removedSessionIds, ["removed"]);
+  assert.deepEqual(reconciled.snapshot.sessions, [canonical]);
+  assert.deepEqual(reconciled.pending.map(({ id }) => id), ["pending-only"]);
+  assert.deepEqual(historySessions(reconciled, "owner-a").map(({ id }) => id), ["duplicate", "pending-only"]);
+  assert.equal(historySessions(reconciled, "owner-a")[0].goal, "Server-corrected goal");
+  assert.equal(historySessions(reconciled, "owner-a")[0].effectiveMetrics.focusedSeconds, 60);
+  assert.equal(reconciled.local.sessions.removed, undefined);
+  assert.equal(reconciled.notes.removed, "recoverable note");
+  assert.equal(reconciled.sources.removed[0].text, "recoverable source");
+  assert.equal(reconciled.materials.removed[0].name, "Chapter.pdf");
+  assert.equal(reconciled.quizDrafts.removed, undefined);
+  assert.equal(reconciled.summarySessionId, undefined);
+});
+
+test("a 410 tombstone suppresses queued rows locally and keeps its ID across an older snapshot", () => {
+  let saved = emptySaved();
+  saved.pending = [session("removed"), session("keep")];
+  saved.local.sessions = { removed: session("removed"), keep: session("keep") };
+  saved.notes.removed = "private note remains";
+
+  saved = suppressRemovedSessions(saved, ["removed"]);
+  const oldSnapshot = { revision: 1, person: {}, group: null, sessions: [session("removed"), session("keep")], removedSessionIds: [], rules: "train-v1" };
+  saved = reconcileOwnerSnapshot(saved, oldSnapshot);
+
+  assert.deepEqual(saved.removedSessionIds, ["removed"]);
+  assert.deepEqual(saved.pending, []);
+  assert.deepEqual(historySessions(saved, "owner-a").map(({ id }) => id), ["keep"]);
+  assert.equal(saved.local.sessions.removed, undefined);
+  assert.equal(saved.notes.removed, "private note remains");
+});
+
+test("owner history never returns a pending row belonging to another owner", () => {
+  const saved = emptySaved();
+  saved.snapshot = { revision: 1, person: {}, group: null, sessions: [session("owned")], rules: "train-v1" };
+  saved.pending = [{ ...session("foreign"), userId: "owner-b" }];
+
+  assert.deepEqual(historySessions(saved, "owner-a").map(({ id }) => id), ["owned"]);
 });
