@@ -145,6 +145,21 @@
   color: #647064;
 }
 
+.experiment-results .experiment-correction-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid #c48b56;
+  border-radius: 999px;
+  background: #fff2e4;
+  color: #77502d;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
 .experiment-results .experiment-details {
   margin-top: 8px;
   color: #455a4b;
@@ -239,6 +254,11 @@
   font-size: 15px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-run-card > .experiment-correction-badge {
+  margin-top: -6px;
+  margin-bottom: 12px;
 }
 
 .experiment-results .experiment-run-card__topic {

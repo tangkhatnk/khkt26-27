@@ -13,6 +13,10 @@ function uuidFor(value) {
   return "00000000-0000-4000-8000-" + String(value).padStart(12, "0");
 }
 
+function isUuid(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function makeAccounts() {
   const accounts = Array.from({ length: 55 }, (_value, index) => {
     const number = index + 1;
@@ -105,72 +109,72 @@ function page(items, limit, offset, key) {
   return { [key]: items.slice(offset, offset + limit), total: items.length, limit, offset };
 }
 
-function makeTotals(sessionCount, multiplier = 1) {
+function emptyTotals() {
   return {
-    sessionCount,
-    plannedStudySeconds: sessionCount * 1800 * multiplier,
-    actualStudySeconds: sessionCount * 1620 * multiplier,
-    focusedSeconds: sessionCount * 1470 * multiplier,
-    plannedBreakSeconds: sessionCount * 180 * multiplier,
-    actualBreakSeconds: sessionCount * 150 * multiplier,
-    distractions: Math.floor(sessionCount / 3),
-    completedSessions: Math.floor(sessionCount * 0.7),
-    completionPercent: 70,
-    gradedQuizSessions: Math.floor(sessionCount * 0.6),
-    quizCoveragePercent: 60,
-    quizScore: 27,
-    quizTotal: 30,
-    quizScorePercent: 90,
+    sessionCount: 0,
+    plannedStudySeconds: 0,
+    actualStudySeconds: 0,
+    focusedSeconds: 0,
+    plannedBreakSeconds: 0,
+    actualBreakSeconds: 0,
+    distractions: 0,
+    completedSessions: 0,
+    completionPercent: 0,
+    gradedQuizSessions: 0,
+    quizCoveragePercent: 0,
+    quizScore: 0,
+    quizTotal: 0,
+    quizScorePercent: null,
   };
 }
 
-function makeReport(days, accountId, groupId) {
-  const scopeFactor = accountId ? 1 : groupId ? 2 : 3;
-  const totals = makeTotals(12 * scopeFactor, 1);
-  const daily = Array.from({ length: days }, (_value, index) => ({
-    ...makeTotals(index % 3 === 0 ? 2 : 1, 1),
-    dateUtc: new Date(Date.UTC(2026, 9, 24 - days + index + 1)).toISOString().slice(0, 10),
-  }));
-  const topics = ["biology", "history", "mathematics"].map((topic, index) => ({
-    ...makeTotals((index + 1) * scopeFactor),
-    topic,
-  }));
+function addReportSession(totals, metrics) {
+  totals.sessionCount += 1;
+  totals.plannedStudySeconds += metrics.targetSeconds;
+  totals.actualStudySeconds += metrics.actualStudySeconds;
+  totals.focusedSeconds += metrics.focusedSeconds;
+  totals.plannedBreakSeconds += metrics.plannedBreakSeconds;
+  totals.actualBreakSeconds += metrics.actualBreakSeconds;
+  totals.distractions += metrics.distractions;
+  totals.completedSessions += Number(metrics.completed);
+  if (metrics.quizScore !== null && metrics.quizTotal !== null) {
+    totals.gradedQuizSessions += 1;
+    totals.quizScore += metrics.quizScore;
+    totals.quizTotal += metrics.quizTotal;
+  }
+}
+
+function finishReportTotals(totals) {
+  const roundPercent = (value) => Math.round(value * 10) / 10;
   return {
-    days,
-    timezone: "UTC",
-    analysisLimit: 20000,
-    fromUtc: new Date(Date.UTC(2026, 9, 24 - days)).toISOString(),
-    asOfUtc: "2026-10-24T12:00:00.000Z",
-    matchingSessionCount: totals.sessionCount + 4,
-    recordsAnalyzed: totals.sessionCount,
-    truncated: false,
-    totals,
-    daily,
-    topics,
-    fixtureScope: accountId ? "account:" + accountId : groupId ? "group:" + groupId : "overall",
+    ...totals,
+    plannedStudySeconds: Math.round(totals.plannedStudySeconds * 10) / 10,
+    actualStudySeconds: Math.round(totals.actualStudySeconds * 10) / 10,
+    focusedSeconds: Math.round(totals.focusedSeconds * 10) / 10,
+    actualBreakSeconds: Math.round(totals.actualBreakSeconds * 10) / 10,
+    completionPercent: totals.sessionCount ? roundPercent((totals.completedSessions / totals.sessionCount) * 100) : 0,
+    quizCoveragePercent: totals.sessionCount ? roundPercent((totals.gradedQuizSessions / totals.sessionCount) * 100) : 0,
+    quizScorePercent: totals.quizTotal ? roundPercent((totals.quizScore / totals.quizTotal) * 100) : null,
   };
 }
 
-function makeSessions(accountId, groupId) {
+function makeSessions() {
   return Array.from({ length: 57 }, (_value, index) => {
     const started = new Date(Date.UTC(2026, 9, 24 - Math.floor(index / 2), 8 + (index % 8)));
-    const ended = new Date(started.getTime() + 1800000);
+    const isShort = index === 1;
+    const metrics = isShort
+      ? { targetSeconds: 60, elapsedSeconds: 53.5, actualStudySeconds: 40, focusedSeconds: 35, plannedBreakSeconds: 0, actualBreakSeconds: 13.5, distractions: 0, completed: false, quizScore: null, quizTotal: null }
+      : { targetSeconds: 1500, elapsedSeconds: 1800, actualStudySeconds: 1440, focusedSeconds: 1320, plannedBreakSeconds: 300, actualBreakSeconds: 240, distractions: index % 4, completed: false, quizScore: index % 4 === 0 ? null : 3, quizTotal: index % 4 === 0 ? null : 5 };
     return {
       id: uuidFor(5000 + index + 1),
-      accountId: accountId ?? uuidFor((index % 55) + 1),
-      groupId: groupId ?? (index % 3 === 0 ? uuidFor(1001 + (index % 33)) : null),
+      ownerId: index === 0 ? `guest:${uuidFor(9001)}` : uuidFor((index % 55) + 1),
+      accountId: index === 0 ? null : uuidFor((index % 55) + 1),
+      groupId: index === 0 ? null : index % 3 === 0 ? uuidFor(1001 + (index % 33)) : null,
       topic: ["biology", "history", "mathematics"][index % 3],
+      goal: `Mục tiêu fixture ban đầu ${index + 1}`,
       startedAt: started.toISOString(),
-      endedAt: ended.toISOString(),
-      plannedStudySeconds: 1500,
-      actualStudySeconds: 1440,
-      focusedSeconds: 1320,
-      plannedBreakSeconds: 300,
-      actualBreakSeconds: 240,
-      distractions: index % 4,
-      completed: index % 5 !== 0,
-      quizScore: index % 4 === 0 ? null : 3,
-      quizTotal: index % 4 === 0 ? null : 5,
+      endedAt: new Date(started.getTime() + metrics.elapsedSeconds * 1000).toISOString(),
+      measuredMetrics: metrics,
     };
   });
 }
@@ -180,6 +184,123 @@ function adminFixtureApi() {
   const audit = new Map();
   for (const account of accounts.values()) audit.set(account.id, makeAudit(account.id));
   const groups = makeGroups();
+  const sessions = new Map(makeSessions().map((session) => [session.id, session]));
+  const sessionOverrides = new Map();
+  const sessionAudits = new Map();
+  const correctionFields = ["goal", "topic", "targetSeconds", "elapsedSeconds", "actualStudySeconds", "focusedSeconds", "actualBreakSeconds", "distractions", "quizResult"];
+
+  function projectedSession(session, suppliedOverride) {
+    const override = suppliedOverride ?? sessionOverrides.get(session.id) ?? { version: 0 };
+    const metrics = { ...session.measuredMetrics };
+    for (const field of ["targetSeconds", "elapsedSeconds", "actualStudySeconds", "focusedSeconds", "actualBreakSeconds", "distractions"])
+      if (Object.hasOwn(override, field)) metrics[field] = override[field];
+    if (Object.hasOwn(override, "quizResult")) {
+      metrics.quizScore = override.quizResult.score;
+      metrics.quizTotal = override.quizResult.total;
+    }
+    metrics.completed = metrics.actualStudySeconds >= metrics.targetSeconds;
+    const metricSources = Object.fromEntries(correctionFields.map((field) => [
+      field, Object.hasOwn(override, field) ? "corrected" : "measured",
+    ]));
+    const measuredMetrics = { ...session.measuredMetrics, plannedStudySeconds: session.measuredMetrics.targetSeconds };
+    const effectiveMetrics = { ...metrics, plannedStudySeconds: metrics.targetSeconds };
+    return {
+      id: session.id,
+      ownerId: session.ownerId,
+      accountId: session.accountId,
+      groupId: session.groupId,
+      status: "active",
+      correctionVersion: override.version,
+      topic: override.topic ?? session.topic,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      timestampsAreSettlementFacts: true,
+      metrics: effectiveMetrics,
+      measuredMetrics,
+      metricSources,
+      ...effectiveMetrics,
+    };
+  }
+
+  function sessionDto(session, includeGoal = false, suppliedOverride) {
+    const override = suppliedOverride ?? sessionOverrides.get(session.id) ?? { version: 0 };
+    const dto = projectedSession(session, override);
+    const goal = override.goal ?? session.goal;
+    if (includeGoal) {
+      dto.goal = goal;
+      dto.measuredContent = { goal: session.goal, topic: session.topic };
+    } else {
+      delete dto.goal;
+    }
+    return dto;
+  }
+
+  function sessionAuditState(session, override = sessionOverrides.get(session.id) ?? { version: 0 }) {
+    const dto = sessionDto(session, true, override);
+    const metrics = { ...dto.metrics };
+    delete metrics.plannedStudySeconds;
+    return { status: "active", correctionVersion: override.version, goal: dto.goal, topic: dto.topic, metrics };
+  }
+
+  function makeReport(days, accountId, groupId) {
+    const asOfMs = Date.now();
+    const now = new Date(asOfMs);
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const fromMs = todayUtc - (days - 1) * 86400000;
+    const matching = [...sessions.values()].filter((session) => {
+      const override = sessionOverrides.get(session.id) ?? { version: 0 };
+      const started = Date.parse(session.startedAt);
+      return !override.removedAt && (!accountId || session.accountId === accountId) &&
+        (!groupId || session.groupId === groupId) && started >= fromMs && started <= asOfMs;
+    });
+    const daily = new Map(Array.from({ length: days }, (_value, index) => {
+      const dateUtc = new Date(fromMs + index * 86400000).toISOString().slice(0, 10);
+      return [dateUtc, emptyTotals()];
+    }));
+    const topics = new Map();
+    const totals = emptyTotals();
+    for (const session of matching) {
+      const projected = projectedSession(session);
+      addReportSession(totals, projected.metrics);
+      const dateUtc = session.startedAt.slice(0, 10);
+      const dayTotals = daily.get(dateUtc);
+      if (dayTotals) addReportSession(dayTotals, projected.metrics);
+      const topicTotals = topics.get(projected.topic) ?? emptyTotals();
+      addReportSession(topicTotals, projected.metrics);
+      topics.set(projected.topic, topicTotals);
+    }
+    return {
+      days,
+      timezone: "UTC",
+      analysisLimit: 20000,
+      fromUtc: new Date(fromMs).toISOString(),
+      asOfUtc: new Date(asOfMs).toISOString(),
+      matchingSessionCount: matching.length,
+      recordsAnalyzed: matching.length,
+      truncated: false,
+      totals: finishReportTotals(totals),
+      daily: [...daily].map(([dateUtc, values]) => ({ dateUtc, ...finishReportTotals(values) })),
+      topics: [...topics].map(([topic, values]) => ({ topic, ...finishReportTotals(values) }))
+        .sort((left, right) => right.focusedSeconds - left.focusedSeconds || left.topic.localeCompare(right.topic)),
+    };
+  }
+
+  function auditSessionMutation(session, action, beforeVersion, afterVersion, before, after, reason) {
+    const rows = sessionAudits.get(session.id) ?? [];
+    rows.unshift({
+      actorId: fixtureOwnerId,
+      targetOwnerId: session.ownerId,
+      sessionId: session.id,
+      action,
+      beforeVersion,
+      afterVersion,
+      before,
+      after,
+      reason: reason.trim(),
+      createdAt: new Date().toISOString(),
+    });
+    sessionAudits.set(session.id, rows);
+  }
 
   return {
     name: "viendu-admin-fixture-api",
@@ -199,6 +320,11 @@ function adminFixtureApi() {
           }
           if (mode === "denied" || mode === "revoked") {
             json(response, 403, { status: 403, detail: mode === "revoked" ? "Quyền quản trị fixture vừa bị thu hồi." : "Tài khoản fixture chưa được cấp quyền." });
+            return;
+          }
+
+          if (request.headers["x-admin-fixture-fail-report"] === "true" && url.pathname === "/api/v1/admin/report") {
+            json(response, 503, { status: 503, detail: "Fixture không tải được báo cáo lần này. Hãy thử lại." });
             return;
           }
 
@@ -319,20 +445,165 @@ function adminFixtureApi() {
             return;
           }
 
+          const sessionAuditMatch = pathname.match(/^\/admin\/sessions\/([^/]+)\/audit$/);
+          if (request.method === "GET" && sessionAuditMatch) {
+            const sessionId = decodeURIComponent(sessionAuditMatch[1]);
+            const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 25));
+            const offset = Math.min(10000, Math.max(0, Number(url.searchParams.get("offset")) || 0));
+            json(response, 200, page(sessionAudits.get(sessionId) ?? [], limit, offset, "actions"));
+            return;
+          }
+
+          const sessionMatch = pathname.match(/^\/admin\/sessions\/([^/]+)$/);
+          if (sessionMatch && ["GET", "PATCH", "DELETE"].includes(request.method ?? "")) {
+            const sessionId = decodeURIComponent(sessionMatch[1]);
+            const session = sessions.get(sessionId);
+            if (!session) {
+              json(response, 404, { status: 404, detail: "Không tìm thấy phiên học fixture." });
+              return;
+            }
+            const current = sessionOverrides.get(sessionId) ?? { version: 0 };
+            if (request.method === "GET") {
+              if (current.removedAt) {
+                json(response, 410, { status: 410, detail: "Phiên học này đã được quản trị viên gỡ khỏi lịch sử." });
+                return;
+              }
+              json(response, 200, sessionDto(session, true));
+              return;
+            }
+
+            const body = await readBody(request);
+            if (typeof body.reason !== "string" || !body.reason.trim() || body.reason.length > 500 ||
+              !Number.isInteger(body.expectedVersion) || body.expectedVersion < 0) {
+              json(response, 400, { status: 400, detail: "Cần nhập phiên bản và lý do kiểm toán hợp lệ." });
+              return;
+            }
+            if (current.removedAt) {
+              json(response, 410, { status: 410, detail: "Phiên học này đã được quản trị viên gỡ khỏi lịch sử." });
+              return;
+            }
+            if (body.expectedVersion !== current.version) {
+              json(response, 409, { status: 409, detail: "Phiên học đã được chỉnh sửa. Hãy tải lại rồi thử lại." });
+              return;
+            }
+
+            if (request.method === "PATCH") {
+              if (Object.keys(body).some((key) => !["expectedVersion", "reason", "changes"].includes(key)) ||
+                !body.changes || typeof body.changes !== "object" || Array.isArray(body.changes) ||
+                Object.keys(body.changes).length === 0 || Object.keys(body.changes).some((key) => !correctionFields.includes(key))) {
+                json(response, 400, { status: 400, detail: "Chọn ít nhất một trường cho phép hiệu chỉnh." });
+                return;
+              }
+              const changes = body.changes;
+              const textLimits = { goal: [3, 500], topic: [1, 100] };
+              for (const [field, [minimum, maximum]] of Object.entries(textLimits)) {
+                const value = changes[field];
+                if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length < minimum || value.trim().length > maximum)) {
+                  json(response, 400, { status: 400, detail: `${field} không hợp lệ.` });
+                  return;
+                }
+              }
+              const numericLimits = {
+                targetSeconds: [60, 14400, true], elapsedSeconds: [0, 32400, false],
+                actualStudySeconds: [0, 14400, false], focusedSeconds: [0, 14400, false],
+                actualBreakSeconds: [0, 32400, false], distractions: [0, 10000, true],
+              };
+              for (const [field, [minimum, maximum, integer]] of Object.entries(numericLimits)) {
+                const value = changes[field];
+                if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum || (integer && !Number.isInteger(value)))) {
+                  json(response, 400, { status: 400, detail: `${field} không hợp lệ.` });
+                  return;
+                }
+              }
+              const quizResult = changes.quizResult;
+              if (quizResult !== undefined && quizResult !== null && (!quizResult || typeof quizResult !== "object" || Array.isArray(quizResult) ||
+                Object.keys(quizResult).some((key) => !["score", "total"].includes(key)) || !Number.isInteger(quizResult.score) ||
+                !Number.isInteger(quizResult.total) || quizResult.score < 0 || quizResult.score > 1000 || quizResult.total < 1 ||
+                quizResult.total > 1000 || quizResult.score > quizResult.total)) {
+                json(response, 400, { status: 400, detail: "Kết quả quiz không hợp lệ." });
+                return;
+              }
+
+              const beforeVersion = current.version;
+              const before = sessionAuditState(session, current);
+              const next = { ...current, version: beforeVersion + 1 };
+              for (const field of ["goal", "topic", ...Object.keys(numericLimits)]) {
+                if (changes[field] === null) delete next[field];
+                else if (changes[field] !== undefined) next[field] = field === "goal" || field === "topic" ? changes[field].trim() : changes[field];
+              }
+              if (changes.quizResult === null) delete next.quizResult;
+              else if (changes.quizResult !== undefined) next.quizResult = changes.quizResult;
+              const nextDto = sessionDto(session, true, next);
+              const metrics = nextDto.metrics;
+              if (session.measuredMetrics.quizScore !== null && nextDto.topic !== session.topic) {
+                json(response, 422, { status: 422, detail: "Không thể đổi chủ đề sau khi phiên học đã được chấm quiz." });
+                return;
+              }
+              if (metrics.actualStudySeconds < 0 || metrics.actualStudySeconds > metrics.targetSeconds ||
+                metrics.focusedSeconds < 0 || metrics.focusedSeconds > metrics.actualStudySeconds ||
+                metrics.actualBreakSeconds < 0 || metrics.elapsedSeconds < metrics.actualStudySeconds + metrics.actualBreakSeconds ||
+                metrics.distractions < 0 || (metrics.quizScore === null) !== (metrics.quizTotal === null) ||
+                (metrics.quizScore !== null && metrics.quizTotal !== null && metrics.quizScore > metrics.quizTotal)) {
+                json(response, 422, { status: 422, detail: "Các chỉ số hiệu chỉnh không tạo thành một phiên học hợp lệ." });
+                return;
+              }
+              sessionOverrides.set(sessionId, next);
+              auditSessionMutation(session, "correction", beforeVersion, next.version, before, sessionAuditState(session, next), body.reason);
+              json(response, 200, sessionDto(session, true));
+              return;
+            }
+
+            if (Object.keys(body).some((key) => !["expectedVersion", "reason"].includes(key))) {
+              json(response, 400, { status: 400, detail: "Yêu cầu gỡ phiên không hợp lệ." });
+              return;
+            }
+            const beforeVersion = current.version;
+            const before = sessionAuditState(session, current);
+            const next = { ...current, version: beforeVersion + 1, removedAt: Date.now() };
+            sessionOverrides.set(sessionId, next);
+            auditSessionMutation(session, "removal", beforeVersion, next.version, before, {
+              status: "removed", correctionVersion: next.version,
+            }, body.reason);
+            json(response, 200, {
+              id: sessionId, ownerId: session.ownerId, accountId: session.accountId,
+              status: "removed", correctionVersion: next.version,
+            });
+            return;
+          }
+
           if (request.method === "GET" && pathname === "/admin/sessions") {
             const accountId = url.searchParams.get("accountId") ?? undefined;
             const groupId = url.searchParams.get("groupId") ?? undefined;
-            const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 25));
-            const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
-            const sessions = makeSessions(accountId, groupId).filter((session) =>
-              (!accountId || session.accountId === accountId) && (!groupId || session.groupId === groupId),
-            );
+            const daysQuery = url.searchParams.get("days") ?? "all";
+            const durationBasis = url.searchParams.get("durationBasis") ?? undefined;
+            const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 25));
+            const offset = Math.min(10000, Math.max(0, Number(url.searchParams.get("offset")) || 0));
+            if (!["7", "30", "90", "all"].includes(daysQuery) || (durationBasis !== undefined && !["planned", "actual"].includes(durationBasis)) ||
+              (accountId && !isUuid(accountId)) || (groupId && !isUuid(groupId))) {
+              json(response, 400, { status: 400, detail: "Bộ lọc lịch sử phiên không hợp lệ." });
+              return;
+            }
+            const asOfMs = Date.now();
+            const fromMs = daysQuery === "all" ? 0 : asOfMs - Number(daysQuery) * 86400000;
+            const matching = [...sessions.values()].filter((session) => {
+              const override = sessionOverrides.get(session.id) ?? { version: 0 };
+              if (override.removedAt || (accountId && session.accountId !== accountId) || (groupId && session.groupId !== groupId)) return false;
+              const started = Date.parse(session.startedAt);
+              if (!Number.isFinite(started) || started < fromMs || started > asOfMs) return false;
+              if (!durationBasis) return true;
+              const metric = projectedSession(session).metrics;
+              return (durationBasis === "planned" ? metric.targetSeconds : metric.elapsedSeconds) <= 60;
+            }).sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt) || right.id.localeCompare(left.id));
             json(response, 200, {
-              ...page(sessions, limit, offset, "sessions"),
-              days: Number(url.searchParams.get("days")) || 7,
+              ...page(matching.map((session) => sessionDto(session)), limit, offset, "sessions"),
+              days: daysQuery === "all" ? "all" : Number(daysQuery),
+              window: daysQuery === "all" ? "all" : `${daysQuery}d`,
               timezone: "UTC",
-              fromUtc: "2026-10-17T00:00:00.000Z",
-              asOfUtc: "2026-10-24T12:00:00.000Z",
+              fromUtc: new Date(fromMs).toISOString(),
+              asOfUtc: new Date(asOfMs).toISOString(),
+              durationBasis: durationBasis ?? null,
+              durationThresholdSeconds: durationBasis ? 60 : null,
+              truncated: matching.length > 10000 + limit,
             });
             return;
           }
@@ -350,8 +621,14 @@ function adminFixtureApi() {
           }
 
           if (request.method === "GET" && pathname === "/admin/report") {
-            const days = Math.max(7, Math.min(90, Number(url.searchParams.get("days")) || 7));
-            json(response, 200, makeReport(days, url.searchParams.get("accountId"), url.searchParams.get("groupId")));
+            const days = url.searchParams.get("days") ?? "7";
+            const accountId = url.searchParams.get("accountId") ?? undefined;
+            const groupId = url.searchParams.get("groupId") ?? undefined;
+            if (!["7", "30", "90"].includes(days) || (accountId && !isUuid(accountId)) || (groupId && !isUuid(groupId)) || (accountId && groupId)) {
+              json(response, 400, { status: 400, detail: "Bộ lọc báo cáo không hợp lệ." });
+              return;
+            }
+            json(response, 200, makeReport(Number(days), accountId, groupId));
             return;
           }
 
