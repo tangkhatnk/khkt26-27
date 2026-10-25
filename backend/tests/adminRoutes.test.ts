@@ -35,6 +35,15 @@ const savedSession = {
   },
 };
 const dbCalls = { raw: [] as unknown[][], users: [] as unknown[] };
+function renderSql(parts: TemplateStringsArray, values: unknown[]) {
+  const render = (value: unknown): string => {
+    if (typeof value !== "object" || value === null) return String(value);
+    const query = value as { strings?: unknown; values?: unknown };
+    if (!Array.isArray(query.strings) || !Array.isArray(query.values)) return String(value);
+    return query.strings.map((part, index) => `${String(part)}${index < query.values!.length ? render(query.values![index]) : ""}`).join("");
+  };
+  return parts.map((part, index) => `${part}${index < values.length ? render(values[index]) : ""}`).join("");
+}
 const fakeDb = {
   user: {
     findUnique: async ({ where }: { where: { id: string } }) => ({
@@ -64,7 +73,7 @@ const fakeDb = {
     count: async () => 1,
   },
   $queryRaw: async (parts: TemplateStringsArray, ...values: unknown[]) => {
-    const sql = parts.join(" ");
+    const sql = renderSql(parts, values);
     dbCalls.raw.push([sql, ...values]);
     if (sql.includes("'sessions'")) {
       return sql.includes("COUNT(*)") ? [{ total: 1 }] : [{ session: savedSession }];
@@ -164,6 +173,8 @@ describe("admin read-only routes", () => {
       archived: false, progress: { journeySeconds: 1200, station: 1 } }], total: 1 });
     expect(groups.body).not.toContain("Private");
     expect(sessions.json()).toMatchObject({
+      days: 30,
+      window: "30d",
       total: 1,
       timezone: "UTC",
       sessions: [{ id: sessionId, accountId: userId, groupId, plannedStudySeconds: 60,
@@ -172,8 +183,28 @@ describe("admin read-only routes", () => {
     for (const privateValue of ["Private personal goal", "Private learning material", "Private explanation", '"segments"', '"feedback"'])
       expect(sessions.body).not.toContain(privateValue);
     const filteredRawCall = dbCalls.raw.filter(([sql]) => String(sql).includes("'sessions'") && !String(sql).includes("COUNT(*)")).at(-1);
-    expect(filteredRawCall).toContain(userId);
-    expect(filteredRawCall).toContain(groupId);
+    expect(filteredRawCall?.[0]).toContain(userId);
+    expect(filteredRawCall?.[0]).toContain(groupId);
+    expect(sessions.json().sessions[0]).not.toHaveProperty("goal");
+  });
+
+  it("supports all-history by default and the named planned/actual 60-second filters", async () => {
+    const headers = { authorization: "Bearer allowed-test-token" };
+    const all = await app.inject({ url: "/api/v1/admin/sessions?limit=10", headers });
+    const planned = await app.inject({ url: "/api/v1/admin/sessions?durationBasis=planned&limit=10", headers });
+    const actual = await app.inject({ url: "/api/v1/admin/sessions?durationBasis=actual&limit=10", headers });
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toMatchObject({ days: "all", window: "all", total: 1,
+      durationBasis: null, durationThresholdSeconds: null, truncated: false });
+    expect(all.json().fromUtc).toBe("1970-01-01T00:00:00.000Z");
+    expect(planned.json()).toMatchObject({ days: "all", durationBasis: "planned", durationThresholdSeconds: 60 });
+    expect(actual.json()).toMatchObject({ days: "all", durationBasis: "actual", durationThresholdSeconds: 60 });
+    const listCalls = dbCalls.raw.filter(([sql]) => String(sql).includes("'sessions'") && !String(sql).includes("COUNT(*)"));
+    const countCalls = dbCalls.raw.filter(([sql]) => String(sql).includes("'sessions'") && String(sql).includes("COUNT(*)"));
+    expect(listCalls.at(-2)?.[0]).toContain("<= 60");
+    expect(countCalls.at(-2)?.[0]).toContain("<= 60");
+    expect(listCalls.at(-1)?.[0]).toContain("effective_duration.elapsed_seconds <= 60");
+    expect(countCalls.at(-1)?.[0]).toContain("effective_duration.elapsed_seconds <= 60");
   });
 
   it("filters aggregate reports by one account or group and rejects ambiguous scopes", async () => {

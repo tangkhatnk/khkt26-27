@@ -5,7 +5,16 @@ import { z } from "zod";
 import { ApiError } from "../errors.js";
 import { config } from "../config.js";
 import { tripIdentity } from "../experiments.js";
-import { DEVICE_CATEGORIES, journey, person, settle, snapshot, type World } from "./domain.js";
+import {
+  DEVICE_CATEGORIES,
+  isSessionRemoved,
+  journey,
+  person,
+  projectSessionMetrics,
+  settle,
+  snapshot,
+  type World,
+} from "./domain.js";
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 const text = z.string().trim().min(1).max(60);
@@ -253,6 +262,11 @@ export function adventureRoutes(
   app.post("/api/v1/adventure/sessions", opts, async (req) => {
     const input = sessionSchema.parse(req.body);
     return atomic((w) => {
+      const prior = w.sessions[input.id];
+      if (prior && prior.userId !== req.userId)
+        throw new ApiError(409, "conflict", "Mã phiên đã được sử dụng.");
+      if (isSessionRemoved(w, input.id))
+        throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
       try {
         settle(w, { ...input, userId: req.userId }, Date.now());
       } catch (error) {
@@ -275,6 +289,8 @@ export function adventureRoutes(
       const prior = world.sessions[input.id];
       if (prior && prior.userId !== owner)
         throw new ApiError(409, "conflict", "Mã phiên đã được sử dụng.");
+      if (isSessionRemoved(world, input.id))
+        throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
       try {
         const session = settle(world, { ...input, userId: owner, groupId: null }, Date.now());
         return { tripCode: tripIdentity(session.userId, session.id, config.JWT_SECRET).tripCode };
@@ -313,12 +329,14 @@ export function adventureRoutes(
       const s = w.sessions[value.sessionId];
       if (!s || s.userId !== req.userId)
         throw new ApiError(404, "not-found", "Không tìm thấy phiên.");
-      if (questions.some((q) => q.topic_id !== s.topic))
-        throw new ApiError(
-          400,
-          "validation-error",
-          "Quiz không thuộc chủ đề phiên.",
-        );
+      if (isSessionRemoved(w, value.sessionId))
+        throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
+      const effectiveTopic = projectSessionMetrics(s, w.sessionOverrides?.[value.sessionId]).topic;
+      if (questions.some((q) => q.topic_id !== effectiveTopic)) {
+        if (effectiveTopic !== s.topic)
+          throw new ApiError(409, "conflict", "Chủ đề phiên học đã thay đổi. Hãy tải lại trước khi chấm bài.");
+        throw new ApiError(400, "validation-error", "Quiz không thuộc chủ đề phiên.");
+      }
       s.quiz ??= {
         score: value.answers.filter(
           (answer) =>

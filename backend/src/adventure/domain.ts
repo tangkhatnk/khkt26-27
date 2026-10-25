@@ -57,6 +57,80 @@ export function studyElapsedSeconds(
   return Math.min(target, Math.max(0, wallSeconds - breakElapsedSeconds(started, target, plan, at)));
 }
 
+/** One projection for owner history, admin reports, and public tester metrics. */
+export function projectSessionMetrics<T extends SessionProjectionSource>(
+  session: T,
+  override?: SessionOverride,
+): T & ProjectedSession {
+  const measuredTarget = session.target;
+  const target = override?.targetSeconds ?? measuredTarget;
+  const plan = session.breakPlan && isValidBreakPlan(session.breakPlan, measuredTarget)
+    ? session.breakPlan
+    : undefined;
+  const wallSeconds = Math.max(0, (session.ended - session.started) / 1000);
+  const plannedBreakSeconds = plan ? plan.count * plan.seconds : 0;
+  const segmentBreakSeconds = session.segments.reduce((sum, segment) => {
+    if (segment.kind !== "break") return sum;
+    const start = Math.max(session.started, segment.start);
+    const end = Math.min(session.ended, segment.end);
+    return sum + Math.max(0, end - start) / 1000;
+  }, 0);
+  const derivedBreakSeconds = plan
+    ? breakElapsedSeconds(session.started, measuredTarget, plan, session.ended)
+    : Math.min(wallSeconds, segmentBreakSeconds);
+  const cappedWallElapsed = Math.min(totalDurationSeconds(measuredTarget, plan), wallSeconds);
+  const actualStudySeconds = plan
+    ? studyElapsedSeconds(session.started, measuredTarget, plan, session.ended)
+    : Math.min(measuredTarget, Math.max(0, wallSeconds - derivedBreakSeconds));
+  const elapsedSeconds = Math.max(cappedWallElapsed, actualStudySeconds + derivedBreakSeconds);
+  const segmentFocusSeconds = session.segments.reduce((sum, segment) =>
+    segment.kind === "focus" || segment.kind === "material"
+      ? sum + Math.max(0, segment.end - segment.start) / 1000
+      : sum, 0);
+  const measuredFocus = Math.min(measuredTarget, session.seconds ?? segmentFocusSeconds);
+  const effectiveStudySeconds = override?.actualStudySeconds ?? actualStudySeconds;
+  const effectiveFocusedSeconds = override?.focusedSeconds ?? measuredFocus;
+  const quiz = session.quiz && session.quiz.score <= session.quiz.total ? session.quiz : undefined;
+  const effectiveQuiz = override?.quizResult ?? quiz;
+  const metrics: SessionMetrics = {
+    targetSeconds: target,
+    elapsedSeconds: override?.elapsedSeconds ?? elapsedSeconds,
+    actualStudySeconds: effectiveStudySeconds,
+    focusedSeconds: effectiveFocusedSeconds,
+    plannedBreakSeconds,
+    actualBreakSeconds: override?.actualBreakSeconds ?? derivedBreakSeconds,
+    distractions: override?.distractions ?? session.distractions ??
+      session.segments.filter((segment) => segment.kind === "distraction").length,
+    completed: effectiveStudySeconds >= target,
+    quizScore: effectiveQuiz?.score ?? null,
+    quizTotal: effectiveQuiz?.total ?? null,
+  };
+  const correctionFlags: SessionCorrectionFlags = {
+    goal: override?.goal !== undefined,
+    topic: override?.topic !== undefined,
+    targetSeconds: override?.targetSeconds !== undefined,
+    elapsedSeconds: override?.elapsedSeconds !== undefined,
+    actualStudySeconds: override?.actualStudySeconds !== undefined,
+    focusedSeconds: override?.focusedSeconds !== undefined,
+    actualBreakSeconds: override?.actualBreakSeconds !== undefined,
+    distractions: override?.distractions !== undefined,
+    quizResult: override?.quizResult !== undefined,
+  };
+  return {
+    ...session,
+    goal: override?.goal ?? session.goal ?? "",
+    topic: override?.topic ?? session.topic,
+    target,
+    correctionVersion: override?.version ?? 0,
+    effectiveMetrics: metrics,
+    correctionFlags,
+  };
+}
+
+export function isSessionRemoved(world: World, sessionId: string): boolean {
+  return world.sessionOverrides?.[sessionId]?.removedAt !== undefined;
+}
+
 export function breakWindowAt(
   started: number,
   target: number,
@@ -140,11 +214,56 @@ export type Session = {
   breakPlan?: BreakPlan;
   quiz?: QuizAssessment;
 };
+export type SessionQuizResult = { score: number; total: number };
+export type SessionOverride = {
+  version: number;
+  removedAt?: number;
+  goal?: string;
+  topic?: string;
+  targetSeconds?: number;
+  elapsedSeconds?: number;
+  actualStudySeconds?: number;
+  focusedSeconds?: number;
+  actualBreakSeconds?: number;
+  distractions?: number;
+  quizResult?: SessionQuizResult;
+};
+export type SessionMetrics = {
+  targetSeconds: number;
+  elapsedSeconds: number;
+  actualStudySeconds: number;
+  focusedSeconds: number;
+  plannedBreakSeconds: number;
+  actualBreakSeconds: number;
+  distractions: number;
+  completed: boolean;
+  quizScore: number | null;
+  quizTotal: number | null;
+};
+export type SessionProjectionSource = Pick<Session, "topic" | "started" | "ended" | "target" | "segments"> &
+  Partial<Pick<Session, "id" | "userId" | "groupId" | "goal" | "seconds" | "distractions" | "breakPlan" | "quiz">>;
+export type ProjectedSession = SessionProjectionSource & {
+  correctionVersion: number;
+  effectiveMetrics: SessionMetrics;
+  correctionFlags: SessionCorrectionFlags;
+};
+export type SessionCorrectionField =
+  | "goal"
+  | "topic"
+  | "targetSeconds"
+  | "elapsedSeconds"
+  | "actualStudySeconds"
+  | "focusedSeconds"
+  | "actualBreakSeconds"
+  | "distractions"
+  | "quizResult";
+export type SessionCorrectionFlags = Record<SessionCorrectionField, boolean>;
 export type World = {
   revision?: number;
   people: Record<string, Person>;
   groups: Record<string, Group>;
   sessions: Record<string, Session>;
+  sessionOverrides?: Record<string, SessionOverride>;
   invites: Record<
     string,
     { groupId: string; expires: number; revoked: boolean }
@@ -154,6 +273,7 @@ export const emptyWorld = (): World => ({
   people: {},
   groups: {},
   sessions: {},
+  sessionOverrides: {},
   invites: {},
 });
 export const journey = (members = 1): Journey => ({
@@ -381,6 +501,7 @@ export function snapshot(world: World, userId: string, now: number) {
   resolveVote(p.journey, now);
   const g = p.groupId ? world.groups[p.groupId] : null;
   if (g) resolveVote(g.journey, now);
+  const ownedSessions = Object.values(world.sessions).filter((session) => session.userId === userId);
   return {
     revision: world.revision ?? 0,
     person: p,
@@ -399,9 +520,14 @@ export function snapshot(world: World, userId: string, now: number) {
           })),
         }
       : null,
-    sessions: Object.values(world.sessions)
-      .filter((s) => s.userId === userId)
+    sessions: ownedSessions
+      .filter((session) => !isSessionRemoved(world, session.id))
+      .map((session) => projectSessionMetrics(session, world.sessionOverrides?.[session.id]))
       .sort((a, b) => b.ended - a.ended),
+    removedSessionIds: ownedSessions
+      .filter((session) => isSessionRemoved(world, session.id))
+      .sort((a, b) => b.ended - a.ended)
+      .map((session) => session.id),
     rules: RULES,
   };
 }

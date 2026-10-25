@@ -14,6 +14,7 @@ import { buildApp } from "../src/app.js";
 import { issueTokens, hashToken } from "../src/auth.js";
 import { config } from "../src/config.js";
 import { registerWebAssets } from "../src/webAssets.js";
+import type { World } from "../src/adventure/domain.js";
 vi.mock("../src/storage.js", () => ({
   uploadFile: vi.fn().mockResolvedValue({}),
   deleteFile: vi.fn().mockResolvedValue({}),
@@ -60,8 +61,10 @@ const redis = new RedisMock();
 let app: Awaited<ReturnType<typeof buildApp>>;
 let headers: Record<string, string>;
 let stranger: Record<string, string>;
+let adminHeaders: Record<string, string>;
 let userId: string;
 let otherUserId: string;
+let adminId: string;
 let questionId: string;
 let sessionId: string;
 const session = () => ({
@@ -93,6 +96,7 @@ beforeAll(async () => {
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261010120000_remove_static_quiz_bank/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261024120000_admin_account_management/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261024130000_admin_account_recovery/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261025120000_admin_session_corrections/migration.sql", import.meta.url), "utf8"));
   await server.start();
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();
@@ -112,6 +116,12 @@ beforeAll(async () => {
   };
   stranger = {
     authorization: `Bearer ${(await issueTokens(db, other)).access_token}`,
+  };
+  const admin = await db.user.create({ data: { email: "admin@example.com", name: "Admin" } });
+  adminId = admin.id;
+  await db.adminGrant.create({ data: { user_id: adminId, is_active: true } });
+  adminHeaders = {
+    authorization: `Bearer ${(await issueTokens(db, admin)).access_token}`,
   };
   questionId = (
     await db.quizQuestion.create({
@@ -301,6 +311,391 @@ it("accepts validated guest trips once, strips spoofed data, and rejects owner U
     payload: { ...payload, id: collisionId } });
   expect(collision.statusCode).toBe(409);
   expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
+});
+
+it("projects an audited correction consistently while preserving raw settlement, quiz, progress, and consent", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const started = ended - 30000;
+  const payload = { id, groupId: null, goal: "Study cells", topic: "biology", target: 60, started, ended,
+    distractions: 1, segments: [{ start: started, end: started + 20000, kind: "focus" },
+      { start: started + 20000, end: ended, kind: "distraction" }] };
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload })).statusCode).toBe(200);
+  const before = await db.$queryRaw<{ state: { people: Record<string, { journey: { seconds: number } }> } }[]>`
+    SELECT state FROM adventure_state WHERE id = 1`;
+  const progressBefore = before[0].state.people[userId].journey.seconds;
+  const grade = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: questionId, selected: 1 }] } });
+  expect(grade.statusCode).toBe(200);
+  const quizFacts = grade.json().sessions.find((session: { id: string }) => session.id === id).quiz;
+  expect((await app.inject({ method: "POST", url: "/api/v1/experiments", headers,
+    payload: { sessionId: id, completionPercent: 75 } })).statusCode).toBe(200);
+
+  const emptyQuizCorrection = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Reject an empty quiz grade", changes: { quizResult: { score: 0, total: 0 } } } });
+  expect(emptyQuizCorrection.statusCode).toBe(400);
+
+  const changed = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Correct reviewed session metrics", changes: {
+      goal: "Review the cell structure", elapsedSeconds: 40, actualStudySeconds: 35,
+      focusedSeconds: 30, actualBreakSeconds: 5, distractions: 2, quizResult: { score: 0, total: 1 },
+    } } });
+  expect(changed.statusCode, changed.body).toBe(200);
+  expect(changed.json()).toMatchObject({ id, ownerId: userId, accountId: userId, correctionVersion: 1,
+    goal: "Review the cell structure", metrics: { elapsedSeconds: 40, actualStudySeconds: 35,
+      focusedSeconds: 30, actualBreakSeconds: 5, distractions: 2, quizScore: 0, quizTotal: 1 },
+    metricSources: { goal: "corrected", elapsedSeconds: "corrected", actualStudySeconds: "corrected" } });
+  const detail = await app.inject({ url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders });
+  expect(detail.json()).toMatchObject({ goal: "Review the cell structure", topic: "biology",
+    measuredContent: { goal: "Study cells", topic: "biology" }, correctionVersion: 1 });
+  const audit = await app.inject({ url: `/api/v1/admin/sessions/${id}/audit?limit=10`, headers: adminHeaders });
+  expect(audit.json()).toMatchObject({ total: 1, actions: [{ actorId: adminId, targetOwnerId: userId,
+    sessionId: id, action: "correction", beforeVersion: 0, afterVersion: 1, reason: "Correct reviewed session metrics" }] });
+  expect((await app.inject({ url: `/api/v1/admin/sessions/${id}/audit`, headers })).statusCode).toBe(403);
+  expect((await app.inject({ url: `/api/v1/admin/sessions/${id}/audit?limit=101`, headers: adminHeaders })).statusCode).toBe(400);
+  expect(changed.json().measuredMetrics).toMatchObject({ elapsedSeconds: 30, actualStudySeconds: 30,
+    focusedSeconds: 20, distractions: 1, quizScore: 1, quizTotal: 1 });
+
+  const history = await app.inject({ url: "/api/v1/adventure", headers });
+  expect(history.json()).toMatchObject({ removedSessionIds: [], sessions: [{ id, goal: "Review the cell structure",
+    topic: "biology", correctionVersion: 1, effectiveMetrics: { elapsedSeconds: 40, actualStudySeconds: 35,
+      focusedSeconds: 30, quizScore: 0, quizTotal: 1 } }] });
+  expect(history.json().sessions[0].quiz).toEqual(quizFacts);
+  const listed = await app.inject({ url: `/api/v1/admin/sessions?days=7&accountId=${userId}`, headers: adminHeaders });
+  expect(listed.statusCode).toBe(200);
+  expect(listed.json().sessions[0]).toMatchObject({ correctionVersion: 1, metrics: { actualStudySeconds: 35 },
+    measuredMetrics: { actualStudySeconds: 30 } });
+  expect(listed.json().sessions[0]).not.toHaveProperty("measuredContent");
+  expect(listed.body).not.toContain("Review the cell structure");
+  expect(listed.body).not.toContain("Study cells");
+  const report = await app.inject({ url: `/api/v1/admin/report?days=7&accountId=${userId}`, headers: adminHeaders });
+  expect(report.json().totals).toMatchObject({ sessionCount: 1, actualStudySeconds: 35, focusedSeconds: 30,
+    distractions: 2, quizScore: 0, quizTotal: 1 });
+  expect(report.body).not.toContain("Study cells");
+
+  const publicHistory = await app.inject({ url: "/api/v1/experiments" });
+  expect(publicHistory.json()).toMatchObject({ total: 1, runs: [{ topic: "biology", targetSeconds: 60,
+    elapsedSeconds: 40, studyElapsedSeconds: 35, focusedSeconds: 30, breakSeconds: 5,
+    distractions: 2, quizScore: 0, quizTotal: 1, completionPercent: 75,
+    correctionFlags: { elapsedSeconds: true, actualStudySeconds: true, quizResult: true } }] });
+  for (const privateValue of ["Study cells", "Review the cell structure", userId, adminId, "Correct reviewed session metrics"])
+    expect(publicHistory.body).not.toContain(privateValue);
+  const reportCsv = await app.inject({ url: `/api/v1/admin/report/export.csv?days=7&accountId=${userId}`, headers: adminHeaders });
+  expect(reportCsv.statusCode).toBe(200);
+  expect(reportCsv.body).toContain('"60","35","30"');
+  expect(reportCsv.body).not.toContain("Study cells");
+  expect(reportCsv.body).not.toContain("Correct reviewed session metrics");
+  const publicCsv = await app.inject({ url: "/api/v1/experiments/export.csv" });
+  expect(publicCsv.body).toContain('"biology"');
+  expect(publicCsv.body).toContain('"40","35","5","","30","2"');
+  expect(publicCsv.body).toContain('"false","false","true","true","true","true","true","true"');
+  expect(publicCsv.body).not.toContain("Study cells");
+  expect(publicCsv.body).not.toContain("Correct reviewed session metrics");
+
+  const raw = await db.$queryRaw<{ state: { sessions: Record<string, Record<string, unknown>>;
+    people: Record<string, { journey: { seconds: number } }>; sessionOverrides: Record<string, unknown> } }[]>`
+    SELECT state FROM adventure_state WHERE id = 1`;
+  expect(raw[0].state.sessions[id]).toMatchObject({ goal: "Study cells", topic: "biology", target: 60,
+    seconds: 20, quiz: quizFacts });
+  expect(raw[0].state.sessionOverrides[id]).toMatchObject({ version: 1, goal: "Review the cell structure",
+    actualStudySeconds: 35, quizResult: { score: 0, total: 1 } });
+  expect(raw[0].state.people[userId].journey.seconds).toBe(progressBefore);
+  expect(await db.testerRun.findUnique({ where: { user_id_session_id: { user_id: userId, session_id: id } } }))
+    .toMatchObject({ withdrawn_at: null, completion_percent: 75, focused_seconds: 30, distractions: 2 });
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: id } })).toBe(1);
+
+  const withdrawal = await app.inject({ method: "DELETE", url: `/api/v1/experiments/${id}`, headers });
+  expect(withdrawal.statusCode).toBe(200);
+  const withdrawnBeforeCorrection = await db.testerRun.findUniqueOrThrow({
+    where: { user_id_session_id: { user_id: userId, session_id: id } },
+  });
+  const withdrawnCorrection = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Correct withdrawn session metrics", changes: { distractions: 3 } } });
+  expect(withdrawnCorrection.statusCode).toBe(200);
+  const withdrawnAfterCorrection = await db.testerRun.findUniqueOrThrow({
+    where: { user_id_session_id: { user_id: userId, session_id: id } },
+  });
+  expect(withdrawnAfterCorrection).toMatchObject({ completion_percent: 75, distractions: 2,
+    focused_seconds: 30,
+    published_at: withdrawnBeforeCorrection.published_at, withdrawn_at: withdrawnBeforeCorrection.withdrawn_at });
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
+
+  const blockedTopicChange = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 2, reason: "Topic is no longer correct", changes: { topic: "history" } } });
+  expect(blockedTopicChange.statusCode).toBe(422);
+  expect(blockedTopicChange.json().detail).toBe("Không thể đổi chủ đề sau khi phiên học đã được chấm quiz.");
+  expect((await app.inject({ url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders })).json())
+    .toMatchObject({ correctionVersion: 2, topic: "biology" });
+  const stale = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Stale correction", changes: { distractions: 3 } } });
+  expect(stale.statusCode).toBe(409);
+  expect(stale.json()).toMatchObject({ title: "Dữ liệu đã thay đổi.",
+    type: "https://api.pomodoro-focus.com/errors/conflict",
+    detail: "Dữ liệu đã thay đổi hoặc tồn tại. Hãy tải lại rồi thử lại." });
+  expect((await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers,
+    payload: { expectedVersion: 2, reason: "Not an admin", changes: { distractions: 3 } } })).statusCode).toBe(403);
+});
+
+it("rejects incoherent partial corrections, audits atomically, and tombstones block sync, grading, and publication", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const started = ended - 30000;
+  const payload = { id, groupId: null, goal: "Study cells", topic: "biology", target: 60, started, ended,
+    segments: [{ start: started, end: ended, kind: "focus" }] };
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload })).statusCode).toBe(200);
+
+  const invalid = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Invalid metric relationship", changes: { focusedSeconds: 31 } } });
+  expect(invalid.statusCode).toBe(422);
+  const emptyChanges = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "No fields selected", changes: {} } });
+  expect(emptyChanges.statusCode).toBe(400);
+  expect(emptyChanges.json().title).toBe("Dữ liệu không hợp lệ.");
+  expect(emptyChanges.json().errors).toContainEqual(expect.objectContaining({
+    message: "Hãy chọn ít nhất một mục cần chỉnh sửa.",
+  }));
+  const strict = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Unknown field", changes: { score: 1 } } });
+  expect(strict.statusCode).toBe(400);
+
+  await db.$executeRaw`ALTER TABLE admin_session_action_audits
+    ADD CONSTRAINT admin_session_action_audits_test_reject CHECK (reason <> 'force audit failure')`;
+  const auditFailure = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "force audit failure", changes: { distractions: 2 } } });
+  await db.$executeRaw`ALTER TABLE admin_session_action_audits DROP CONSTRAINT admin_session_action_audits_test_reject`;
+  expect(auditFailure.statusCode).toBe(500);
+  let state = await db.$queryRaw<{ state: { sessionOverrides?: Record<string, unknown> } }[]>`
+    SELECT state FROM adventure_state WHERE id = 1`;
+  expect(state[0].state.sessionOverrides?.[id]).toBeUndefined();
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: id } })).toBe(0);
+
+  const coherent = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Adjust break accounting", changes: { actualStudySeconds: 20,
+      focusedSeconds: 20, actualBreakSeconds: 10 } } });
+  expect(coherent.statusCode).toBe(200);
+  const incoherentReset = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Reset study measurement", changes: { actualStudySeconds: null } } });
+  expect(incoherentReset.statusCode).toBe(422);
+  expect(incoherentReset.json().detail).toBe("Thời lượng đã trôi qua phải bao gồm thời gian học và thời gian nghỉ.");
+  expect((await app.inject({ url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders })).json())
+    .toMatchObject({ correctionVersion: 1, metrics: { actualStudySeconds: 20, actualBreakSeconds: 10 } });
+
+  expect((await app.inject({ method: "POST", url: "/api/v1/experiments", headers, payload: { sessionId: id } })).statusCode).toBe(200);
+  const removed = await app.inject({ method: "DELETE", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Remove diagnosed test trip" } });
+  expect(removed.statusCode, removed.body).toBe(200);
+  expect(removed.json()).toMatchObject({ id, ownerId: userId, status: "removed", correctionVersion: 2 });
+  const history = await app.inject({ url: "/api/v1/adventure", headers });
+  expect(history.json()).toMatchObject({ sessions: [], removedSessionIds: [id] });
+  const resync = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload });
+  expect(resync.statusCode).toBe(410);
+  expect(resync.json()).toMatchObject({ title: "Phiên học đã bị gỡ.",
+    type: "https://api.pomodoro-focus.com/errors/session-removed",
+    detail: "Phiên học này đã được quản trị viên gỡ khỏi lịch sử." });
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers: stranger, payload })).statusCode).toBe(409);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/guest-sessions", payload })).statusCode).toBe(409);
+  expect((await app.inject({ method: "POST", url: "/api/v1/experiments", headers: stranger,
+    payload: { sessionId: id } })).statusCode).toBe(404);
+  const grade = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: questionId, selected: 1 }] } });
+  expect(grade.statusCode).toBe(410);
+  const republish = await app.inject({ method: "POST", url: "/api/v1/experiments", headers, payload: { sessionId: id } });
+  expect(republish.statusCode).toBe(410);
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
+  expect((await app.inject({ url: `/api/v1/admin/sessions?days=7&accountId=${userId}`, headers: adminHeaders })).json().total).toBe(0);
+  expect((await db.testerRun.findUnique({ where: { user_id_session_id: { user_id: userId, session_id: id } } }))?.withdrawn_at)
+    .toBeNull();
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: id } })).toBe(2);
+  const removedAudit = await app.inject({ url: `/api/v1/admin/sessions/${id}/audit?limit=10`, headers: adminHeaders });
+  expect(removedAudit.statusCode).toBe(200);
+  expect(removedAudit.json()).toMatchObject({ total: 2, actions: expect.arrayContaining([
+    expect.objectContaining({ action: "removal", beforeVersion: 1, afterVersion: 2,
+      reason: "Remove diagnosed test trip", actorId: adminId }),
+  ]) });
+
+  const guestId = randomUUID();
+  const guestPayload = { ...payload, id: guestId };
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/guest-sessions", payload: guestPayload })).statusCode).toBe(200);
+  const guestCorrection = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${guestId}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Correct guest trip count", changes: { distractions: 2 } } });
+  expect(guestCorrection.statusCode).toBe(200);
+  expect(guestCorrection.json()).toMatchObject({ ownerId: `guest:${guestId}`, accountId: null,
+    metrics: { distractions: 2 }, correctionVersion: 1 });
+  const guestAudit = await app.inject({ url: `/api/v1/admin/sessions/${guestId}/audit`, headers: adminHeaders });
+  expect(guestAudit.json()).toMatchObject({ total: 1, actions: [{ targetOwnerId: `guest:${guestId}`, actorId: adminId }] });
+  const guestListed = await app.inject({ url: "/api/v1/admin/sessions?days=7", headers: adminHeaders });
+  expect(guestListed.json().sessions).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: guestId, ownerId: `guest:${guestId}`, accountId: null }),
+  ]));
+  const guestDelete = await app.inject({ method: "DELETE", url: `/api/v1/admin/sessions/${guestId}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Remove diagnosed guest test trip" } });
+  expect(guestDelete.statusCode).toBe(200);
+  expect(guestDelete.json()).toMatchObject({ ownerId: `guest:${guestId}`, accountId: null, status: "removed" });
+  const guestReplay = await app.inject({ method: "POST", url: "/api/v1/adventure/guest-sessions", payload: guestPayload });
+  expect(guestReplay.statusCode).toBe(410);
+  expect(guestReplay.body).toContain("session-removed");
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: guestId } })).toBe(2);
+});
+
+it("grades against a corrected topic while rejecting quiz questions from the stale topic", async () => {
+  await db.topic.upsert({
+    where: { id: "history" },
+    create: { id: "history", name: "History", icon: "📜" },
+    update: {},
+  });
+  const historyQuestion = await db.quizQuestion.create({
+    data: {
+      topic_id: "history",
+      owner_id: userId,
+      question: "History question",
+      options: ["A", "B", "C", "D"],
+      correct_index: 1,
+      explanation: "History explanation",
+      source: "gemini_generated",
+    },
+  });
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const started = ended - 30000;
+  const payload = { id, groupId: null, goal: "Study cells", topic: "biology", target: 60, started, ended,
+    segments: [{ start: started, end: ended, kind: "focus" }] };
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload })).statusCode).toBe(200);
+
+  const corrected = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Correct session topic before grading", changes: { topic: "history",
+      actualBreakSeconds: 0 } } });
+  expect(corrected.statusCode).toBe(200);
+  const staleQuiz = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: questionId, selected: 1 }] } });
+  expect(staleQuiz.statusCode).toBe(409);
+  const correctQuiz = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: historyQuestion.id, selected: 1 }] } });
+  expect(correctQuiz.statusCode).toBe(200);
+  expect(correctQuiz.json().sessions[0]).toMatchObject({ topic: "history", quiz: { score: 1, total: 1 } });
+  const published = await app.inject({ method: "POST", url: "/api/v1/experiments", headers,
+    payload: { sessionId: id } });
+  expect(published.statusCode).toBe(200);
+  expect(published.json()).toMatchObject({ breakSeconds: 0, correctionFlags: { topic: true, actualBreakSeconds: true } });
+  const publicCsv = await app.inject({ url: "/api/v1/experiments/export.csv" });
+  const [publicHeaders, publicRow] = publicCsv.body.replace(/^\uFEFF/, "").split("\r\n");
+  const headerCells = publicHeaders.split(",");
+  const publicCells = publicRow.split(",");
+  expect(headerCells).toContain("topic_corrected");
+  expect(headerCells).toContain("break_seconds_corrected");
+  expect(publicCells[headerCells.indexOf("break_seconds")]).toBe('"0"');
+  expect(publicCells[headerCells.indexOf("break_seconds_corrected")]).toBe('"true"');
+  expect(publicHeaders).not.toContain("goal");
+
+  const raw = await db.$queryRaw<{ state: { sessions: Record<string, { topic: string; quiz: unknown }> } }[]>`
+    SELECT state FROM adventure_state WHERE id = 1`;
+  expect(raw[0].state.sessions[id]).toMatchObject({ topic: "biology", quiz: { score: 1, total: 1 } });
+  const blockedReset = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Reset graded topic", changes: { topic: null } } });
+  expect(blockedReset.statusCode).toBe(422);
+  expect(blockedReset.json().detail).toBe("Không thể đổi chủ đề sau khi phiên học đã được chấm quiz.");
+});
+
+it("filters all-history admin sessions by effective planned and elapsed seconds", async () => {
+  async function saveSession(options: {
+    ageDays: number;
+    target: number;
+    wallMs: number;
+    segments: { startOffset: number; endOffset: number; kind: "focus" | "break" }[];
+    breakPlan?: { count: number; seconds: number };
+  }) {
+    const id = randomUUID();
+    const started = Date.now() - options.ageDays * 86_400_000 - 3_600_000;
+    const ended = started + options.wallMs;
+    const response = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers,
+      payload: { id, groupId: null, goal: "Short trip filter fixture", topic: "biology", target: options.target,
+        started, ended, breakPlan: options.breakPlan,
+        segments: options.segments.map(({ startOffset, endOffset, kind }) => ({
+          start: started + startOffset, end: started + endOffset, kind,
+        })) } });
+    expect(response.statusCode, response.body).toBe(200);
+    return id;
+  }
+
+  const legacyBreak = await saveSession({ ageDays: 29, target: 60, wallMs: 70_000,
+    segments: [{ startOffset: 0, endOffset: 60_000, kind: "focus" },
+      { startOffset: 60_000, endOffset: 70_000, kind: "break" }] });
+  const dayThirtyOnly = await saveSession({ ageDays: 10, target: 60, wallMs: 30_000,
+    segments: [{ startOffset: 0, endOffset: 30_000, kind: "focus" }] });
+  const cappedWall = await saveSession({ ageDays: 2, target: 60, wallMs: 100_000,
+    segments: [{ startOffset: 0, endOffset: 60_000, kind: "focus" }] });
+  const partialPlannedBreak = await saveSession({ ageDays: 3, target: 120, wallMs: 90_000,
+    breakPlan: { count: 1, seconds: 60 },
+    segments: [{ startOffset: 0, endOffset: 60_000, kind: "focus" },
+      { startOffset: 60_000, endOffset: 90_000, kind: "break" }] });
+  const corrected = await saveSession({ ageDays: 4, target: 120, wallMs: 90_000,
+    segments: [{ startOffset: 0, endOffset: 90_000, kind: "focus" }] });
+  const fractionalCutoff = await saveSession({ ageDays: 5, target: 60, wallMs: 60_001,
+    segments: [{ startOffset: 0, endOffset: 60_000, kind: "focus" }] });
+
+  // The sync API correctly limits new submissions to 30 days. Shift this synthetic saved
+  // fixture beyond that boundary to exercise the separate all-history admin window.
+  const worldRows = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+  const world = worldRows[0].state;
+  const oldSession = world.sessions[legacyBreak];
+  const oldStarted = Date.now() - 45 * 86_400_000 - 3_600_000;
+  const timestampShift = oldStarted - oldSession.started;
+  oldSession.started = oldStarted;
+  oldSession.ended += timestampShift;
+  oldSession.segments = oldSession.segments.map((segment) => ({
+    ...segment, start: segment.start + timestampShift, end: segment.end + timestampShift,
+  }));
+  const malformedId = randomUUID();
+  (world.sessions as Record<string, unknown>)[malformedId] = {
+    id: malformedId, userId, started: "not-a-number", ended: "also-invalid", target: "bad-target",
+    segments: [{ kind: "break", start: "not-a-timestamp", end: "still-not-a-timestamp" }],
+  };
+  const oversizedTimestampId = randomUUID();
+  (world.sessions as Record<string, unknown>)[oversizedTimestampId] = {
+    id: oversizedTimestampId, userId, groupId: null, goal: "Malformed timestamp fixture", topic: "biology",
+    started: "9".repeat(100), ended: "9".repeat(100), target: 60, segments: [],
+  };
+  await db.$executeRaw`UPDATE adventure_state SET state = ${JSON.stringify(world)}::jsonb WHERE id = 1`;
+
+  const applyCorrection = (id: string, changes: Record<string, number>) => app.inject({ method: "PATCH",
+    url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Verify effective short-trip filter", changes } });
+  expect((await applyCorrection(corrected, { targetSeconds: 60, elapsedSeconds: 50,
+    actualStudySeconds: 40, focusedSeconds: 40, actualBreakSeconds: 0 })).statusCode).toBe(200);
+  expect((await applyCorrection(fractionalCutoff, { elapsedSeconds: 60.001 })).statusCode).toBe(200);
+
+  const all = await app.inject({ url: "/api/v1/admin/sessions?limit=50", headers: adminHeaders });
+  const thirtyDays = await app.inject({ url: "/api/v1/admin/sessions?days=30&limit=50", headers: adminHeaders });
+  const sevenDays = await app.inject({ url: "/api/v1/admin/sessions?days=7&limit=50", headers: adminHeaders });
+  const ninetyDays = await app.inject({ url: "/api/v1/admin/sessions?days=90&limit=50", headers: adminHeaders });
+  const planned = await app.inject({ url: "/api/v1/admin/sessions?durationBasis=planned&limit=50", headers: adminHeaders });
+  const actual = await app.inject({ url: "/api/v1/admin/sessions?durationBasis=actual&limit=50", headers: adminHeaders });
+  const reportWithMalformedTimestamp = await app.inject({
+    url: `/api/v1/admin/report?days=7&accountId=${userId}`, headers: adminHeaders,
+  });
+
+  expect(all.statusCode, all.body).toBe(200);
+  expect(all.json()).toMatchObject({ days: "all", window: "all", total: 6, truncated: false });
+  expect(all.json().sessions).toHaveLength(6);
+  expect(thirtyDays.json()).toMatchObject({ days: 30, window: "30d", total: 5 });
+  expect(sevenDays.json()).toMatchObject({ days: 7, window: "7d", total: 4 });
+  expect(ninetyDays.json()).toMatchObject({ days: 90, window: "90d", total: 6 });
+  expect(ninetyDays.json().sessions.map((row: { id: string }) => row.id)).toContain(legacyBreak);
+  expect(reportWithMalformedTimestamp.statusCode, reportWithMalformedTimestamp.body).toBe(200);
+  expect(planned.json()).toMatchObject({ durationBasis: "planned", durationThresholdSeconds: 60, total: 5 });
+  expect(planned.json().sessions.map((row: { id: string }) => row.id)).toEqual(expect.arrayContaining([
+    legacyBreak, dayThirtyOnly, cappedWall, corrected, fractionalCutoff,
+  ]));
+  expect(actual.json()).toMatchObject({ durationBasis: "actual", durationThresholdSeconds: 60, total: 3 });
+  expect(actual.json().sessions.map((row: { id: string }) => row.id)).toEqual(expect.arrayContaining([
+    dayThirtyOnly, cappedWall, corrected,
+  ]));
+  expect(actual.json().sessions.map((row: { id: string }) => row.id)).not.toEqual(expect.arrayContaining([
+    legacyBreak, partialPlannedBreak, fractionalCutoff,
+  ]));
+  expect(actual.json().sessions.find((row: { id: string }) => row.id === legacyBreak)).toBeUndefined();
+  expect(actual.json().sessions.find((row: { id: string }) => row.id === partialPlannedBreak)).toBeUndefined();
+  expect(actual.json().sessions.find((row: { id: string }) => row.id === fractionalCutoff)).toBeUndefined();
+  expect(actual.json().sessions.find((row: { id: string }) => row.id === malformedId)).toBeUndefined();
 });
 afterAll(async () => {
   await app?.close();
