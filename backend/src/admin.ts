@@ -919,8 +919,15 @@ async function mutateAdminSession(
         throw new ApiError(400, "validation-error", "Hãy chọn ít nhất một mục cần chỉnh sửa.");
       nextOverride = mergeSessionOverride(current, changes, beforeVersion + 1);
       const projected = projectSessionMetrics(session, nextOverride);
-      if (session.quiz && projected.topic !== projectSessionMetrics(session, current).topic)
-        throw new ApiError(422, "validation-error", "Không thể đổi chủ đề sau khi phiên học đã được chấm quiz.");
+      const currentTopic = projectSessionMetrics(session, current).topic;
+      if (projected.topic !== currentTopic && changes.topic !== null && changes.topic !== undefined) {
+        const registeredTopic = await tx.topic.findUnique({
+          where: { id: projected.topic },
+          select: { id: true },
+        });
+        if (!registeredTopic)
+          throw new ApiError(422, "validation-error", "Chủ đề đã chọn không tồn tại trong danh mục.");
+      }
       validateEffectiveCorrection(session, nextOverride);
       afterState = sessionAuditState(session, nextOverride);
     } else {

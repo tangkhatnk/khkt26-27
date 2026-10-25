@@ -137,6 +137,7 @@ export function QuizPanel({
   const wrongAnswers = assessment?.feedback?.filter((item) => !item.correct) ?? [];
   const gaps = assessment ? knowledgeGaps(assessment) : [];
   const hasCorrectedQuizResult = session.correctionFlags?.quizResult === true;
+  const hasCorrectedTopic = session.correctionFlags?.topic === true;
   const correctedScore = session.effectiveMetrics?.quizScore ?? null;
   const correctedTotal = session.effectiveMetrics?.quizTotal ?? null;
   return (
@@ -155,9 +156,14 @@ export function QuizPanel({
           {assessment && " Phản hồi bên dưới vẫn giữ nguyên từ lượt chấm ban đầu."}
         </p>
       )}
+      {hasCorrectedTopic && !hasCorrectedQuizResult && assessment && (
+        <p className="quiz-corrected-result" role="status">
+          Chủ đề chuyến đã được hiệu chỉnh; điểm và phản hồi dưới đây vẫn là kết quả chấm ban đầu.
+        </p>
+      )}
       {assessment ? (
         <div className="quiz-result" role="status">
-          <h3>{hasCorrectedQuizResult ? "Điểm chấm ban đầu" : "Điểm"}: {assessment.score}/{assessment.total}</h3>
+          <h3>{hasCorrectedQuizResult || hasCorrectedTopic ? "Điểm chấm ban đầu" : "Điểm"}: {assessment.score}/{assessment.total}</h3>
           {assessment.feedback ? (
             <>
               {wrongAnswers.length ? (

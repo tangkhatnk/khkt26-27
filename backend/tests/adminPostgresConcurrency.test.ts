@@ -171,6 +171,16 @@ beforeAll(async () => {
   const rows = await db.$queryRaw<{ database_name: string }[]>`SELECT current_database() AS database_name`;
   if (rows[0]?.database_name !== "admin_concurrency")
     throw new Error("Refusing to run admin concurrency tests outside admin_concurrency");
+  await db.topic.upsert({
+    where: { id: "biology" },
+    create: { id: "biology", name: "Biology", icon: "leaf" },
+    update: {},
+  });
+  await db.topic.upsert({
+    where: { id: "history" },
+    create: { id: "history", name: "History", icon: "scroll" },
+    update: {},
+  });
   bootstrapId = (await createUser()).id;
   firstApp = makeApp(db, [bootstrapId]);
   secondApp = makeApp(secondDb, [bootstrapId]);

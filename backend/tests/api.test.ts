@@ -314,6 +314,11 @@ it("accepts validated guest trips once, strips spoofed data, and rejects owner U
 });
 
 it("projects an audited correction consistently while preserving raw settlement, quiz, progress, and consent", async () => {
+  await db.topic.upsert({
+    where: { id: "history" },
+    create: { id: "history", name: "History", icon: "📜" },
+    update: {},
+  });
   const id = randomUUID();
   const ended = Date.now() - 1000;
   const started = ended - 30000;
@@ -420,12 +425,27 @@ it("projects an audited correction consistently while preserving raw settlement,
     published_at: withdrawnBeforeCorrection.published_at, withdrawn_at: withdrawnBeforeCorrection.withdrawn_at });
   expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
 
-  const blockedTopicChange = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
-    payload: { expectedVersion: 2, reason: "Topic is no longer correct", changes: { topic: "history" } } });
-  expect(blockedTopicChange.statusCode).toBe(422);
-  expect(blockedTopicChange.json().detail).toBe("Không thể đổi chủ đề sau khi phiên học đã được chấm quiz.");
+  const unknownTopicChange = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 2, reason: "Reject an unregistered topic", changes: { topic: "unregistered-topic" } } });
+  expect(unknownTopicChange.statusCode).toBe(422);
+  expect(unknownTopicChange.json().detail).toBe("Chủ đề đã chọn không tồn tại trong danh mục.");
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: id } })).toBe(2);
   expect((await app.inject({ url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders })).json())
     .toMatchObject({ correctionVersion: 2, topic: "biology" });
+
+  const correctedGradedTopic = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 2, reason: "Correct the graded session topic", changes: { topic: "history" } } });
+  expect(correctedGradedTopic.statusCode, correctedGradedTopic.body).toBe(200);
+  expect(correctedGradedTopic.json()).toMatchObject({ correctionVersion: 3, topic: "history" });
+  const duplicateGrade = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: questionId, selected: 0 }] } });
+  expect(duplicateGrade.statusCode, duplicateGrade.body).toBe(200);
+  expect(duplicateGrade.json().sessions.find((item: { id: string }) => item.id === id).quiz).toEqual(quizFacts);
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: id } })).toBe(3);
+  const rawAfterTopicCorrection = await db.$queryRaw<{ state: { sessions: Record<string, Record<string, unknown>>;
+    sessionOverrides: Record<string, unknown> } }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+  expect(rawAfterTopicCorrection[0].state.sessions[id]).toMatchObject({ topic: "biology", quiz: quizFacts });
+  expect(rawAfterTopicCorrection[0].state.sessionOverrides[id]).toMatchObject({ version: 3, topic: "history" });
   const stale = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
     payload: { expectedVersion: 1, reason: "Stale correction", changes: { distractions: 3 } } });
   expect(stale.statusCode).toBe(409);
@@ -537,6 +557,28 @@ it("rejects incoherent partial corrections, audits atomically, and tombstones bl
   expect(await db.adminSessionActionAudit.count({ where: { session_id: guestId } })).toBe(2);
 });
 
+it("allows metric corrections for an unregistered legacy topic and rejects a new unknown topic without an audit", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const started = ended - 30000;
+  const payload = { id, groupId: null, goal: "Legacy topic fixture", topic: "legacy-unregistered-topic", target: 60,
+    started, ended, segments: [{ start: started, end: ended, kind: "focus" }] };
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload })).statusCode).toBe(200);
+
+  const metricsOnly = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Correct legacy trip metrics", changes: { distractions: 1 } } });
+  expect(metricsOnly.statusCode, metricsOnly.body).toBe(200);
+  expect(metricsOnly.json()).toMatchObject({ correctionVersion: 1, topic: "legacy-unregistered-topic", metrics: { distractions: 1 } });
+
+  const unknownTopic = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 1, reason: "Reject an unknown replacement topic", changes: { topic: "new-unknown-topic" } } });
+  expect(unknownTopic.statusCode).toBe(422);
+  expect(unknownTopic.json().detail).toBe("Chủ đề đã chọn không tồn tại trong danh mục.");
+  expect((await app.inject({ url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders })).json())
+    .toMatchObject({ correctionVersion: 1, topic: "legacy-unregistered-topic", metrics: { distractions: 1 } });
+  expect(await db.adminSessionActionAudit.count({ where: { session_id: id } })).toBe(1);
+});
+
 it("grades against a corrected topic while rejecting quiz questions from the stale topic", async () => {
   await db.topic.upsert({
     where: { id: "history" },
@@ -589,10 +631,18 @@ it("grades against a corrected topic while rejecting quiz questions from the sta
   const raw = await db.$queryRaw<{ state: { sessions: Record<string, { topic: string; quiz: unknown }> } }[]>`
     SELECT state FROM adventure_state WHERE id = 1`;
   expect(raw[0].state.sessions[id]).toMatchObject({ topic: "biology", quiz: { score: 1, total: 1 } });
-  const blockedReset = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+  const resetTopic = await app.inject({ method: "PATCH", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
     payload: { expectedVersion: 1, reason: "Reset graded topic", changes: { topic: null } } });
-  expect(blockedReset.statusCode).toBe(422);
-  expect(blockedReset.json().detail).toBe("Không thể đổi chủ đề sau khi phiên học đã được chấm quiz.");
+  expect(resetTopic.statusCode, resetTopic.body).toBe(200);
+  expect(resetTopic.json()).toMatchObject({ correctionVersion: 2, topic: "biology" });
+  const duplicateAfterReset = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
+    payload: { sessionId: id, answers: [{ id: historyQuestion.id, selected: 0 }] } });
+  expect(duplicateAfterReset.statusCode, duplicateAfterReset.body).toBe(200);
+  expect(duplicateAfterReset.json().sessions.find((session: { id: string }) => session.id === id).quiz)
+    .toMatchObject({ score: 1, total: 1 });
+  const rawAfterReset = await db.$queryRaw<{ state: { sessions: Record<string, { topic: string; quiz: unknown }> } }[]>`
+    SELECT state FROM adventure_state WHERE id = 1`;
+  expect(rawAfterReset[0].state.sessions[id]).toMatchObject({ topic: "biology", quiz: { score: 1, total: 1 } });
 });
 
 it("filters all-history admin sessions by effective planned and elapsed seconds", async () => {
@@ -1765,7 +1815,8 @@ it("grades thirty answers from trusted question data, freezes the first assessme
   } });
   const mismatch = await app.inject({ method: "POST", url: "/api/v1/adventure/quiz", headers,
     payload: { sessionId: id, answers: [{ id: wrongTopic.id, selected: 1 }] } });
-  expect(mismatch.statusCode).toBe(400);
+  expect(mismatch.statusCode).toBe(200);
+  expect(mismatch.json().sessions[0].quiz).toEqual(assessment);
   const otherQuestion = await db.quizQuestion.create({ data: {
     topic_id: "biology", owner_id: otherUserId, question: "Other owner AI question",
     options: ["A", "B", "C", "D"], correct_index: 1, explanation: "Other owner explanation",

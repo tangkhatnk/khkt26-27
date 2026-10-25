@@ -331,6 +331,7 @@ export function adventureRoutes(
         throw new ApiError(404, "not-found", "Không tìm thấy phiên.");
       if (isSessionRemoved(w, value.sessionId))
         throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
+      if (s.quiz) return snapshot(w, req.userId, Date.now());
       const effectiveTopic = projectSessionMetrics(s, w.sessionOverrides?.[value.sessionId]).topic;
       if (questions.some((q) => q.topic_id !== effectiveTopic)) {
         if (effectiveTopic !== s.topic)
