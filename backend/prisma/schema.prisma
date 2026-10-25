@@ -58,6 +58,23 @@ model AdminActionAudit {
   @@index([actor_user_id, created_at(sort: Desc)])
   @@map("admin_action_audits")
 }
+model AdminSessionActionAudit {
+  id               String   @id @default(uuid()) @db.Uuid
+  actor_user_id    String   @db.Uuid
+  target_owner_id  String   @db.Text
+  session_id       String   @db.Uuid
+  action           String   @db.VarChar(20)
+  before_version   Int
+  after_version    Int
+  before_state     Json
+  after_state      Json
+  reason           String   @db.VarChar(500)
+  created_at       DateTime @default(now())
+  @@index([session_id, created_at(sort: Desc), id(sort: Desc)], map: "admin_session_action_audits_session_created_idx")
+  @@index([target_owner_id, created_at(sort: Desc)], map: "admin_session_action_audits_owner_created_idx")
+  @@index([actor_user_id, created_at(sort: Desc)], map: "admin_session_action_audits_actor_created_idx")
+  @@map("admin_session_action_audits")
+}
 model AdminControl {
   id         Int      @id @default(1)
   created_at DateTime @default(now())

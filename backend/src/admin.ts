@@ -4,10 +4,13 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { ApiError } from "./errors.js";
 import {
-  breakElapsedSeconds,
-  isValidBreakPlan,
-  studyElapsedSeconds,
-  type BreakPlan,
+  isSessionRemoved,
+  projectSessionMetrics,
+  type Session,
+  type SessionCorrectionFlags,
+  type SessionMetrics,
+  type SessionOverride,
+  type World,
 } from "./adventure/domain.js";
 
 const ADMIN_REPORT_SESSION_LIMIT = 20_000;
@@ -20,9 +23,10 @@ const pageSchema = z.object({
   offset: z.coerce.number().int().min(0).max(ADMIN_MAX_OFFSET).default(0),
 });
 const sessionFilterSchema = pageSchema.extend({
-  days: periodSchema.default(30),
+  days: z.enum(["7", "30", "90", "all"]).default("all"),
   accountId: z.uuid().optional(),
   groupId: z.uuid().optional(),
+  durationBasis: z.enum(["planned", "actual"]).optional(),
 });
 const auditQuerySchema = pageSchema.extend({ targetId: z.uuid().optional() });
 const roleMutationSchema = z.object({
@@ -46,6 +50,29 @@ const deletionMutationSchema = z.object({
   expectedVersion: z.number().int().nonnegative(),
   reason: z.string().trim().min(1).max(500),
 }).strict();
+const sessionCorrectionBodySchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+  changes: z.object({
+    goal: z.string().trim().min(3).max(500).nullable().optional(),
+    topic: z.string().trim().min(1).max(100).nullable().optional(),
+    targetSeconds: z.number().int().min(60).max(14_400).nullable().optional(),
+    elapsedSeconds: z.number().finite().min(0).max(32_400).nullable().optional(),
+    actualStudySeconds: z.number().finite().min(0).max(14_400).nullable().optional(),
+    focusedSeconds: z.number().finite().min(0).max(14_400).nullable().optional(),
+    actualBreakSeconds: z.number().finite().min(0).max(32_400).nullable().optional(),
+    distractions: z.number().int().min(0).max(10_000).nullable().optional(),
+    quizResult: z.object({
+      score: z.number().int().min(0).max(1000),
+      total: z.number().int().min(1, "Tổng số câu phải lớn hơn 0.").max(1000),
+    }).strict().refine((result) => result.score <= result.total, "Điểm không được vượt quá tổng số câu.").nullable().optional(),
+  }).strict().refine((changes) => Object.keys(changes).length > 0, "Hãy chọn ít nhất một mục cần chỉnh sửa."),
+}).strict();
+const sessionRemovalBodySchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+const sessionAuditQuerySchema = pageSchema;
 
 const breakPlanSchema = z.object({
   count: z.number().int().min(0).max(10),
@@ -60,6 +87,7 @@ const storedSessionSchema = z.object({
   id: z.string().min(1).max(100),
   userId: z.string().min(1).max(100),
   groupId: z.uuid().nullable().optional().default(null),
+  goal: z.string().trim().max(500).optional().default(""),
   topic: z.string().trim().min(1).max(100),
   started: z.number().int().nonnegative().max(8.64e15),
   ended: z.number().int().nonnegative().max(8.64e15),
@@ -73,6 +101,22 @@ const storedSessionSchema = z.object({
     total: z.number().int().min(1).max(1000),
   }).optional(),
 }).strip().refine((session) => session.ended >= session.started, "Invalid session time");
+const storedSessionOverrideSchema = z.object({
+  version: z.number().int().nonnegative(),
+  removedAt: z.number().int().nonnegative().optional(),
+  goal: z.string().trim().min(3).max(500).optional(),
+  topic: z.string().trim().min(1).max(100).optional(),
+  targetSeconds: z.number().int().min(60).max(14_400).optional(),
+  elapsedSeconds: z.number().finite().min(0).max(32_400).optional(),
+  actualStudySeconds: z.number().finite().min(0).max(14_400).optional(),
+  focusedSeconds: z.number().finite().min(0).max(14_400).optional(),
+  actualBreakSeconds: z.number().finite().min(0).max(32_400).optional(),
+  distractions: z.number().int().min(0).max(10_000).optional(),
+  quizResult: z.object({
+    score: z.number().int().min(0).max(1000),
+    total: z.number().int().min(1).max(1000),
+  }).strict().refine((result) => result.score <= result.total).optional(),
+}).strict();
 
 type StoredSession = z.infer<typeof storedSessionSchema>;
 type AdminPeriod = 7 | 30 | 90;
@@ -95,11 +139,20 @@ type MetricTotals = {
 
 export type AdminSessionDto = {
   id: string;
-  accountId: string;
+  ownerId: string;
+  accountId: string | null;
   groupId: string | null;
+  status: "active";
+  correctionVersion: number;
+  goal?: string;
+  measuredContent?: { goal: string; topic: string };
   topic: string;
   startedAt: string;
   endedAt: string;
+  timestampsAreSettlementFacts: true;
+  metrics: SessionMetrics;
+  measuredMetrics: SessionMetrics;
+  metricSources: Record<keyof SessionCorrectionFlags, "measured" | "corrected">;
   plannedStudySeconds: number;
   actualStudySeconds: number;
   focusedSeconds: number;
@@ -134,55 +187,55 @@ function finiteSeconds(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.round(value * 10) / 10) : 0;
 }
 
-function metricsFor(session: StoredSession) {
-  const validPlan: BreakPlan | undefined = session.breakPlan &&
-    isValidBreakPlan(session.breakPlan, session.target)
-    ? session.breakPlan
-    : undefined;
-  const wallSeconds = Math.max(0, (session.ended - session.started) / 1000);
-  const plannedBreakSeconds = validPlan ? validPlan.count * validPlan.seconds : 0;
-  const actualBreakSeconds = validPlan
-    ? breakElapsedSeconds(session.started, session.target, validPlan, session.ended)
-    : session.segments.reduce((sum, segment) => {
-      if (segment.kind !== "break") return sum;
-      const start = Math.max(session.started, segment.start);
-      const end = Math.min(session.ended, segment.end);
-      return sum + Math.max(0, end - start) / 1000;
-    }, 0);
-  const actualStudySeconds = validPlan
-    ? studyElapsedSeconds(session.started, session.target, validPlan, session.ended)
-    : Math.min(session.target, Math.max(0, wallSeconds - actualBreakSeconds));
-  const segmentFocusSeconds = session.segments.reduce((sum, segment) =>
-    segment.kind === "focus" || segment.kind === "material"
-      ? sum + Math.max(0, segment.end - segment.start) / 1000
-      : sum, 0);
-  const focusedSeconds = Math.min(session.target, session.seconds ?? segmentFocusSeconds);
-  const quiz = session.quiz && session.quiz.score <= session.quiz.total ? session.quiz : undefined;
+type SessionProjectionRow = { session: unknown; override?: unknown };
 
+function parseSessionProjection(value: unknown): { session: StoredSession; override?: SessionOverride } | null {
+  const wrapped = typeof value === "object" && value !== null && "session" in value
+    ? value as SessionProjectionRow
+    : { session: value };
+  const session = parseSession(wrapped.session);
+  if (!session) return null;
+  if (wrapped.override === undefined || wrapped.override === null) return { session };
+  const parsedOverride = storedSessionOverrideSchema.safeParse(wrapped.override);
+  return parsedOverride.success ? { session, override: parsedOverride.data } : null;
+}
+
+function metricSources(flags: SessionCorrectionFlags): AdminSessionDto["metricSources"] {
+  return Object.fromEntries(Object.entries(flags).map(([key, corrected]) =>
+    [key, corrected ? "corrected" : "measured"])) as AdminSessionDto["metricSources"];
+}
+
+function toMetrics(metrics: SessionMetrics) {
   return {
-    plannedStudySeconds: session.target,
-    actualStudySeconds: finiteSeconds(actualStudySeconds),
-    focusedSeconds: finiteSeconds(focusedSeconds),
-    plannedBreakSeconds,
-    actualBreakSeconds: finiteSeconds(Math.min(wallSeconds, actualBreakSeconds)),
-    distractions: session.distractions ?? session.segments.filter((segment) => segment.kind === "distraction").length,
-    completed: actualStudySeconds >= session.target,
-    quizScore: quiz?.score ?? null,
-    quizTotal: quiz?.total ?? null,
+    ...metrics,
+    plannedStudySeconds: metrics.targetSeconds,
   };
 }
 
-export function adminSessionDto(value: unknown): AdminSessionDto | null {
-  const session = parseSession(value);
-  if (!session) return null;
-  const metrics = metricsFor(session);
+export function adminSessionDto(value: unknown, includeGoal = false): AdminSessionDto | null {
+  const parsed = parseSessionProjection(value);
+  if (!parsed) return null;
+  const { session, override } = parsed;
+  const measured = projectSessionMetrics(session).effectiveMetrics;
+  const projected = projectSessionMetrics(session, override);
+  const metrics = toMetrics(projected.effectiveMetrics);
+  const measuredMetrics = toMetrics(measured);
+  const accountId = z.uuid().safeParse(session.userId).success ? session.userId : null;
   return {
     id: session.id,
-    accountId: session.userId,
+    ownerId: session.userId,
+    accountId,
     groupId: session.groupId ?? null,
-    topic: session.topic,
+    status: "active",
+    correctionVersion: projected.correctionVersion,
+    ...(includeGoal ? { goal: projected.goal, measuredContent: { goal: session.goal, topic: session.topic } } : {}),
+    topic: projected.topic,
     startedAt: new Date(session.started).toISOString(),
     endedAt: new Date(session.ended).toISOString(),
+    timestampsAreSettlementFacts: true,
+    metrics,
+    measuredMetrics,
+    metricSources: metricSources(projected.correctionFlags),
     ...metrics,
   };
 }
@@ -206,10 +259,10 @@ function emptyTotals(): MetricTotals {
   };
 }
 
-function addSession(totals: MetricTotals, session: StoredSession) {
-  const metrics = metricsFor(session);
+function addSession(totals: MetricTotals, session: StoredSession, override?: SessionOverride) {
+  const metrics = projectSessionMetrics(session, override).effectiveMetrics;
   totals.sessionCount += 1;
-  totals.plannedStudySeconds += metrics.plannedStudySeconds;
+  totals.plannedStudySeconds += metrics.targetSeconds;
   totals.actualStudySeconds += metrics.actualStudySeconds;
   totals.focusedSeconds += metrics.focusedSeconds;
   totals.plannedBreakSeconds += metrics.plannedBreakSeconds;
@@ -262,10 +315,11 @@ export function buildAdminReport(
   matchingSessionCount = values.length,
 ): AdminReport {
   const window = adminReportWindow(days, asOf);
-  const sessions = values
-    .map(parseSession)
-    .filter((session): session is StoredSession => Boolean(session) &&
-      session!.started >= window.fromMs && session!.started <= window.asOfMs);
+  const projections = values
+    .map(parseSessionProjection)
+    .filter((projection): projection is { session: StoredSession; override?: SessionOverride } =>
+      Boolean(projection) && projection!.override?.removedAt === undefined &&
+      projection!.session.started >= window.fromMs && projection!.session.started <= window.asOfMs);
   const daily = new Map<string, MetricTotals>();
   const topics = new Map<string, MetricTotals>();
   for (let offset = 0; offset < days; offset += 1) {
@@ -273,13 +327,14 @@ export function buildAdminReport(
     daily.set(dateUtc, emptyTotals());
   }
   const totals = emptyTotals();
-  for (const session of sessions) {
-    addSession(totals, session);
+  for (const { session, override } of projections) {
+    const projected = projectSessionMetrics(session, override);
+    addSession(totals, session, override);
     const day = daily.get(utcDate(session.started));
-    if (day) addSession(day, session);
-    const topic = topics.get(session.topic) ?? emptyTotals();
-    addSession(topic, session);
-    topics.set(session.topic, topic);
+    if (day) addSession(day, session, override);
+    const topic = topics.get(projected.topic) ?? emptyTotals();
+    addSession(topic, session, override);
+    topics.set(projected.topic, topic);
   }
   return {
     days,
@@ -288,8 +343,8 @@ export function buildAdminReport(
     fromUtc: window.fromUtc,
     asOfUtc: window.asOfUtc,
     matchingSessionCount,
-    recordsAnalyzed: sessions.length,
-    truncated: matchingSessionCount > sessions.length,
+    recordsAnalyzed: projections.length,
+    truncated: matchingSessionCount > projections.length,
     totals: finishTotals(totals),
     daily: [...daily].map(([dateUtc, valuesForDay]) => ({ dateUtc, ...finishTotals(valuesForDay) })),
     topics: [...topics].map(([topic, valuesForTopic]) => ({ topic, ...finishTotals(valuesForTopic) }))
@@ -365,21 +420,22 @@ function readWindowSessions(
   limit: number,
   filters: AdminSessionFilters = {},
 ) {
-  return db.$queryRaw<{ session: unknown }[]>`
-    SELECT entry.value AS session
+  return db.$queryRaw<{ session: unknown; override: unknown }[]>`
+    SELECT entry.value AS session, a.state->'sessionOverrides'->entry.key AS override
     FROM adventure_state a
     CROSS JOIN LATERAL jsonb_each(
       CASE WHEN jsonb_typeof(a.state->'sessions') = 'object'
         THEN a.state->'sessions' ELSE '{}'::jsonb END
     ) AS entry(key, value)
     WHERE a.id = 1
-      AND CASE WHEN entry.value->>'started' ~ '^[0-9]+$'
+      AND CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
         THEN (entry.value->>'started')::bigint >= ${fromMs}
           AND (entry.value->>'started')::bigint <= ${asOfMs}
         ELSE false END
       AND (${filters.accountId ?? null}::text IS NULL OR entry.value->>'userId' = ${filters.accountId ?? null})
       AND (${filters.groupId ?? null}::text IS NULL OR entry.value->>'groupId' = ${filters.groupId ?? null})
-    ORDER BY CASE WHEN entry.value->>'started' ~ '^[0-9]+$'
+      AND NOT COALESCE((a.state->'sessionOverrides'->entry.key) ? 'removedAt', false)
+    ORDER BY CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
       THEN (entry.value->>'started')::bigint ELSE 0 END DESC, entry.key DESC
     LIMIT ${limit}`;
 }
@@ -393,12 +449,118 @@ function countWindowSessions(db: PrismaClient, fromMs: number, asOfMs: number, f
         THEN a.state->'sessions' ELSE '{}'::jsonb END
     ) AS entry(key, value)
     WHERE a.id = 1
-      AND CASE WHEN entry.value->>'started' ~ '^[0-9]+$'
+      AND CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
         THEN (entry.value->>'started')::bigint >= ${fromMs}
           AND (entry.value->>'started')::bigint <= ${asOfMs}
         ELSE false END
       AND (${filters.accountId ?? null}::text IS NULL OR entry.value->>'userId' = ${filters.accountId ?? null})
-      AND (${filters.groupId ?? null}::text IS NULL OR entry.value->>'groupId' = ${filters.groupId ?? null})`;
+      AND (${filters.groupId ?? null}::text IS NULL OR entry.value->>'groupId' = ${filters.groupId ?? null})
+      AND NOT COALESCE((a.state->'sessionOverrides'->entry.key) ? 'removedAt', false)`;
+}
+
+type SessionDurationBasis = "planned" | "actual" | undefined;
+
+function sessionElapsedProjectionSql() {
+  return Prisma.sql`
+    CROSS JOIN LATERAL (
+      SELECT
+        CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
+          THEN (entry.value->>'started')::double precision ELSE 0 END AS started_ms,
+        CASE WHEN entry.value->>'ended' ~ '^[0-9]{1,16}$'
+          THEN (entry.value->>'ended')::double precision ELSE 0 END AS ended_ms,
+        CASE WHEN entry.value->>'target' ~ '^[0-9]{1,5}$'
+          THEN (entry.value->>'target')::double precision ELSE 0 END AS target_seconds
+    ) AS trip_time
+    CROSS JOIN LATERAL (
+      SELECT
+        CASE WHEN entry.value->'breakPlan'->>'count' ~ '^[0-9]{1,2}$'
+          THEN (entry.value->'breakPlan'->>'count')::integer ELSE -1 END AS break_count,
+        CASE WHEN entry.value->'breakPlan'->>'seconds' ~ '^[0-9]{1,4}$'
+          THEN (entry.value->'breakPlan'->>'seconds')::integer ELSE -1 END AS break_seconds
+    ) AS plan_values
+    CROSS JOIN LATERAL (
+      SELECT jsonb_typeof(entry.value->'breakPlan') = 'object'
+        AND plan_values.break_count BETWEEN 0 AND 10
+        AND plan_values.break_seconds BETWEEN 60 AND 1800
+        AND plan_values.break_count < FLOOR(trip_time.target_seconds / 60) AS is_valid
+    ) AS break_plan
+    CROSS JOIN LATERAL (
+      SELECT GREATEST(0, (trip_time.ended_ms - trip_time.started_ms) / 1000.0) AS wall_seconds
+    ) AS trip_duration
+    CROSS JOIN LATERAL (
+      SELECT CASE WHEN break_plan.is_valid THEN
+        COALESCE((
+          SELECT SUM(GREATEST(0, LEAST(trip_time.ended_ms, windows.window_start_ms + plan_values.break_seconds * 1000.0)
+            - windows.window_start_ms) / 1000.0)
+          FROM generate_series(1, plan_values.break_count) AS break_window(window_index)
+          CROSS JOIN LATERAL (
+            SELECT trip_time.started_ms
+              + ROUND((break_window.window_index * trip_time.target_seconds * 1000.0)
+                / (plan_values.break_count + 1))
+              + (break_window.window_index - 1) * plan_values.break_seconds * 1000.0 AS window_start_ms
+          ) AS windows
+        ), 0)
+      ELSE LEAST(trip_duration.wall_seconds, COALESCE((
+        SELECT SUM(GREATEST(0,
+          LEAST(trip_time.ended_ms, CASE WHEN segment.value->>'end' ~ '^[0-9]{1,16}$'
+            THEN (segment.value->>'end')::double precision ELSE 0 END)
+          - GREATEST(trip_time.started_ms, CASE WHEN segment.value->>'start' ~ '^[0-9]{1,16}$'
+            THEN (segment.value->>'start')::double precision ELSE 0 END)) / 1000.0)
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(entry.value->'segments') = 'array'
+          THEN entry.value->'segments' ELSE '[]'::jsonb END) AS segment(value)
+        WHERE segment.value->>'kind' = 'break'
+      ), 0)) END AS actual_break_seconds
+    ) AS break_duration
+    CROSS JOIN LATERAL (
+      SELECT LEAST(trip_time.target_seconds,
+        GREATEST(0, trip_duration.wall_seconds - break_duration.actual_break_seconds)) AS actual_study_seconds
+    ) AS study_duration
+    CROSS JOIN LATERAL (
+      SELECT GREATEST(
+        LEAST(trip_time.target_seconds + CASE WHEN break_plan.is_valid
+          THEN plan_values.break_count * plan_values.break_seconds ELSE 0 END, trip_duration.wall_seconds),
+        study_duration.actual_study_seconds + break_duration.actual_break_seconds
+      ) AS base_elapsed_seconds
+    ) AS base_duration
+    CROSS JOIN LATERAL (
+      SELECT CASE WHEN jsonb_typeof(a.state->'sessionOverrides'->entry.key->'elapsedSeconds') = 'number'
+        THEN (a.state->'sessionOverrides'->entry.key->>'elapsedSeconds')::double precision
+        ELSE base_duration.base_elapsed_seconds END AS elapsed_seconds
+    ) AS effective_duration`;
+}
+
+function sessionDurationFilterSql(basis: SessionDurationBasis) {
+  if (basis === "planned") {
+    return Prisma.sql`AND COALESCE(
+      CASE WHEN jsonb_typeof(a.state->'sessionOverrides'->entry.key->'targetSeconds') = 'number'
+        THEN (a.state->'sessionOverrides'->entry.key->>'targetSeconds')::double precision END,
+      CASE WHEN entry.value->>'target' ~ '^[0-9]{1,5}$'
+        THEN (entry.value->>'target')::double precision END
+    ) <= 60`;
+  }
+  if (basis === "actual") return Prisma.sql`AND effective_duration.elapsed_seconds <= 60`;
+  return Prisma.empty;
+}
+
+function sessionManagementBaseWhere(fromMs: number, asOfMs: number, accountId?: string, groupId?: string) {
+  return Prisma.sql`
+    WHERE a.id = 1
+      AND CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
+        THEN (entry.value->>'started')::numeric BETWEEN ${fromMs} AND ${asOfMs}
+        ELSE false END
+      AND CASE WHEN entry.value->>'ended' ~ '^[0-9]{1,16}$'
+        THEN (entry.value->>'ended')::numeric <= 8640000000000000
+        ELSE false END
+      AND CASE WHEN entry.value->>'target' ~ '^[0-9]{1,5}$'
+        THEN (entry.value->>'target')::numeric BETWEEN 60 AND 14400
+        ELSE false END
+      AND CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
+        AND entry.value->>'ended' ~ '^[0-9]{1,16}$'
+        THEN (entry.value->>'started')::numeric <= (entry.value->>'ended')::numeric
+        ELSE false END
+      AND (${accountId ?? null}::text IS NULL OR entry.value->>'userId' = ${accountId ?? null})
+      AND (${groupId ?? null}::text IS NULL OR entry.value->>'groupId' = ${groupId ?? null})
+      AND NOT COALESCE((a.state->'sessionOverrides'->entry.key) ? 'removedAt', false)`;
 }
 
 async function reportData(db: PrismaClient, days: AdminPeriod, asOf: Date, filters: AdminSessionFilters = {}) {
@@ -407,7 +569,7 @@ async function reportData(db: PrismaClient, days: AdminPeriod, asOf: Date, filte
     readWindowSessions(db, window.fromMs, window.asOfMs, ADMIN_REPORT_SESSION_LIMIT + 1, filters),
     countWindowSessions(db, window.fromMs, window.asOfMs, filters),
   ]);
-  const values = rows.slice(0, ADMIN_REPORT_SESSION_LIMIT).map((row) => row.session);
+  const values = rows.slice(0, ADMIN_REPORT_SESSION_LIMIT);
   return buildAdminReport(values, days, asOf, counts[0]?.total ?? 0);
 }
 
@@ -626,6 +788,189 @@ async function performAdminMutation(
   });
 }
 
+type SessionCorrectionChanges = z.infer<typeof sessionCorrectionBodySchema>["changes"];
+
+function mergeSessionOverride(
+  current: SessionOverride | undefined,
+  changes: SessionCorrectionChanges,
+  version: number,
+): SessionOverride {
+  const next: SessionOverride = { ...(current ?? {}), version };
+  if (changes.goal !== undefined) {
+    if (changes.goal === null) delete next.goal;
+    else next.goal = changes.goal;
+  }
+  if (changes.topic !== undefined) {
+    if (changes.topic === null) delete next.topic;
+    else next.topic = changes.topic;
+  }
+  if (changes.targetSeconds !== undefined) {
+    if (changes.targetSeconds === null) delete next.targetSeconds;
+    else next.targetSeconds = changes.targetSeconds;
+  }
+  if (changes.elapsedSeconds !== undefined) {
+    if (changes.elapsedSeconds === null) delete next.elapsedSeconds;
+    else next.elapsedSeconds = changes.elapsedSeconds;
+  }
+  if (changes.actualStudySeconds !== undefined) {
+    if (changes.actualStudySeconds === null) delete next.actualStudySeconds;
+    else next.actualStudySeconds = changes.actualStudySeconds;
+  }
+  if (changes.focusedSeconds !== undefined) {
+    if (changes.focusedSeconds === null) delete next.focusedSeconds;
+    else next.focusedSeconds = changes.focusedSeconds;
+  }
+  if (changes.actualBreakSeconds !== undefined) {
+    if (changes.actualBreakSeconds === null) delete next.actualBreakSeconds;
+    else next.actualBreakSeconds = changes.actualBreakSeconds;
+  }
+  if (changes.distractions !== undefined) {
+    if (changes.distractions === null) delete next.distractions;
+    else next.distractions = changes.distractions;
+  }
+  if (changes.quizResult !== undefined) {
+    if (changes.quizResult === null) delete next.quizResult;
+    else next.quizResult = changes.quizResult;
+  }
+  return next;
+}
+
+function sessionAuditState(session: StoredSession, override: SessionOverride | undefined) {
+  const projected = projectSessionMetrics(session, override);
+  return {
+    status: "active" as const,
+    correctionVersion: projected.correctionVersion,
+    goal: projected.goal,
+    topic: projected.topic,
+    metrics: projected.effectiveMetrics,
+  };
+}
+
+function validateEffectiveCorrection(session: StoredSession, override: SessionOverride) {
+  const metrics = projectSessionMetrics(session, override).effectiveMetrics;
+  if (!Number.isFinite(metrics.elapsedSeconds) || !Number.isFinite(metrics.actualStudySeconds) ||
+    !Number.isFinite(metrics.focusedSeconds) || !Number.isFinite(metrics.actualBreakSeconds) ||
+    !Number.isFinite(metrics.targetSeconds) || !Number.isFinite(metrics.distractions))
+    throw new ApiError(422, "validation-error", "Các chỉ số đã chỉnh sửa phải là số hữu hạn.");
+  if (metrics.actualStudySeconds < 0 || metrics.actualStudySeconds > metrics.targetSeconds)
+    throw new ApiError(422, "validation-error", "Thời gian học phải nằm trong khoảng từ 0 đến thời lượng mục tiêu đã chỉnh.");
+  if (metrics.focusedSeconds < 0 || metrics.focusedSeconds > metrics.actualStudySeconds)
+    throw new ApiError(422, "validation-error", "Thời gian tập trung không thể lớn hơn thời gian học.");
+  if (metrics.actualBreakSeconds < 0 || metrics.elapsedSeconds < metrics.actualStudySeconds + metrics.actualBreakSeconds)
+    throw new ApiError(422, "validation-error", "Thời lượng đã trôi qua phải bao gồm thời gian học và thời gian nghỉ.");
+  if (metrics.distractions < 0)
+    throw new ApiError(422, "validation-error", "Số lần rời phiên không thể nhỏ hơn 0.");
+  if ((metrics.quizScore === null) !== (metrics.quizTotal === null) ||
+    (metrics.quizScore !== null && metrics.quizTotal !== null && metrics.quizScore > metrics.quizTotal))
+    throw new ApiError(422, "validation-error", "Điểm quiz và tổng số câu không hợp lệ.");
+  return metrics;
+}
+
+async function mutateAdminSession(
+  db: PrismaClient,
+  actorId: string,
+  sessionId: string,
+  expectedVersion: number,
+  reason: string,
+  action: "correction" | "removal",
+  changes: SessionCorrectionChanges | undefined,
+  admins: ReadonlySet<string>,
+) {
+  return db.$transaction(async (tx) => {
+    const control = await tx.$queryRaw<{ id: number }[]>`
+      SELECT id FROM admin_control WHERE id = 1 FOR UPDATE`;
+    if (control.length !== 1)
+      throw new ApiError(503, "service-unavailable", "Admin controls are unavailable");
+
+    const actor = await findAdminAccount(tx, actorId);
+    if (!actor || !isActiveAdmin(actor, admins))
+      throw new ApiError(403, "authorization-error", "Admin access required");
+
+    const stateRows = await tx.$queryRaw<{ state: World }[]>`
+      SELECT state FROM adventure_state WHERE id = 1 FOR UPDATE`;
+    if (!stateRows[0])
+      throw new ApiError(503, "service-unavailable", "Adventure state is unavailable");
+    const world = stateRows[0].state;
+    const rawSession = world.sessions?.[sessionId];
+    if (!rawSession)
+      throw new ApiError(404, "not-found", "Không tìm thấy phiên học.");
+    const parsedSession = storedSessionSchema.safeParse(rawSession);
+    if (!parsedSession.success || parsedSession.data.id !== sessionId)
+      throw new ApiError(500, "internal-error", "Dữ liệu phiên học không hợp lệ.");
+    const session = parsedSession.data;
+    const storedOverride = world.sessionOverrides?.[sessionId];
+    const parsedOverride = storedOverride === undefined
+      ? undefined
+      : storedSessionOverrideSchema.safeParse(storedOverride);
+    if (parsedOverride && !parsedOverride.success)
+      throw new ApiError(500, "internal-error", "Dữ liệu chỉnh sửa phiên học không hợp lệ.");
+    const current = parsedOverride?.data;
+    if (current?.removedAt !== undefined)
+      throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
+    const beforeVersion = current?.version ?? 0;
+    if (beforeVersion !== expectedVersion)
+      throw new ApiError(409, "conflict", "Phiên học đã được chỉnh sửa. Hãy tải lại rồi thử lại.");
+
+    const beforeState = sessionAuditState(session, current);
+    let nextOverride: SessionOverride;
+    let afterState: ReturnType<typeof sessionAuditState> | { status: "removed"; correctionVersion: number };
+    if (action === "correction") {
+      if (!changes)
+        throw new ApiError(400, "validation-error", "Hãy chọn ít nhất một mục cần chỉnh sửa.");
+      nextOverride = mergeSessionOverride(current, changes, beforeVersion + 1);
+      const projected = projectSessionMetrics(session, nextOverride);
+      if (session.quiz && projected.topic !== projectSessionMetrics(session, current).topic)
+        throw new ApiError(422, "validation-error", "Không thể đổi chủ đề sau khi phiên học đã được chấm quiz.");
+      validateEffectiveCorrection(session, nextOverride);
+      afterState = sessionAuditState(session, nextOverride);
+    } else {
+      nextOverride = { ...(current ?? {}), version: beforeVersion + 1, removedAt: Date.now() };
+      afterState = { status: "removed", correctionVersion: nextOverride.version };
+    }
+
+    const accountOwner = z.uuid().safeParse(session.userId);
+    if (accountOwner.success) {
+      const testerRows = await tx.$queryRaw<{ session_id: string }[]>`
+        SELECT session_id::text FROM tester_runs
+        WHERE user_id = ${accountOwner.data}::uuid AND session_id = ${sessionId}::uuid AND withdrawn_at IS NULL
+        FOR UPDATE`;
+      if (action === "correction" && testerRows.length > 0) {
+        const metrics = projectSessionMetrics(session, nextOverride).effectiveMetrics;
+        // The legacy tester_runs elapsed column is target-capped; public responses use the
+        // shared session projection so actual rest time remains visible without rewriting raw time.
+        await tx.$executeRaw`
+          UPDATE tester_runs SET topic = ${projectSessionMetrics(session, nextOverride).topic},
+            target_seconds = ${metrics.targetSeconds}, elapsed_seconds = ${Math.min(metrics.elapsedSeconds, metrics.targetSeconds)},
+            focused_seconds = ${metrics.focusedSeconds}, distractions = ${metrics.distractions}, completed = ${metrics.completed}
+          WHERE user_id = ${accountOwner.data}::uuid AND session_id = ${sessionId}::uuid AND withdrawn_at IS NULL`;
+      }
+    }
+
+    world.sessionOverrides ??= {};
+    world.sessionOverrides[sessionId] = nextOverride;
+    world.revision = (world.revision ?? 0) + 1;
+    await tx.$executeRaw`UPDATE adventure_state SET state = ${JSON.stringify(world)}::jsonb WHERE id = 1`;
+    await tx.adminSessionActionAudit.create({
+      data: {
+        actor_user_id: actor.id,
+        target_owner_id: session.userId,
+        session_id: sessionId,
+        action,
+        before_version: beforeVersion,
+        after_version: nextOverride.version,
+        before_state: beforeState,
+        after_state: afterState,
+        reason,
+      },
+    });
+
+    return action === "removal"
+      ? { id: sessionId, ownerId: session.userId, accountId: accountOwner.success ? session.userId : null,
+          status: "removed" as const, correctionVersion: nextOverride.version }
+      : adminSessionDto({ session, override: nextOverride }, true);
+  }, { timeout: 15000 });
+}
+
 export function adminRoutes(
   app: FastifyInstance,
   db: PrismaClient,
@@ -652,6 +997,84 @@ export function adminRoutes(
   app.get("/api/v1/admin/access", authenticatedOptions, async (request) => {
     const actor = await findAdminAccount(db, request.userId);
     return { allowed: Boolean(actor && isActiveAdmin(actor, admins)) };
+  });
+
+  app.get("/api/v1/admin/sessions/:sessionId", adminOptions, async (request) => {
+    const { sessionId } = z.object({ sessionId: z.uuid() }).parse(request.params);
+    const rows = await db.$queryRaw<{ session: unknown; override: unknown }[]>`
+      SELECT state->'sessions'->${sessionId} AS session,
+        state->'sessionOverrides'->${sessionId} AS override
+      FROM adventure_state WHERE id = 1`;
+    const row = rows[0];
+    if (!row || row.session === null)
+      throw new ApiError(404, "not-found", "Không tìm thấy phiên học.");
+    const parsed = parseSessionProjection(row);
+    if (!parsed)
+      throw new ApiError(500, "internal-error", "Dữ liệu phiên học không hợp lệ.");
+    if (parsed.override?.removedAt !== undefined)
+      throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
+    const result = adminSessionDto(row, true);
+    if (!result)
+      throw new ApiError(500, "internal-error", "Dữ liệu phiên học không hợp lệ.");
+    return result;
+  });
+
+  app.get("/api/v1/admin/sessions/:sessionId/audit", adminOptions, async (request) => {
+    const { sessionId } = z.object({ sessionId: z.uuid() }).parse(request.params);
+    const { limit, offset } = sessionAuditQuerySchema.parse(request.query);
+    const where = { session_id: sessionId };
+    const [rows, total] = await Promise.all([
+      db.adminSessionActionAudit.findMany({
+        where,
+        select: {
+          actor_user_id: true,
+          target_owner_id: true,
+          session_id: true,
+          action: true,
+          before_version: true,
+          after_version: true,
+          before_state: true,
+          after_state: true,
+          reason: true,
+          created_at: true,
+        },
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        take: limit,
+        skip: offset,
+      }),
+      db.adminSessionActionAudit.count({ where }),
+    ]);
+    return {
+      actions: rows.map((row) => ({
+        actorId: row.actor_user_id,
+        targetOwnerId: row.target_owner_id,
+        sessionId: row.session_id,
+        action: row.action,
+        beforeVersion: row.before_version,
+        afterVersion: row.after_version,
+        before: row.before_state,
+        after: row.after_state,
+        reason: row.reason,
+        createdAt: row.created_at.toISOString(),
+      })),
+      total,
+      limit,
+      offset,
+    };
+  });
+
+  app.patch("/api/v1/admin/sessions/:sessionId", adminOptions, async (request) => {
+    const { sessionId } = z.object({ sessionId: z.uuid() }).parse(request.params);
+    const body = sessionCorrectionBodySchema.parse(request.body);
+    return mutateAdminSession(db, request.userId, sessionId, body.expectedVersion,
+      body.reason, "correction", body.changes, admins);
+  });
+
+  app.delete("/api/v1/admin/sessions/:sessionId", adminOptions, async (request) => {
+    const { sessionId } = z.object({ sessionId: z.uuid() }).parse(request.params);
+    const body = sessionRemovalBodySchema.parse(request.body);
+    return mutateAdminSession(db, request.userId, sessionId, body.expectedVersion,
+      body.reason, "removal", undefined, admins);
   });
 
   app.get("/api/v1/admin/report", adminOptions, async (request) => {
@@ -860,50 +1283,48 @@ export function adminRoutes(
   });
 
   app.get("/api/v1/admin/sessions", adminOptions, async (request) => {
-    const { days, accountId, groupId, limit, offset } = sessionQuery(request.query);
-    const window = adminReportWindow(days, new Date());
+    const { days, accountId, groupId, durationBasis, limit, offset } = sessionQuery(request.query);
+    const asOfMs = Date.now();
+    const fromMs = days === "all" ? 0 : asOfMs - Number(days) * dayMilliseconds;
+    const fromSessions = Prisma.sql`FROM adventure_state a
+      CROSS JOIN LATERAL jsonb_each(
+        CASE WHEN jsonb_typeof(a.state->'sessions') = 'object'
+          THEN a.state->'sessions' ELSE '{}'::jsonb END
+      ) AS entry(key, value)`;
+    const metricProjection = durationBasis === "actual" ? sessionElapsedProjectionSql() : Prisma.empty;
+    const where = sessionManagementBaseWhere(fromMs, asOfMs, accountId, groupId);
+    const durationFilter = sessionDurationFilterSql(durationBasis);
     const [rows, counts] = await Promise.all([
-      db.$queryRaw<{ session: unknown }[]>`
-        SELECT entry.value AS session
-        FROM adventure_state a
-        CROSS JOIN LATERAL jsonb_each(
-          CASE WHEN jsonb_typeof(a.state->'sessions') = 'object'
-            THEN a.state->'sessions' ELSE '{}'::jsonb END
-        ) AS entry(key, value)
-        WHERE a.id = 1
-          AND CASE WHEN entry.value->>'started' ~ '^[0-9]+$'
-            THEN (entry.value->>'started')::bigint >= ${window.fromMs}
-              AND (entry.value->>'started')::bigint <= ${window.asOfMs}
-            ELSE false END
-          AND (${accountId ?? null}::text IS NULL OR entry.value->>'userId' = ${accountId ?? null})
-          AND (${groupId ?? null}::text IS NULL OR entry.value->>'groupId' = ${groupId ?? null})
-        ORDER BY CASE WHEN entry.value->>'started' ~ '^[0-9]+$'
-          THEN (entry.value->>'started')::bigint ELSE 0 END DESC, entry.key DESC
+      db.$queryRaw<{ session: unknown; override: unknown }[]>`
+        SELECT entry.value AS session, a.state->'sessionOverrides'->entry.key AS override
+        ${fromSessions}
+        ${metricProjection}
+        ${where}
+        ${durationFilter}
+        ORDER BY CASE WHEN entry.value->>'started' ~ '^[0-9]{1,16}$'
+          THEN (entry.value->>'started')::numeric ELSE 0 END DESC, entry.key DESC
         LIMIT ${limit} OFFSET ${offset}`,
       db.$queryRaw<{ total: number }[]>`
         SELECT COUNT(*)::int AS total
-        FROM adventure_state a
-        CROSS JOIN LATERAL jsonb_each(
-          CASE WHEN jsonb_typeof(a.state->'sessions') = 'object'
-            THEN a.state->'sessions' ELSE '{}'::jsonb END
-        ) AS entry(key, value)
-        WHERE a.id = 1
-          AND CASE WHEN entry.value->>'started' ~ '^[0-9]+$'
-            THEN (entry.value->>'started')::bigint >= ${window.fromMs}
-              AND (entry.value->>'started')::bigint <= ${window.asOfMs}
-            ELSE false END
-          AND (${accountId ?? null}::text IS NULL OR entry.value->>'userId' = ${accountId ?? null})
-          AND (${groupId ?? null}::text IS NULL OR entry.value->>'groupId' = ${groupId ?? null})`,
+        ${fromSessions}
+        ${metricProjection}
+        ${where}
+        ${durationFilter}`,
     ]);
+    const total = counts[0]?.total ?? 0;
     return {
-      sessions: rows.map(({ session }) => adminSessionDto(session)).filter((session): session is AdminSessionDto => Boolean(session)),
-      total: counts[0]?.total ?? 0,
+      sessions: rows.map((row) => adminSessionDto(row)).filter((session): session is AdminSessionDto => Boolean(session)),
+      total,
       limit,
       offset,
-      days,
+      days: days === "all" ? "all" as const : Number(days) as 7 | 30 | 90,
+      window: days === "all" ? "all" as const : `${days}d`,
+      fromUtc: new Date(fromMs).toISOString(),
+      asOfUtc: new Date(asOfMs).toISOString(),
+      durationBasis: durationBasis ?? null,
+      durationThresholdSeconds: durationBasis ? 60 : null,
+      truncated: total > ADMIN_MAX_OFFSET + limit,
       timezone: "UTC" as const,
-      fromUtc: window.fromUtc,
-      asOfUtc: window.asOfUtc,
     };
   });
 }

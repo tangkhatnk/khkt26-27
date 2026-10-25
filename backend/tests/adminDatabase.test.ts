@@ -80,9 +80,27 @@ const outsideWindow = session({
 });
 
 function postgresQueryRaw(parts: TemplateStringsArray, ...values: unknown[]) {
-  const sql = parts.reduce((result, part, index) =>
-    `${result}${part}${index < values.length ? `$${index + 1}` : ""}`, "");
-  return pg.query(sql, values).then((result) => result.rows);
+  const parameters: unknown[] = [];
+  let sql = "";
+  const appendValue = (value: unknown) => {
+    if (typeof value === "object" && value !== null && "strings" in value && "values" in value &&
+      Array.isArray(value.strings) && Array.isArray(value.values)) {
+      sql += value.strings[0] ?? "";
+      value.values.forEach((nestedValue, index) => {
+        appendValue(nestedValue);
+        sql += value.strings[index + 1] ?? "";
+      });
+      return;
+    }
+    parameters.push(value);
+    sql += `$${parameters.length}`;
+  };
+  // Match Prisma's nested-fragment flattening before handing SQL to PGlite.
+  parts.forEach((part, index) => {
+    sql += part;
+    if (index < values.length) appendValue(values[index]);
+  });
+  return pg.query(sql, parameters).then((result) => result.rows);
 }
 
 const fakeDb = {

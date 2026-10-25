@@ -184,19 +184,26 @@ export async function buildApp(deps?: {
             : status < 500
               ? "validation-error"
               : "internal-error";
+    const title = kind === "session-removed"
+      ? "Phiên học đã bị gỡ."
+      : kind === "conflict"
+        ? "Dữ liệu đã thay đổi."
+        : kind === "validation-error"
+          ? "Dữ liệu không hợp lệ."
+          : kind.replaceAll("-", " ");
     if (status >= 500) req.log.error({ err }, "Request failed");
     reply
       .code(status)
       .type("application/problem+json")
       .send({
         type: `https://api.pomodoro-focus.com/errors/${kind}`,
-        title: kind.replaceAll("-", " "),
+        title,
         status,
         detail:
           status >= 500 && !(err instanceof ApiError)
             ? "Service temporarily unavailable"
             : status === 409
-              ? "Resource already exists"
+              ? "Dữ liệu đã thay đổi hoặc tồn tại. Hãy tải lại rồi thử lại."
               : error.message,
         instance: req.url.split("?")[0],
         ...(status === 429
