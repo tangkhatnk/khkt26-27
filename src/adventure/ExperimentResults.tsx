@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_URL, post, request } from "../services/api";
-import type { DeviceCategory } from "../../backend/src/adventure/domain";
+import type { DeviceCategory, SessionCorrectionFlags } from "../../backend/src/adventure/domain";
 import { studyTopics } from "./topics";
 import "./experimentResults.css";
 
@@ -21,6 +21,7 @@ export type ExperimentRun = {
   completed: boolean;
   quizScore: number | null;
   quizTotal: number | null;
+  correctionFlags: Omit<SessionCorrectionFlags, "goal">;
   startedAt: string;
   endedAt: string;
   publishedAt: string;
@@ -85,9 +86,30 @@ function QuizBadge({ run }: { run: ExperimentRun }) {
   </span>;
 }
 
+const publicCorrectionFields: (keyof ExperimentRun["correctionFlags"])[] = [
+  "topic", "targetSeconds", "elapsedSeconds", "actualStudySeconds", "focusedSeconds",
+  "actualBreakSeconds", "distractions", "quizResult",
+];
+
+export function experimentRunHasCorrections(flags: ExperimentRun["correctionFlags"] | undefined) {
+  return Boolean(flags && publicCorrectionFields.some((field) => flags[field] === true));
+}
+
+function CorrectionBadge({ run }: { run: ExperimentRun }) {
+  if (!experimentRunHasCorrections(run.correctionFlags)) return null;
+  return <span className="experiment-correction-badge" aria-label="Phiên có chỉ số đã hiệu chỉnh">Đã hiệu chỉnh</span>;
+}
+
+function completionStatusText(run: ExperimentRun) {
+  const statusSource = run.correctionFlags?.targetSeconds || run.correctionFlags?.actualStudySeconds
+    ? "theo số liệu đang áp dụng"
+    : "theo dữ liệu đo ban đầu";
+  return `${run.completed ? "Đạt mục tiêu" : "Chưa đạt mục tiêu"} ${statusSource}`;
+}
+
 function CompletionReport({ run }: { run: ExperimentRun }) {
   return <div className="experiment-completion-summary">
-    <span>{run.completed ? "Đủ giờ theo đồng hồ" : "Kết thúc sớm theo đồng hồ"}</span>
+    <span>{completionStatusText(run)}</span>
     <span>{run.completionPercent === null ? "Chưa tự đánh giá" : `${run.completionPercent}% tự đánh giá`}</span>
   </div>;
 }
@@ -108,10 +130,11 @@ function RunDetails({ run }: { run: ExperimentRun }) {
       <div><dt>Bắt đầu (giờ địa phương của bạn)</dt><dd><time dateTime={run.startedAt}>{startedDate}</time></dd></div>
       <div><dt>Kết thúc (giờ địa phương của bạn)</dt><dd><time dateTime={run.endedAt}>{endedDate}</time></dd></div>
       <div><dt>Đăng công khai</dt><dd><time dateTime={run.publishedAt}>{compactDateTime(run.publishedAt, fullTimestampOptions)}</time></dd></div>
+      {run.correctionFlags?.elapsedSeconds && <div><dt>Ghi chú thời gian</dt><dd>Mốc bắt đầu và kết thúc là dữ kiện đo ban đầu; thời lượng chuyến đã được hiệu chỉnh.</dd></div>}
       <div><dt>Xao nhãng</dt><dd>{run.distractions} lần</dd></div>
       <div><dt>Giải lao thực tế</dt><dd>{run.breakSeconds == null ? "Chưa có thời gian giải lao" : formatExperimentDuration(run.breakSeconds)}</dd></div>
       <div><dt>Giải lao dự kiến</dt><dd>{run.plannedBreakSeconds == null ? "Không ghi nhận lịch nghỉ" : formatExperimentDuration(run.plannedBreakSeconds)}</dd></div>
-      <div><dt>Trạng thái đồng hồ</dt><dd>{run.completed ? "Đủ giờ" : "Kết thúc sớm"}</dd></div>
+      <div><dt>Trạng thái mục tiêu</dt><dd>{completionStatusText(run)}</dd></div>
       <div><dt>Mức hoàn thành tự đánh giá</dt><dd>{run.completionPercent === null ? "Chưa ghi nhận" : `${run.completionPercent}% · tự đánh giá`}</dd></div>
     </dl>
   </details>;
@@ -148,7 +171,7 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           <th scope="col">Chủ đề</th>
           <th scope="col">Thời gian học và chuyến</th>
           <th scope="col">Tập trung và nghỉ</th>
-          <th scope="col">Đồng hồ và tự đánh giá</th>
+          <th scope="col">Mục tiêu và tự đánh giá</th>
           <th scope="col">Quiz</th>
         </tr></thead>
         <tbody>{runs.map((run) => <tr key={run.id}>
@@ -162,7 +185,7 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
               <small>{compactDateTime(run.startedAt, { hour: "2-digit", minute: "2-digit" })}</small>
             </time>
           </td>
-          <td className="experiment-topic"><strong>{topicLabel(run.topic)}</strong></td>
+          <td className="experiment-topic"><strong>{topicLabel(run.topic)}</strong><CorrectionBadge run={run} /></td>
           <td><JourneyTime run={run} /></td>
           <td><RestAndFocus run={run} /></td>
           <td><CompletionReport run={run} /></td>
@@ -180,10 +203,11 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           </time>
         </header>
         <h3>{topicLabel(run.topic)}</h3>
+        <CorrectionBadge run={run} />
         <div className="experiment-run-card__metrics">
           <div><span className="experiment-run-card__metric-label">Thời gian học và chuyến</span><JourneyTime run={run} /></div>
           <div><span className="experiment-run-card__metric-label">Tập trung và nghỉ</span><RestAndFocus run={run} /></div>
-          <div><span className="experiment-run-card__metric-label">Đồng hồ và tự đánh giá</span><CompletionReport run={run} /></div>
+          <div><span className="experiment-run-card__metric-label">Mục tiêu và tự đánh giá</span><CompletionReport run={run} /></div>
           <div><span className="experiment-run-card__metric-label">Quiz</span><QuizBadge run={run} /></div>
         </div>
         <RunDetails run={run} />
@@ -227,7 +251,7 @@ export function ExperimentResults() {
         : <div className="panel"><h2>Chưa có kết quả công khai</h2><p>Sau khi đăng nhập và đồng bộ một phiên, người học có thể chọn công khai phiên đó từ tổng kết.</p></div>}
       <div className="choice-row"><button disabled={loading || offset === 0} onClick={() => { setLoading(true); setData(null); setOffset(Math.max(0, offset - 50)); }}>Trang trước</button>
         <button disabled={loading || offset + 50 >= data.total} onClick={() => { setLoading(true); setData(null); setOffset(offset + 50); }}>Trang sau</button></div></>}
-    <p className="material-hint">Thời gian học loại trừ các khoảng nghỉ; thời gian tập trung loại trừ cả xao nhãng. Đủ giờ được tính bằng đồng hồ máy chủ. Mức hoàn thành là tự đánh giá, không phải phép đo tự động. Điểm quiz được chấm trên máy chủ. CSV chứa tối đa 10.000 phiên gần nhất.</p>
+    <p className="material-hint">Thời gian học loại trừ các khoảng nghỉ; thời gian tập trung loại trừ cả xao nhãng. Đạt mục tiêu được tính bằng thời gian học thực tế so với thời lượng mục tiêu hiện hành. Mức hoàn thành là tự đánh giá, không phải phép đo tự động. Điểm quiz được chấm trên máy chủ. CSV chứa tối đa 10.000 phiên gần nhất.</p>
   </section>;
 }
 

@@ -14,6 +14,12 @@ import type {
   AdminDeletionUpdateRequest,
   AdminSuspensionUpdateRequest,
   AdminSessionsPage,
+  AdminSessionAuditPage,
+  AdminSessionCorrectionRequest,
+  AdminSessionDetail,
+  AdminSessionPeriod,
+  AdminSessionRemovalRequest,
+  AdminSessionRemovalResponse,
 } from "./adminContracts";
 
 function query(values: Record<string, string | number | undefined>) {
@@ -83,8 +89,8 @@ export const fetchAdminGroups = (
 });
 
 export const fetchAdminSessions = (
-  days: AdminPeriod,
-  filters: { accountId?: string; groupId?: string },
+  days: AdminSessionPeriod,
+  filters: { accountId?: string; groupId?: string; durationBasis?: "planned" | "actual" },
   limit = 25,
   offset = 0,
   signal?: AbortSignal,
@@ -92,6 +98,36 @@ export const fetchAdminSessions = (
   signal,
   cache: "no-store",
 });
+
+export const fetchAdminSession = (sessionId: string, signal?: AbortSignal) =>
+  request<AdminSessionDetail>(`/admin/sessions/${encodeURIComponent(sessionId)}`, {
+    signal,
+    cache: "no-store",
+  });
+
+export const updateAdminSession = (sessionId: string, update: AdminSessionCorrectionRequest) =>
+  request<AdminSessionDetail>(`/admin/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(update),
+    cache: "no-store",
+  });
+
+export const removeAdminSession = (sessionId: string, update: AdminSessionRemovalRequest) =>
+  request<AdminSessionRemovalResponse>(`/admin/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    body: JSON.stringify(update),
+    cache: "no-store",
+  });
+
+export const fetchAdminSessionAudit = (
+  sessionId: string,
+  limit = 25,
+  offset = 0,
+  signal?: AbortSignal,
+) => request<AdminSessionAuditPage>(
+  `/admin/sessions/${encodeURIComponent(sessionId)}/audit?${query({ limit, offset })}`,
+  { signal, cache: "no-store" },
+);
 
 function csvFilename(header: string | null, days: AdminPeriod) {
   const match = header?.match(/filename="([a-zA-Z0-9._-]+)"/);

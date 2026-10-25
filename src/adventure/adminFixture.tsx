@@ -24,8 +24,10 @@ function AdminFixtureApp() {
   const [deniedByRequest, setDeniedByRequest] = useState(false);
   const [panelGeneration, setPanelGeneration] = useState(0);
   const [failArmed, setFailArmed] = useState(false);
+  const [reportFailArmed, setReportFailArmed] = useState(false);
   const [revokeArmed, setRevokeArmed] = useState(false);
   const failNext = useRef(false);
+  const failNextReport = useRef(false);
   const revokeNextMutation = useRef(false);
 
   useEffect(() => {
@@ -41,7 +43,12 @@ function AdminFixtureApp() {
         failNext.current = false;
         setFailArmed(false);
       }
-      if (revokeNextMutation.current && init?.method === "PUT") {
+      if (failNextReport.current && new URL(url, window.location.origin).pathname === "/api/v1/admin/report") {
+        headers.set("x-admin-fixture-fail-report", "true");
+        failNextReport.current = false;
+        setReportFailArmed(false);
+      }
+      if (revokeNextMutation.current && ["PUT", "PATCH", "DELETE"].includes((init?.method ?? "").toUpperCase())) {
         headers.set("x-admin-fixture-revoke-mutation", "true");
         revokeNextMutation.current = false;
         setRevokeArmed(false);
@@ -66,8 +73,10 @@ function AdminFixtureApp() {
     setMode(next);
     setDeniedByRequest(false);
     setFailArmed(false);
+    setReportFailArmed(false);
     setRevokeArmed(false);
     failNext.current = false;
+    failNextReport.current = false;
     revokeNextMutation.current = false;
     setPanelGeneration((value) => value + 1);
   };
@@ -88,6 +97,9 @@ function AdminFixtureApp() {
         </select>
         <button type="button" disabled={mode !== "allowed"} onClick={() => { failNext.current = true; setFailArmed(true); }} style={{ minHeight: 38, padding: "6px 11px", borderRadius: 9 }}>
           {failArmed ? "Đã bật: lỗi một lần" : "Lỗi API kế tiếp"}
+        </button>
+        <button type="button" disabled={mode !== "allowed"} onClick={() => { failNextReport.current = true; setReportFailArmed(true); }} style={{ minHeight: 38, padding: "6px 11px", borderRadius: 9 }}>
+          {reportFailArmed ? "Đã bật: lỗi báo cáo kế tiếp" : "Lỗi báo cáo kế tiếp"}
         </button>
         <button type="button" disabled={mode !== "allowed"} onClick={() => { revokeNextMutation.current = true; setRevokeArmed(true); }} style={{ minHeight: 38, padding: "6px 11px", borderRadius: 9 }}>
           {revokeArmed ? "Thu hồi ở lần sửa kế tiếp" : "Thu hồi khi xác nhận sửa"}

@@ -124,6 +124,10 @@
 .admin-search > div { display: flex; min-width: 0; gap: 8px; }
 .admin-search input { width: 100%; min-width: 0; padding: 8px 10px; }
 .admin-search button { flex: none; }
+.admin-session-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 14px 0; padding: 13px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--admin-inset); }
+.admin-session-filters label { display: grid; flex: 1 1 240px; min-width: 0; gap: 5px; color: var(--admin-muted); font-size: 11px; font-weight: 700; }
+.admin-session-filters select { width: 100%; min-width: 0; }
+.admin-session-filters .admin-analysis-note { flex: 1 1 100%; margin: 0; }
 .admin-result-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .admin-result-button { display: grid; width: 100%; gap: 3px; padding: 12px 14px !important; text-align: left; }
 .admin-result-button span,
@@ -165,6 +169,32 @@
 .admin-audit-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
 .admin-audit-heading time { flex: none; color: var(--admin-muted); font-size: 11px; }
 .admin-audit-list p { margin: 5px 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-session-editor { padding-top: 8px; }
+.admin-session-editor .admin-detail-heading code { font-size: 12px; }
+.admin-session-timestamps { color: var(--admin-muted); font-size: 12px; line-height: 1.6; }
+.admin-session-edit-form { display: grid; gap: 11px; }
+.admin-session-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.admin-session-edit-grid > label,
+.admin-session-quiz-edit { display: grid; min-width: 0; align-content: start; gap: 7px; margin: 0; padding: 12px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--admin-inset); color: var(--admin-ink); font-size: 12px; font-weight: 700; }
+.admin-session-edit-form input:not([type="checkbox"]),
+.admin-session-edit-form textarea { width: 100%; min-width: 0; padding: 8px 10px; }
+.admin-session-edit-grid small { color: var(--admin-muted); font-size: 10px; font-weight: 450; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-session-edit-grid label > button,
+.admin-session-quiz-edit > button { justify-self: start; min-height: 32px !important; padding: 5px 9px !important; font-size: 11px !important; }
+.admin-session-quiz-edit { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.admin-session-quiz-edit label { display: grid; gap: 6px; }
+.admin-session-quiz-edit legend { grid-column: 1 / -1; padding: 0 4px; font-size: 12px; }
+.admin-session-quiz-edit > small,
+.admin-session-quiz-edit > button { grid-column: 1 / -1; }
+.admin-session-edit-form > label { font-size: 12px; font-weight: 700; }
+.admin-session-edit-form > textarea { min-height: 86px; resize: vertical; }
+.admin-session-delete-confirm { display: inline-flex; min-height: 40px; align-items: center; gap: 8px; color: var(--admin-muted); font-size: 12px; font-weight: 650; }
+.admin-panel .admin-session-delete-confirm input[type="checkbox"] { width: 19px; min-height: 19px; accent-color: #5b815e; }
+.admin-session-removed { padding: 12px; border: 1px solid #b78353; border-radius: 10px; background: #fff2e5; color: #714820; line-height: 1.5; }
+.admin-session-audit { margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--admin-line); }
+.admin-session-audit details { margin-top: 8px; font-size: 11px; }
+.admin-session-audit details summary { width: fit-content; color: #426b52; cursor: pointer; font-weight: 700; }
+.admin-session-audit pre { max-height: 320px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--admin-inset); color: var(--admin-ink); font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .admin-panel-footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--admin-line); color: var(--admin-muted); font-size: 11px; line-height: 1.55; }
 
 html[data-theme="dark"] .adventure .admin-panel {
@@ -192,12 +222,18 @@ html[data-theme="dark"] .adventure .admin-panel .admin-account-governance,
 html[data-theme="dark"] .adventure .admin-panel .admin-account-facts > div { border-color: var(--line); }
 html[data-theme="dark"] .adventure .admin-panel .admin-confirmation { border-color: var(--line); background: var(--surface, #1d2922); color: var(--text, #e7eee5); }
 html[data-theme="dark"] .adventure .admin-panel .admin-confirmation textarea { border-color: var(--line); background: var(--surface-raised); color: var(--text); }
+html[data-theme="dark"] .adventure .admin-panel .admin-session-removed { border-color: #8c6643; background: #382b20; color: #f3d0a5; }
 html[data-theme="dark"] .adventure .admin-panel .admin-destructive { border-color: #c98775; color: #ffc0ad; }
 html[data-theme="dark"] .adventure .admin-panel .admin-destructive:hover:not(:disabled) { background: #4b2d24; color: #ffe0d5; }
 
 @media (max-width: 760px) {
   .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-chart-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-session-edit-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-session-quiz-edit { grid-template-columns: minmax(0, 1fr); }
+  .admin-session-quiz-edit legend,
+  .admin-session-quiz-edit > small,
+  .admin-session-quiz-edit > button { grid-column: 1; }
 }
 
 @media (max-width: 430px) {

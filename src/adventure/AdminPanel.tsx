@@ -6,7 +6,11 @@ import {
   fetchAdminAudit,
   fetchAdminGroups,
   fetchAdminReport,
+  fetchAdminSession,
+  fetchAdminSessionAudit,
   fetchAdminSessions,
+  removeAdminSession,
+  updateAdminSession,
   updateAdminAccountRole,
   updateAdminAccountSuspension,
   updateAdminAccountProfile,
@@ -20,13 +24,43 @@ import type {
   AdminPeriod,
   AdminReportFilters,
   AdminReport,
+  AdminSessionAuditAction,
+  AdminSessionCorrectionChanges,
+  AdminSessionCorrectionField,
+  AdminSessionDetail,
+  AdminSessionPeriod,
   AdminSession,
+  AdminSessionMetrics,
   AdminStateVersion,
 } from "../services/adminContracts";
 import "./admin.css";
 
 const pageSize = 25;
 const periods: AdminPeriod[] = [7, 30, 90];
+const sessionPeriods: AdminSessionPeriod[] = ["all", 7, 30, 90];
+export const defaultAdminSessionPeriod: AdminSessionPeriod = "all";
+export type AdminSessionScope = "global" | "account" | "group";
+
+export function adminSessionApiFilters(
+  scope: AdminSessionScope,
+  accountId: string | undefined,
+  groupId: string | undefined,
+  durationBasis: "planned" | "actual" | "",
+) {
+  return {
+    ...(scope === "account" && accountId ? { accountId } : {}),
+    ...(scope === "group" && groupId ? { groupId } : {}),
+    ...(durationBasis ? { durationBasis } : {}),
+  };
+}
+
+export function adminSessionOwnerLabel(session: Pick<AdminSession, "accountId">) {
+  return session.accountId ? "Phiên tài khoản" : "Phiên khách";
+}
+
+export function adminReportCacheKey(days: AdminPeriod, accountId: string | undefined, groupId: string | undefined, revision = 0) {
+  return `${days}:${accountId ?? ""}:${groupId ?? ""}:${revision}`;
+}
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Không tải được dữ liệu quản trị.";
@@ -54,6 +88,138 @@ export function isAdminReasonValid(reason: string) {
 
 export function isAdminNameValid(name: string) {
   return name.trim().length > 0 && name.trim().length <= 100;
+}
+
+type AdminSessionEditDraft = {
+  goal: string;
+  topic: string;
+  targetSeconds: string;
+  elapsedSeconds: string;
+  actualStudySeconds: string;
+  focusedSeconds: string;
+  actualBreakSeconds: string;
+  distractions: string;
+  quizScore: string;
+  quizTotal: string;
+};
+
+function adminSessionDraft(detail: AdminSessionDetail): AdminSessionEditDraft {
+  return {
+    goal: detail.goal,
+    topic: detail.topic,
+    targetSeconds: String(detail.metrics.targetSeconds),
+    elapsedSeconds: String(detail.metrics.elapsedSeconds),
+    actualStudySeconds: String(detail.metrics.actualStudySeconds),
+    focusedSeconds: String(detail.metrics.focusedSeconds),
+    actualBreakSeconds: String(detail.metrics.actualBreakSeconds),
+    distractions: String(detail.metrics.distractions),
+    quizScore: detail.metrics.quizScore === null ? "" : String(detail.metrics.quizScore),
+    quizTotal: detail.metrics.quizTotal === null ? "" : String(detail.metrics.quizTotal),
+  };
+}
+
+export function buildAdminSessionChanges(
+  detail: AdminSessionDetail,
+  draft: AdminSessionEditDraft,
+  resetFields: Iterable<AdminSessionCorrectionField>,
+): AdminSessionCorrectionChanges {
+  const resets = new Set(resetFields);
+  const changes: AdminSessionCorrectionChanges = {};
+  for (const field of ["goal", "topic"] as const) {
+    if (resets.has(field)) changes[field] = null;
+    else if (draft[field] !== detail[field]) changes[field] = draft[field].trim();
+  }
+  const metricFields = [
+    "targetSeconds", "elapsedSeconds", "actualStudySeconds", "focusedSeconds", "actualBreakSeconds", "distractions",
+  ] as const;
+  for (const field of metricFields) {
+    if (resets.has(field)) {
+      changes[field] = null;
+      continue;
+    }
+    const value = Number(draft[field]);
+    if (!draft[field].trim() || !Number.isFinite(value) || value === detail.metrics[field]) continue;
+    if ((field === "targetSeconds" || field === "distractions") && !Number.isInteger(value)) continue;
+    changes[field] = value;
+  }
+  if (resets.has("quizResult")) changes.quizResult = null;
+  else if (draft.quizScore !== "" && draft.quizTotal !== "") {
+    const score = Number(draft.quizScore);
+    const total = Number(draft.quizTotal);
+    if (Number.isInteger(score) && Number.isInteger(total) &&
+      (score !== detail.metrics.quizScore || total !== detail.metrics.quizTotal)) {
+      changes.quizResult = { score, total };
+    }
+  }
+  return changes;
+}
+
+export function adminSessionDraftValidationError(
+  detail: AdminSessionDetail,
+  draft: AdminSessionEditDraft,
+  resetFields: Iterable<AdminSessionCorrectionField>,
+) {
+  const resets = new Set(resetFields);
+  if (!resets.has("goal") && draft.goal !== detail.goal && (draft.goal.trim().length < 3 || draft.goal.trim().length > 500))
+    return "Mục tiêu mới cần có từ 3 đến 500 ký tự.";
+  if (!resets.has("topic") && draft.topic !== detail.topic && (draft.topic.trim().length < 1 || draft.topic.trim().length > 100))
+    return "Chủ đề mới cần có từ 1 đến 100 ký tự.";
+  const limits = {
+    targetSeconds: { minimum: 60, maximum: 14400, integer: true, label: "Thời lượng học dự kiến" },
+    elapsedSeconds: { minimum: 0, maximum: 32400, integer: false, label: "Thời lượng đã trôi qua" },
+    actualStudySeconds: { minimum: 0, maximum: 14400, integer: false, label: "Thời gian học thực tế" },
+    focusedSeconds: { minimum: 0, maximum: 14400, integer: false, label: "Thời gian tập trung" },
+    actualBreakSeconds: { minimum: 0, maximum: 32400, integer: false, label: "Thời gian nghỉ thực tế" },
+    distractions: { minimum: 0, maximum: 10000, integer: true, label: "Số lần rời phiên" },
+  } as const;
+  for (const [field, limit] of Object.entries(limits) as [keyof typeof limits, typeof limits[keyof typeof limits]][]) {
+    if (resets.has(field) || draft[field] === String(detail.metrics[field])) continue;
+    const value = Number(draft[field]);
+    if (!draft[field].trim() || !Number.isFinite(value) || value < limit.minimum || value > limit.maximum ||
+      (limit.integer && !Number.isInteger(value))) {
+      return `${limit.label} chưa hợp lệ.`;
+    }
+  }
+  if (!resets.has("quizResult")) {
+    const currentScore = detail.metrics.quizScore === null ? "" : String(detail.metrics.quizScore);
+    const currentTotal = detail.metrics.quizTotal === null ? "" : String(detail.metrics.quizTotal);
+    if (draft.quizScore !== currentScore || draft.quizTotal !== currentTotal) {
+      const score = Number(draft.quizScore);
+      const total = Number(draft.quizTotal);
+      if (draft.quizScore === "" || draft.quizTotal === "" || !Number.isInteger(score) || !Number.isInteger(total) ||
+        score < 0 || score > 1000 || total < 1 || total > 1000 || score > total) {
+        return "Kết quả quiz cần có điểm và tổng số câu hợp lệ, hoặc hãy đặt lại kết quả theo dữ liệu đo.";
+      }
+    }
+  }
+  const changes = buildAdminSessionChanges(detail, draft, resets);
+  const targetSeconds = changes.targetSeconds === null ? detail.measuredMetrics.targetSeconds : changes.targetSeconds ?? detail.metrics.targetSeconds;
+  const actualStudySeconds = changes.actualStudySeconds === null ? detail.measuredMetrics.actualStudySeconds : changes.actualStudySeconds ?? detail.metrics.actualStudySeconds;
+  const focusedSeconds = changes.focusedSeconds === null ? detail.measuredMetrics.focusedSeconds : changes.focusedSeconds ?? detail.metrics.focusedSeconds;
+  const elapsedSeconds = changes.elapsedSeconds === null ? detail.measuredMetrics.elapsedSeconds : changes.elapsedSeconds ?? detail.metrics.elapsedSeconds;
+  const actualBreakSeconds = changes.actualBreakSeconds === null ? detail.measuredMetrics.actualBreakSeconds : changes.actualBreakSeconds ?? detail.metrics.actualBreakSeconds;
+  if (actualStudySeconds > targetSeconds) return "Thời gian học thực tế không thể vượt thời lượng mục tiêu.";
+  if (focusedSeconds > actualStudySeconds) return "Thời gian tập trung không thể vượt thời gian học thực tế.";
+  if (elapsedSeconds < actualStudySeconds + actualBreakSeconds) return "Thời lượng đã trôi qua phải bao gồm thời gian học và nghỉ thực tế.";
+  return "";
+}
+
+function adminSessionDraftIsDirty(detail: AdminSessionDetail, draft: AdminSessionEditDraft, resetFields: Iterable<AdminSessionCorrectionField>) {
+  return Object.keys(buildAdminSessionChanges(detail, draft, resetFields)).length > 0 || [...resetFields].length > 0 ||
+    draft.goal !== detail.goal || draft.topic !== detail.topic ||
+    ["targetSeconds", "elapsedSeconds", "actualStudySeconds", "focusedSeconds", "actualBreakSeconds", "distractions"]
+      .some((field) => draft[field as keyof AdminSessionEditDraft] !== String(detail.metrics[field as keyof AdminSessionMetrics])) ||
+    draft.quizScore !== (detail.metrics.quizScore === null ? "" : String(detail.metrics.quizScore)) ||
+    draft.quizTotal !== (detail.metrics.quizTotal === null ? "" : String(detail.metrics.quizTotal));
+}
+
+export function adminSessionMutationProblem(error: unknown) {
+  if (!(error instanceof ApiError)) return errorMessage(error);
+  if (error.status === 409) return "Phiên học đã thay đổi. Hãy tải lại phiên để xem giá trị mới rồi áp dụng lại hiệu chỉnh.";
+  if (error.status === 410) return "Phiên học này đã được gỡ khỏi lịch sử.";
+  if (error.status === 404) return "Không còn tìm thấy phiên học này.";
+  if (error.status === 400 || error.status === 422) return `Thông tin hiệu chỉnh chưa hợp lệ: ${error.message}`;
+  return error.message;
 }
 
 function adminRoleLabel(isAdmin: boolean) {
@@ -95,6 +261,36 @@ export function formatAdminDuration(value: number) {
 
 function percent(value: number | null) {
   return value === null ? "Chưa có dữ liệu" : `${value.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
+}
+
+export function AdminSessionFilters({ days, durationBasis, onDaysChange, onDurationBasisChange }: {
+  days: AdminSessionPeriod;
+  durationBasis: "planned" | "actual" | "";
+  onDaysChange: (value: AdminSessionPeriod) => void;
+  onDurationBasisChange: (value: "planned" | "actual" | "") => void;
+}) {
+  return <div className="admin-session-filters" aria-label="Bộ lọc lịch sử phiên">
+    <label htmlFor="admin-session-period">Lịch sử phiên
+      <select id="admin-session-period" value={days} onChange={(event) => {
+        const value = event.target.value;
+        onDaysChange(value === "all" ? "all" : Number(value) as AdminPeriod);
+      }}>
+        {sessionPeriods.map((period) => <option value={period} key={period}>
+          {period === "all" ? "Toàn bộ lịch sử" : `${period} ngày`}
+        </option>)}
+      </select>
+    </label>
+    <label htmlFor="admin-session-duration">Lọc phiên có thời lượng ≤ 60 giây
+      <select id="admin-session-duration" value={durationBasis} onChange={(event) => {
+        onDurationBasisChange(event.target.value as "planned" | "actual" | "");
+      }}>
+        <option value="">Không lọc</option>
+        <option value="planned">Theo thời lượng dự kiến</option>
+        <option value="actual">Theo thời lượng thực tế đã trôi qua (bao gồm thời gian nghỉ và vắng mặt)</option>
+      </select>
+    </label>
+    <p className="admin-analysis-note">Chỉ lọc khi được chọn; đây không phải phân loại phiên thử nghiệm.</p>
+  </div>;
 }
 
 function utcTime(value: string) {
@@ -462,6 +658,226 @@ export function AdminAuditView({ actions, loading, error, total, offset, onOffse
   </section>;
 }
 
+function adminMetricSource(source: "measured" | "corrected") {
+  return source === "corrected" ? "Đã hiệu chỉnh" : "Theo dữ liệu đo";
+}
+
+function adminMetricValue(value: string | number | boolean | null) {
+  if (value === null) return "Chưa có dữ liệu";
+  if (typeof value === "boolean") return value ? "Đạt" : "Chưa đạt";
+  return String(value);
+}
+
+export function AdminSessionEditor({
+  detail,
+  removed,
+  loading,
+  error,
+  mutationBusy,
+  mutationError,
+  auditActions,
+  auditLoading,
+  auditError,
+  auditTotal,
+  auditOffset,
+  onReload,
+  onSave,
+  onDelete,
+  onAuditOffsetChange,
+  onAuditRetry,
+}: {
+  detail: AdminSessionDetail | null;
+  removed: boolean;
+  loading: boolean;
+  error: string;
+  mutationBusy: boolean;
+  mutationError: string;
+  auditActions: AdminSessionAuditAction[];
+  auditLoading: boolean;
+  auditError: string;
+  auditTotal: number;
+  auditOffset: number;
+  onReload: () => void;
+  onSave: (changes: AdminSessionCorrectionChanges, reason: string) => void;
+  onDelete: (reason: string) => void;
+  onAuditOffsetChange: (next: number) => void;
+  onAuditRetry: () => void;
+}) {
+  const [draft, setDraft] = useState<AdminSessionEditDraft>(() => detail ? adminSessionDraft(detail) : {
+    goal: "", topic: "", targetSeconds: "", elapsedSeconds: "", actualStudySeconds: "",
+    focusedSeconds: "", actualBreakSeconds: "", distractions: "", quizScore: "", quizTotal: "",
+  });
+  const [resetFields, setResetFields] = useState<AdminSessionCorrectionField[]>([]);
+  const [reason, setReason] = useState("");
+  const [confirmedRemoval, setConfirmedRemoval] = useState(false);
+  const [formError, setFormError] = useState("");
+  const latestDetail = useRef(detail);
+  useEffect(() => {
+    if (!detail || latestDetail.current?.id === detail.id && latestDetail.current.correctionVersion === detail.correctionVersion) return;
+    latestDetail.current = detail;
+    setDraft(adminSessionDraft(detail));
+    setResetFields([]);
+    setReason("");
+    setConfirmedRemoval(false);
+    setFormError("");
+  }, [detail]);
+
+  const updateField = (field: keyof AdminSessionEditDraft, value: string) => {
+    setDraft((previous) => ({ ...previous, [field]: value }));
+    const resetField = field === "quizScore" || field === "quizTotal" ? "quizResult" : field;
+    setResetFields((previous) => previous.filter((item) => item !== resetField));
+    setFormError("");
+  };
+  const resetField = (field: AdminSessionCorrectionField) => {
+    if (!detail) return;
+    setResetFields((previous) => [...new Set([...previous, field])]);
+    setFormError("");
+    setDraft((previous) => {
+      if (field === "goal") return { ...previous, goal: detail.measuredContent.goal };
+      if (field === "topic") return { ...previous, topic: detail.measuredContent.topic };
+      if (field === "quizResult") return { ...previous, quizScore: "", quizTotal: "" };
+      const value = detail.measuredMetrics[field as keyof AdminSessionMetrics];
+      return { ...previous, [field]: value == null ? "" : String(value) };
+    });
+  };
+  const changes = detail ? buildAdminSessionChanges(detail, draft, resetFields) : {};
+  const canSave = Boolean(detail && adminSessionDraftIsDirty(detail, draft, resetFields) && isAdminReasonValid(reason) && !mutationBusy && !removed);
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!detail || removed || mutationBusy) return;
+    const validationError = adminSessionDraftValidationError(detail, draft, resetFields);
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+    if ((draft.quizScore !== "") !== (draft.quizTotal !== "")) {
+      setFormError("Để hiệu chỉnh quiz, hãy nhập cả điểm và tổng số câu, hoặc đặt lại cả hai giá trị.");
+      return;
+    }
+    if (!isAdminReasonValid(reason)) {
+      setFormError("Nhập lý do kiểm toán từ 1 đến 500 ký tự.");
+      return;
+    }
+    if (Object.keys(changes).length === 0) {
+      setFormError("Chưa có giá trị nào thay đổi. Hãy sửa hoặc đặt lại ít nhất một trường.");
+      return;
+    }
+    setFormError("");
+    onSave(changes, reason.trim());
+  };
+  const submitRemoval = () => {
+    if (!isAdminReasonValid(reason)) {
+      setFormError("Nhập lý do kiểm toán trước khi xác nhận gỡ phiên.");
+      return;
+    }
+    if (!confirmedRemoval) {
+      setFormError("Đánh dấu xác nhận trước khi gỡ phiên học này.");
+      return;
+    }
+    if (!mutationBusy && !removed) onDelete(reason.trim());
+  };
+
+  return <section className="admin-session-editor admin-detail" aria-live="polite">
+    {loading && <p role="status">Đang tải chi tiết phiên học…</p>}
+    {error && <p className="admin-error" role="alert">{error} <button type="button" onClick={onReload}>Tải lại phiên</button></p>}
+    {removed && <p className="admin-session-removed" role="status">Phiên học đã được gỡ khỏi lịch sử. Nhật ký kiểm toán vẫn có thể xem.</p>}
+    {detail && !removed && <>
+      <div className="admin-detail-heading"><div>
+        <h3>Hiệu chỉnh phiên <code>{detail.id.slice(0, 8)}</code></h3>
+        <p>{adminSessionOwnerLabel(detail)} · Phiên bản hiệu chỉnh {detail.correctionVersion}. Các giá trị đang áp dụng được so sánh với dữ liệu đo ban đầu.</p>
+      </div><button type="button" disabled={mutationBusy} onClick={onReload}>Tải lại phiên</button></div>
+      <p className="admin-session-timestamps">Mốc bắt đầu và kết thúc đã đo khi chốt phiên; đây là dữ kiện đo, không thể chỉnh sửa. Bắt đầu: <time dateTime={detail.startedAt}>{utcTime(detail.startedAt)}</time> · Kết thúc: <time dateTime={detail.endedAt}>{utcTime(detail.endedAt)}</time></p>
+      <form className="admin-session-edit-form" noValidate onSubmit={submit}>
+        <div className="admin-session-edit-grid">
+          <label htmlFor="admin-session-goal">Mục tiêu riêng
+            <input id="admin-session-goal" maxLength={500} value={draft.goal} disabled={mutationBusy} onChange={(event) => updateField("goal", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.goal)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredContent.goal)} · {adminMetricSource(detail.metricSources.goal)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.goal !== "corrected"} onClick={() => resetField("goal")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-topic">Chủ đề
+            <input id="admin-session-topic" maxLength={100} value={draft.topic} disabled={mutationBusy} onChange={(event) => updateField("topic", event.target.value)} />
+            <small>Đang áp dụng: {detail.topic} · Theo ghi nhận ban đầu: {detail.measuredContent.topic} · {adminMetricSource(detail.metricSources.topic)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.topic !== "corrected"} onClick={() => resetField("topic")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-target">Thời lượng học dự kiến (giây)
+            <input id="admin-session-target" type="number" min={60} max={14400} step="1" value={draft.targetSeconds} disabled={mutationBusy} onChange={(event) => updateField("targetSeconds", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.metrics.targetSeconds)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredMetrics.targetSeconds)} · {adminMetricSource(detail.metricSources.targetSeconds)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.targetSeconds !== "corrected"} onClick={() => resetField("targetSeconds")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-elapsed">Thời lượng đã trôi qua (giây)
+            <input id="admin-session-elapsed" type="number" min={0} max={32400} step="any" value={draft.elapsedSeconds} disabled={mutationBusy} onChange={(event) => updateField("elapsedSeconds", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.metrics.elapsedSeconds)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredMetrics.elapsedSeconds)} · {adminMetricSource(detail.metricSources.elapsedSeconds)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.elapsedSeconds !== "corrected"} onClick={() => resetField("elapsedSeconds")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-actual-study">Thời gian học thực tế (giây)
+            <input id="admin-session-actual-study" type="number" min={0} max={14400} step="any" value={draft.actualStudySeconds} disabled={mutationBusy} onChange={(event) => updateField("actualStudySeconds", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.metrics.actualStudySeconds)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredMetrics.actualStudySeconds)} · {adminMetricSource(detail.metricSources.actualStudySeconds)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.actualStudySeconds !== "corrected"} onClick={() => resetField("actualStudySeconds")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-focused">Thời gian tập trung (giây)
+            <input id="admin-session-focused" type="number" min={0} max={14400} step="any" value={draft.focusedSeconds} disabled={mutationBusy} onChange={(event) => updateField("focusedSeconds", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.metrics.focusedSeconds)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredMetrics.focusedSeconds)} · {adminMetricSource(detail.metricSources.focusedSeconds)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.focusedSeconds !== "corrected"} onClick={() => resetField("focusedSeconds")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-break">Thời gian nghỉ thực tế (giây)
+            <input id="admin-session-break" type="number" min={0} max={32400} step="any" value={draft.actualBreakSeconds} disabled={mutationBusy} onChange={(event) => updateField("actualBreakSeconds", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.metrics.actualBreakSeconds)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredMetrics.actualBreakSeconds)} · {adminMetricSource(detail.metricSources.actualBreakSeconds)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.actualBreakSeconds !== "corrected"} onClick={() => resetField("actualBreakSeconds")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <label htmlFor="admin-session-distractions">Số lần rời phiên
+            <input id="admin-session-distractions" type="number" min={0} max={10000} step="1" value={draft.distractions} disabled={mutationBusy} onChange={(event) => updateField("distractions", event.target.value)} />
+            <small>Đang áp dụng: {adminMetricValue(detail.metrics.distractions)} · Theo ghi nhận ban đầu: {adminMetricValue(detail.measuredMetrics.distractions)} · {adminMetricSource(detail.metricSources.distractions)}</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.distractions !== "corrected"} onClick={() => resetField("distractions")}>Đặt lại theo dữ liệu đo</button>
+          </label>
+          <fieldset className="admin-session-quiz-edit">
+            <legend>Kết quả quiz trong số liệu phiên</legend>
+            <label htmlFor="admin-session-quiz-score">Điểm
+              <input id="admin-session-quiz-score" type="number" min={0} max={1000} step="1" value={draft.quizScore} disabled={mutationBusy} onChange={(event) => updateField("quizScore", event.target.value)} />
+            </label>
+            <label htmlFor="admin-session-quiz-total">Tổng số câu
+              <input id="admin-session-quiz-total" type="number" min={1} max={1000} step="1" value={draft.quizTotal} disabled={mutationBusy} onChange={(event) => updateField("quizTotal", event.target.value)} />
+            </label>
+            <small>Điểm quiz gốc: {adminMetricValue(detail.measuredMetrics.quizScore)}/{adminMetricValue(detail.measuredMetrics.quizTotal)} · Đang áp dụng: {adminMetricValue(detail.metrics.quizScore)}/{adminMetricValue(detail.metrics.quizTotal)} · {adminMetricSource(detail.metricSources.quizResult)}. Hiệu chỉnh này không sửa phản hồi hoặc bài chấm gốc của quiz.</small>
+            <button type="button" disabled={mutationBusy || detail.metricSources.quizResult !== "corrected"} onClick={() => resetField("quizResult")}>Đặt lại theo dữ liệu đo</button>
+          </fieldset>
+        </div>
+        <p className="admin-analysis-note">Nghỉ dự kiến và trạng thái hoàn tất là số liệu suy ra, không thể chỉnh sửa trực tiếp. Mọi thời lượng đo bằng giây; số thập phân được giữ nguyên.</p>
+        <label htmlFor="admin-session-reason">Lý do kiểm toán · bắt buộc</label>
+        <textarea id="admin-session-reason" maxLength={500} value={reason} disabled={mutationBusy} onChange={(event) => { setReason(event.target.value); setFormError(""); }} />
+        <p className="admin-analysis-note">Không ghi thông tin đăng nhập, tài liệu riêng hoặc nội dung phản hồi quiz vào lý do.</p>
+        {formError && <p className="admin-error" role="alert">{formError}</p>}
+        {mutationError && <p className="admin-error" role="alert">{mutationError} {mutationError.includes("tải lại phiên") && <button type="button" onClick={onReload}>Tải lại phiên</button>}</p>}
+        <div className="admin-account-actions">
+          <button type="submit" disabled={!canSave}>{mutationBusy ? "Đang lưu…" : "Lưu hiệu chỉnh"}</button>
+          <label className="admin-session-delete-confirm"><input type="checkbox" checked={confirmedRemoval} disabled={mutationBusy} onChange={(event) => setConfirmedRemoval(event.target.checked)} />Tôi xác nhận gỡ phiên khỏi lịch sử</label>
+          <button type="button" className="admin-destructive" disabled={mutationBusy || !confirmedRemoval || !isAdminReasonValid(reason)} onClick={submitRemoval}>{mutationBusy ? "Đang lưu…" : "Gỡ khỏi lịch sử"}</button>
+        </div>
+      </form>
+    </>}
+    {mutationError && !detail && <p className="admin-error" role="alert">{mutationError}</p>}
+    {formError && !detail && <p className="admin-error" role="alert">{formError}</p>}
+    <section className="admin-session-audit" aria-label="Nhật ký hiệu chỉnh phiên">
+      <div className="admin-detail-heading"><div><h3>Nhật ký hiệu chỉnh phiên</h3><p>Nhật ký vẫn được lưu sau khi phiên được gỡ khỏi lịch sử.</p></div></div>
+      {auditLoading && <p role="status">Đang tải nhật ký…</p>}
+      {auditError && <p className="admin-error" role="alert">{auditError} <button type="button" onClick={onAuditRetry}>Thử lại</button></p>}
+      {!auditLoading && !auditError && auditActions.length === 0 && <p className="admin-empty">Chưa có thay đổi được ghi nhận.</p>}
+      {!!auditActions.length && <>
+        <ol className="admin-audit-list">
+          {auditActions.map((item, index) => <li key={`${item.sessionId}:${item.createdAt}:${index}`}>
+            <div className="admin-audit-heading"><strong>{item.action === "removal" ? "Gỡ phiên khỏi lịch sử" : "Hiệu chỉnh phiên"}</strong><time dateTime={item.createdAt}>{utcTime(item.createdAt)}</time></div>
+            <p>Người thực hiện: <code>{item.actorId}</code></p>
+            <p>Chủ phiên: <code>{item.targetOwnerId}</code></p>
+            <p>Phiên bản {item.beforeVersion} → {item.afterVersion}</p>
+            <p>Lý do: {item.reason}</p>
+            <details><summary>Giá trị trước và sau</summary><pre>{JSON.stringify({ before: item.before, after: item.after }, null, 2)}</pre></details>
+          </li>)}
+        </ol>
+        <Pager total={auditTotal} offset={auditOffset} onChange={onAuditOffsetChange} />
+      </>}
+    </section>
+  </section>;
+}
+
 function SessionsView({
   sessions,
   loading,
@@ -470,7 +886,14 @@ function SessionsView({
   offset,
   onOffsetChange,
   onRetry,
+  onAccessDenied,
+  onListChanged,
+  onSessionRemoved,
   label,
+  days,
+  durationBasis,
+  onDaysChange,
+  onDurationBasisChange,
 }: {
   sessions: AdminSession[];
   loading: boolean;
@@ -479,19 +902,140 @@ function SessionsView({
   offset: number;
   onOffsetChange: (next: number) => void;
   onRetry: () => void;
+  onAccessDenied: () => void;
+  onListChanged: () => void;
+  onSessionRemoved: (sessionId: string) => void;
   label: string;
+  days: AdminSessionPeriod;
+  durationBasis: "planned" | "actual" | "";
+  onDaysChange: (value: AdminSessionPeriod) => void;
+  onDurationBasisChange: (value: "planned" | "actual" | "") => void;
 }) {
+  const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [detail, setDetail] = useState<AdminSessionDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailRemoved, setDetailRemoved] = useState(false);
+  const [detailRetry, setDetailRetry] = useState(0);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const [mutationError, setMutationError] = useState("");
+  const [auditResult, setAuditResult] = useState<{ key: string; actions: AdminSessionAuditAction[]; total: number } | null>(null);
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditRetry, setAuditRetry] = useState(0);
+  const auditKey = `${selectedSessionId}:${auditOffset}`;
+  const auditValue = auditResult?.key === auditKey ? auditResult : null;
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const controller = new AbortController();
+    setDetailLoading(true);
+    setDetailError("");
+    setMutationError("");
+    setDetail(null);
+    setDetailRemoved(false);
+    fetchAdminSession(selectedSessionId, controller.signal)
+      .then((value) => { if (!controller.signal.aborted) setDetail(value); })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        if (isAdminAccessDenied(cause)) onAccessDenied();
+        else if (cause instanceof ApiError && cause.status === 410) setDetailRemoved(true);
+        else setDetailError(adminSessionMutationProblem(cause));
+      })
+      .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
+    return () => controller.abort();
+  }, [detailRetry, onAccessDenied, selectedSessionId]);
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const controller = new AbortController();
+    setAuditLoading(true);
+    setAuditError("");
+    fetchAdminSessionAudit(selectedSessionId, pageSize, auditOffset, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setAuditResult({ key: auditKey, actions: value.actions, total: value.total });
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        if (isAdminAccessDenied(cause)) onAccessDenied();
+        else setAuditError(errorMessage(cause));
+      })
+      .finally(() => { if (!controller.signal.aborted) setAuditLoading(false); });
+    return () => controller.abort();
+  }, [auditKey, auditOffset, auditRetry, onAccessDenied, selectedSessionId]);
+
+  const reloadDetail = () => {
+    setDetail(null);
+    setDetailError("");
+    setDetailRemoved(false);
+    setMutationError("");
+    setDetailRetry((value) => value + 1);
+  };
+
+  const saveSession = async (changes: AdminSessionCorrectionChanges, reason: string) => {
+    if (!detail || mutationBusy || !isAdminReasonValid(reason)) return;
+    setMutationBusy(true);
+    setMutationError("");
+    try {
+      const updated = await updateAdminSession(detail.id, {
+        expectedVersion: detail.correctionVersion, reason: reason.trim(), changes,
+      });
+      setDetail(updated);
+      setDetailRemoved(false);
+      setAuditOffset(0);
+      setAuditRetry((value) => value + 1);
+      onListChanged();
+    } catch (cause) {
+      if (isAdminAccessDenied(cause)) onAccessDenied();
+      else if (cause instanceof ApiError && cause.status === 410) {
+        setDetailRemoved(true);
+        setMutationError(adminSessionMutationProblem(cause));
+        onSessionRemoved(detail.id);
+        setAuditOffset(0);
+        setAuditRetry((value) => value + 1);
+      } else setMutationError(adminSessionMutationProblem(cause));
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
+  const deleteSession = async (reason: string) => {
+    if (!detail || mutationBusy || !isAdminReasonValid(reason)) return;
+    setMutationBusy(true);
+    setMutationError("");
+    try {
+      await removeAdminSession(detail.id, { expectedVersion: detail.correctionVersion, reason: reason.trim() });
+      setDetailRemoved(true);
+      setAuditOffset(0);
+      setAuditRetry((value) => value + 1);
+      onSessionRemoved(detail.id);
+    } catch (cause) {
+      if (isAdminAccessDenied(cause)) onAccessDenied();
+      else if (cause instanceof ApiError && cause.status === 410) {
+        setDetailRemoved(true);
+        setMutationError(adminSessionMutationProblem(cause));
+        onSessionRemoved(detail.id);
+        setAuditOffset(0);
+        setAuditRetry((value) => value + 1);
+      } else setMutationError(adminSessionMutationProblem(cause));
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
   return <section className="admin-detail" aria-live="polite">
-    <div className="admin-detail-heading"><div><h3>Phiên học của {label}</h3><p>Hiển thị thời lượng học, thời gian tập trung, nghỉ, xao nhãng và quiz đã chấm. Không hiển thị mục tiêu riêng hoặc nội dung tài liệu.</p></div></div>
+    <div className="admin-detail-heading"><div><h3>Phiên học của {label}</h3><p>Danh sách chỉ hiển thị chỉ số phiên, không hiển thị mục tiêu riêng hoặc nội dung tài liệu.</p></div></div>
+    <AdminSessionFilters days={days} durationBasis={durationBasis} onDaysChange={onDaysChange} onDurationBasisChange={onDurationBasisChange} />
     {loading && <p role="status">Đang tải phiên học…</p>}
     {error && <p className="admin-error" role="alert">{error} <button type="button" onClick={onRetry}>Thử lại</button></p>}
     {!loading && !error && sessions.length === 0 && <p className="admin-empty">Chưa có phiên học trong khoảng thời gian này.</p>}
     {!!sessions.length && <>
       <div className="admin-table-scroll" role="region" aria-label={`Phiên học của ${label}`} tabIndex={0}>
         <table className="admin-data-table admin-session-table">
-          <thead><tr><th>Phiên · chủ đề</th><th>Bắt đầu · kết thúc UTC</th><th>Kế hoạch</th><th>Thực tế · tập trung</th><th>Nghỉ</th><th>Xao nhãng</th><th>Hoàn tất</th><th>Quiz</th></tr></thead>
+          <thead><tr><th>Phiên · chủ đề</th><th>Bắt đầu · kết thúc UTC</th><th>Kế hoạch</th><th>Thực tế · tập trung</th><th>Nghỉ</th><th>Xao nhãng</th><th>Hoàn tất</th><th>Quiz</th><th>Thao tác</th></tr></thead>
           <tbody>{sessions.map((session) => <tr key={session.id}>
-            <th scope="row"><code>{session.id.slice(0, 8)}</code><small>{session.topic}</small></th>
+            <th scope="row"><code>{session.id.slice(0, 8)}</code><small>{session.topic}</small>{label === "toàn hệ thống" && <small>{adminSessionOwnerLabel(session)}</small>}</th>
             <td><time dateTime={session.startedAt}>{utcTime(session.startedAt)}</time><small><time dateTime={session.endedAt}>{utcTime(session.endedAt)}</time></small></td>
             <td>{formatAdminDuration(session.plannedStudySeconds)} học<small>{session.plannedBreakSeconds ? `${formatAdminDuration(session.plannedBreakSeconds)} nghỉ dự kiến` : "Không lên lịch nghỉ"}</small></td>
             <td>{formatAdminDuration(session.actualStudySeconds)} học<small>{formatAdminDuration(session.focusedSeconds)} tập trung</small></td>
@@ -499,11 +1043,39 @@ function SessionsView({
             <td>{session.distractions}</td>
             <td>{session.completed ? "Đạt" : "Chưa đạt"}</td>
             <td>{session.quizScore === null || session.quizTotal === null ? "Chưa chấm" : `${session.quizScore}/${session.quizTotal}`}</td>
+            <td><button type="button" aria-pressed={selectedSessionId === session.id} onClick={() => {
+              if (selectedSessionId === session.id) return;
+              setSelectedSessionId(session.id);
+              setDetail(null);
+              setDetailError("");
+              setDetailRemoved(false);
+              setMutationError("");
+              setAuditOffset(0);
+            }} disabled={mutationBusy}>Xem / chỉnh sửa</button></td>
           </tr>)}</tbody>
         </table>
       </div>
       <Pager total={total} offset={offset} onChange={onOffsetChange} />
     </>}
+    {selectedSessionId && <AdminSessionEditor
+      key={`${selectedSessionId}:${detail?.correctionVersion ?? "loading"}`}
+      detail={detail}
+      removed={detailRemoved}
+      loading={detailLoading}
+      error={detailError}
+      mutationBusy={mutationBusy}
+      mutationError={mutationError}
+      auditActions={auditValue?.actions ?? []}
+      auditLoading={auditLoading}
+      auditError={auditError}
+      auditTotal={auditValue?.total ?? 0}
+      auditOffset={auditOffset}
+      onReload={reloadDetail}
+      onSave={(changes, reason) => void saveSession(changes, reason)}
+      onDelete={(reason) => void deleteSession(reason)}
+      onAuditOffsetChange={setAuditOffset}
+      onAuditRetry={() => setAuditRetry((value) => value + 1)}
+    />}
   </section>;
 }
 
@@ -513,7 +1085,9 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
   currentUserId?: string;
 } = {}) {
   const [days, setDays] = useState<AdminPeriod>(7);
-  const [tab, setTab] = useState<"overview" | "accounts" | "groups">("overview");
+  const [sessionDays, setSessionDays] = useState<AdminSessionPeriod>(defaultAdminSessionPeriod);
+  const [sessionDurationBasis, setSessionDurationBasis] = useState<"planned" | "actual" | "">("");
+  const [tab, setTab] = useState<"overview" | "accounts" | "groups" | "sessions">("overview");
   const [report, setReport] = useState<AdminReport | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reportError, setReportError] = useState("");
@@ -561,12 +1135,46 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
   const reportFilters: AdminReportFilters | null = selectedAccountId
     ? { accountId: selectedAccountId }
     : selectedGroupId ? { groupId: selectedGroupId } : null;
-  const reportKey = `${days}:${selectedAccountId ?? ""}:${selectedGroupId ?? ""}`;
-  const detailReport = reportFilters ? adminReportForKey(detailReportResult, reportKey) : null;
-  const detailReportErrorMessage = detailReportError?.key === reportKey ? detailReportError.message : "";
+  const reportKey = adminReportCacheKey(days, selectedAccountId, selectedGroupId, reportRetry);
+  const detailReportKey = adminReportCacheKey(days, selectedAccountId, selectedGroupId, reportRetry + detailReportRetry);
+  const detailReport = reportFilters ? adminReportForKey(detailReportResult, detailReportKey) : null;
+  const detailReportErrorMessage = detailReportError?.key === detailReportKey ? detailReportError.message : "";
   const detailReportLoading = Boolean(reportFilters && !detailReport && !detailReportErrorMessage);
-  const sessionKey = `${days}:${selectedAccount?.id ?? ""}:${selectedGroup?.id ?? ""}:${sessionOffset}`;
+  const sessionScope: AdminSessionScope = tab === "sessions" ? "global" : selectedAccount ? "account" : "group";
+  const sessionFilterId = sessionScope === "account" ? selectedAccount?.id ?? ""
+    : sessionScope === "group" ? selectedGroup?.id ?? "" : "";
+  const sessionKey = `${sessionDays}:${sessionScope}:${sessionFilterId}:${sessionDurationBasis}:${sessionOffset}`;
   const { rows: sessions, total: sessionTotal } = adminRowsForKey(sessionResult, sessionKey);
+  const refreshSessionList = useCallback(() => setSessionRetry((value) => value + 1), []);
+  const removeSessionFromList = useCallback((sessionId: string) => {
+    setSessionResult((previous) => {
+      if (previous?.key !== sessionKey) return previous;
+      const rows = previous.rows.filter((session) => session.id !== sessionId);
+      return rows.length === previous.rows.length
+        ? previous
+        : { ...previous, rows, total: Math.max(0, previous.total - 1) };
+    });
+    setSessionRetry((value) => value + 1);
+    setReport(null);
+    setReportLoading(true);
+    setReportError("");
+    setReportRetry((value) => value + 1);
+    setDetailReportResult(null);
+    setDetailReportError(null);
+    setDetailReportRetry((value) => value + 1);
+  }, [sessionKey]);
+  const refreshSessionMutationData = useCallback(() => {
+    setSessionResult(null);
+    setSessionLoading(true);
+    setSessionRetry((value) => value + 1);
+    setReport(null);
+    setReportLoading(true);
+    setReportError("");
+    setReportRetry((value) => value + 1);
+    setDetailReportResult(null);
+    setDetailReportError(null);
+    setDetailReportRetry((value) => value + 1);
+  }, []);
   const deniedCallback = useRef(onAccessDenied);
   const exportRequest = useRef<AbortController | null>(null);
 
@@ -618,15 +1226,16 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
     }
     const controller = new AbortController();
     setDetailReportError(null);
+    setDetailReportResult(null);
     fetchAdminReport(days, controller.signal, filters)
-      .then((value) => { if (!controller.signal.aborted) setDetailReportResult({ key: reportKey, value }); })
+      .then((value) => { if (!controller.signal.aborted) setDetailReportResult({ key: detailReportKey, value }); })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         if (isAdminAccessDenied(error)) clearAdminData();
-        else setDetailReportError({ key: reportKey, message: errorMessage(error) });
+        else setDetailReportError({ key: detailReportKey, message: errorMessage(error) });
       });
     return () => controller.abort();
-  }, [clearAdminData, days, detailReportRetry, reportKey, selectedAccountId, selectedGroupId]);
+  }, [clearAdminData, days, detailReportKey, reportKey, selectedAccountId, selectedGroupId]);
 
   useEffect(() => {
     if (tab !== "accounts") return;
@@ -702,7 +1311,7 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
 
   useEffect(() => {
     const filters = selectedAccount ? { accountId: selectedAccount.id } : selectedGroup ? { groupId: selectedGroup.id } : null;
-    if (!filters) {
+    if (tab !== "sessions" && !filters) {
       setSessionResult(null);
       setSessionError("");
       setSessionLoading(false);
@@ -711,7 +1320,7 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
     const controller = new AbortController();
     setSessionLoading(true);
     setSessionError("");
-    fetchAdminSessions(days, filters, pageSize, sessionOffset, controller.signal)
+    fetchAdminSessions(sessionDays, adminSessionApiFilters(sessionScope, selectedAccountId, selectedGroupId, sessionDurationBasis), pageSize, sessionOffset, controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
         setSessionResult({ key: sessionKey, rows: value.sessions, total: value.total });
@@ -723,7 +1332,7 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
       })
       .finally(() => { if (!controller.signal.aborted) setSessionLoading(false); });
     return () => controller.abort();
-  }, [clearAdminData, days, selectedAccount, selectedGroup, sessionOffset, sessionKey, sessionRetry]);
+  }, [clearAdminData, selectedAccount, selectedAccountId, selectedGroup, selectedGroupId, sessionDays, sessionDurationBasis, sessionOffset, sessionKey, sessionRetry, sessionScope, tab]);
 
   const searchAccounts = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -848,7 +1457,7 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
 
     <div className="admin-toolbar">
       <label htmlFor="admin-report-period">Khoảng báo cáo
-        <select id="admin-report-period" value={days} onChange={(event) => { setSessionError(""); setSessionOffset(0); setDays(Number(event.target.value) as AdminPeriod); }}>
+        <select id="admin-report-period" value={days} onChange={(event) => { setDays(Number(event.target.value) as AdminPeriod); }}>
           {periods.map((period) => <option value={period} key={period}>{period} ngày</option>)}
         </select>
       </label>
@@ -861,6 +1470,7 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
       <button type="button" aria-pressed={tab === "overview"} onClick={() => setTab("overview")}>Tổng quan</button>
       <button type="button" aria-pressed={tab === "accounts"} onClick={() => setTab("accounts")}>Tài khoản</button>
       <button type="button" aria-pressed={tab === "groups"} onClick={() => setTab("groups")}>Nhóm học</button>
+      <button type="button" aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}>Lịch sử phiên</button>
     </nav>
 
     {reportError && <p className="admin-error" role="alert">{reportError} <button type="button" onClick={() => setReportRetry((value) => value + 1)}>Thử tải báo cáo lại</button></p>}
@@ -869,6 +1479,12 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
       {reportLoading && <p role="status">Đang tải báo cáo…</p>}
       {!reportLoading && report && <AdminOverview report={report} />}
       {!reportLoading && !report && !reportError && <p className="admin-empty">Chưa có dữ liệu báo cáo.</p>}
+    </section>}
+
+    {tab === "sessions" && <section aria-label="Lịch sử phiên toàn hệ thống" className="admin-panel-content">
+      <SessionsView key={sessionKey} sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={refreshSessionList} onAccessDenied={clearAdminData} onListChanged={refreshSessionMutationData} onSessionRemoved={removeSessionFromList} label="toàn hệ thống" days={sessionDays} durationBasis={sessionDurationBasis}
+        onDaysChange={(value) => { setSessionError(""); setSessionOffset(0); setSessionDays(value); }}
+        onDurationBasisChange={(value) => { setSessionError(""); setSessionOffset(0); setSessionDurationBasis(value); }} />
     </section>}
 
     {tab === "accounts" && <section aria-label="Tra cứu tài khoản" className="admin-panel-content">
@@ -926,7 +1542,9 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
           {detailReportErrorMessage && <p className="admin-error" role="alert">{detailReportErrorMessage} <button type="button" onClick={() => setDetailReportRetry((value) => value + 1)}>Thử lại</button></p>}
           {detailReport && <AdminOverview report={detailReport} scopeLabel={`Tài khoản: ${selectedAccount.name} · ${selectedAccount.email}`} />}
         </section>
-        <SessionsView sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={() => setSessionRetry((value) => value + 1)} label={`${selectedAccount.name} · ${selectedAccount.email}`} />
+        <SessionsView key={sessionKey} sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={refreshSessionList} onAccessDenied={clearAdminData} onListChanged={refreshSessionMutationData} onSessionRemoved={removeSessionFromList} label={`${selectedAccount.name} · ${selectedAccount.email}`} days={sessionDays} durationBasis={sessionDurationBasis}
+        onDaysChange={(value) => { setSessionError(""); setSessionOffset(0); setSessionDays(value); }}
+        onDurationBasisChange={(value) => { setSessionError(""); setSessionOffset(0); setSessionDurationBasis(value); }} />
       </>}
     </section>}
 
@@ -958,7 +1576,9 @@ export function AdminPanel({ onClose, onAccessDenied, currentUserId }: {
           {detailReportErrorMessage && <p className="admin-error" role="alert">{detailReportErrorMessage} <button type="button" onClick={() => setDetailReportRetry((value) => value + 1)}>Thử lại</button></p>}
           {detailReport && <AdminOverview report={detailReport} scopeLabel={`Nhóm: ${selectedGroup.name}`} />}
         </section>
-        <SessionsView sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={() => setSessionRetry((value) => value + 1)} label={selectedGroup.name} />
+        <SessionsView key={sessionKey} sessions={sessions} loading={sessionLoading || (!sessionError && sessionResult?.key !== sessionKey)} error={sessionError} total={sessionTotal} offset={sessionOffset} onOffsetChange={setSessionOffset} onRetry={refreshSessionList} onAccessDenied={clearAdminData} onListChanged={refreshSessionMutationData} onSessionRemoved={removeSessionFromList} label={selectedGroup.name} days={sessionDays} durationBasis={sessionDurationBasis}
+        onDaysChange={(value) => { setSessionError(""); setSessionOffset(0); setSessionDays(value); }}
+        onDurationBasisChange={(value) => { setSessionError(""); setSessionOffset(0); setSessionDurationBasis(value); }} />
       </>}
     </section>}
 

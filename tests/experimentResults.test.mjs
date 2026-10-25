@@ -11,16 +11,18 @@ let vite;
 let ExperimentRunList;
 let formatExperimentDuration;
 let experimentStudySeconds;
+let experimentRunHasCorrections;
 
 before(async () => {
   vite = await createServer({
     configFile: resolve(projectRoot, "vite.config.ts"),
+    configLoader: "runner",
     cacheDir: resolve(projectRoot, "node_modules/.vite-experiment-results-tests"),
     appType: "custom",
     logLevel: "silent",
     server: { middlewareMode: true },
   });
-  ({ ExperimentRunList, formatExperimentDuration, experimentStudySeconds } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
+  ({ ExperimentRunList, formatExperimentDuration, experimentStudySeconds, experimentRunHasCorrections } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
 });
 
 after(async () => {
@@ -55,7 +57,7 @@ test("history uses compact semantic columns while retaining every run detail", (
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
 
   assert.match(markup, /<caption>Các phiên người học đã chọn công khai/u);
-  for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Thời gian học và chuyến", "Tập trung và nghỉ", "Đồng hồ và tự đánh giá", "Quiz"]) {
+  for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Thời gian học và chuyến", "Tập trung và nghỉ", "Mục tiêu và tự đánh giá", "Quiz"]) {
     assert.match(markup, new RegExp(`<th[^>]*>${heading}</th>`, "u"));
   }
   assert.match(markup, /class="experiment-trip-code"[^>]*>V-1234567890AB/u);
@@ -66,7 +68,7 @@ test("history uses compact semantic columns while retaining every run detail", (
   assert.match(markup, /8 phút giải lao thực tế/u);
   assert.match(markup, /10 phút giải lao dự kiến/u);
   assert.match(markup, /4\/5 điểm/u);
-  for (const detail of ["TESTER-PRIVATE-42", "iPad/Tablet", "3 lần", "Kết thúc sớm", "80% · tự đánh giá"]) {
+  for (const detail of ["TESTER-PRIVATE-42", "iPad/Tablet", "3 lần", "Chưa đạt mục tiêu", "80% · tự đánh giá"]) {
     assert.match(markup, new RegExp(detail, "u"));
   }
   assert.doesNotMatch(markup, /Ôn tập cấu trúc tế bào và chức năng của các bào quan/u);
@@ -92,6 +94,47 @@ test("history handles a missing quiz and missing optional timing values accessib
   assert.match(markup, /Chưa có thời gian giải lao/u);
   assert.match(markup, /1 giờ 40 phút học/u);
   assert.match(markup, /1 giờ 30 phút mục tiêu/u);
+});
+
+test("public history shows zero seconds of breaks and keeps corrected elapsed time provenance clear", () => {
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
+    runs: [{
+      ...fixture,
+      breakSeconds: 0,
+      correctionFlags: {
+        topic: false, targetSeconds: true, elapsedSeconds: true, actualStudySeconds: true,
+        focusedSeconds: false, actualBreakSeconds: false, distractions: false, quizResult: false,
+      },
+    }],
+  }));
+
+  assert.match(markup, /0 giây giải lao thực tế/u);
+  assert.match(markup, /Đạt mục tiêu theo số liệu đang áp dụng|Chưa đạt mục tiêu theo số liệu đang áp dụng/u);
+  assert.match(markup, /Mốc bắt đầu và kết thúc.*dữ kiện đo ban đầu.*thời lượng chuyến đã được hiệu chỉnh/u);
+  assert.doesNotMatch(markup, /theo đồng hồ/u);
+});
+
+test("public history shows a concise correction flag without exposing private fields", () => {
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
+    runs: [{
+      ...fixture,
+      correctionFlags: {
+        topic: false, targetSeconds: false, elapsedSeconds: false, actualStudySeconds: false,
+        focusedSeconds: false, actualBreakSeconds: false, distractions: false, quizResult: true,
+        ownerId: true,
+      },
+      goal: "Không được công khai mục tiêu riêng",
+      ownerId: "private-owner-id",
+      materials: ["private-material-name.pdf"],
+    }],
+  }));
+
+  assert.match(markup, /Đã hiệu chỉnh/u);
+  assert.doesNotMatch(markup, /Không được công khai mục tiêu riêng/u);
+  assert.doesNotMatch(markup, /private-owner-id/u);
+  assert.doesNotMatch(markup, /private-material-name\.pdf/u);
+  assert.equal(experimentRunHasCorrections({ ownerId: true }), false);
+  assert.equal(experimentRunHasCorrections({ quizResult: true }), true);
 });
 
 test("duration values stay human-readable and legacy study time excludes known rests", () => {

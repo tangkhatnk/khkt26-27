@@ -51,6 +51,14 @@ test("detail reports from another account, group or period never carry over to a
   }
 });
 
+test("session mutations invalidate cached report totals before they can render", () => {
+  const report = { totals: { sessionCount: 1, actualStudySeconds: 30 } };
+  const previous = { key: panelModule.exports.adminReportCacheKey(7, "account-a", undefined, 0), value: report };
+  const refreshedKey = panelModule.exports.adminReportCacheKey(7, "account-a", undefined, 1);
+
+  assert.equal(panelModule.exports.adminReportForKey(previous, refreshedKey), null);
+});
+
 test("AdminOverview presents UTC usage, quiz coverage and topic trends on narrow layouts", () => {
   const report = {
     days: 7,
@@ -137,6 +145,7 @@ test("AdminPanel keeps the existing overview, account and group reporting tabs",
   assert.match(html, /Tổng quan/);
   assert.match(html, /Tài khoản/);
   assert.match(html, /Nhóm học/);
+  assert.match(html, /Lịch sử phiên/);
   assert.match(html, /Tải CSV tổng hợp/);
 });
 
@@ -291,4 +300,146 @@ test("profile editing validates a display name and deletion confirmation explain
   assert.match(deletion, /giữ lại dữ liệu học/i);
   assert.match(deletion, /thu hồi quyền quản trị/i);
   assert.match(deletion, /đăng nhập/i);
+});
+
+const adminSessionDetail = {
+  id: "00000000-0000-4000-8000-000000000042",
+  ownerId: "00000000-0000-4000-8000-000000000099",
+  accountId: "00000000-0000-4000-8000-000000000099",
+  groupId: null,
+  status: "active",
+  correctionVersion: 2,
+  goal: "Mục tiêu đã hiệu chỉnh",
+  measuredContent: { goal: "Mục tiêu ban đầu", topic: "biology" },
+  topic: "biology",
+  startedAt: "2026-10-21T03:00:00.000Z",
+  endedAt: "2026-10-21T04:01:00.500Z",
+  timestampsAreSettlementFacts: true,
+  metrics: {
+    targetSeconds: 3600, plannedStudySeconds: 3600, elapsedSeconds: 3660.5,
+    actualStudySeconds: 3300, focusedSeconds: 3200, plannedBreakSeconds: 300,
+    actualBreakSeconds: 360.5, distractions: 2, completed: false, quizScore: 4, quizTotal: 5,
+  },
+  measuredMetrics: {
+    targetSeconds: 3600, plannedStudySeconds: 3600, elapsedSeconds: 3600,
+    actualStudySeconds: 3300, focusedSeconds: 3150, plannedBreakSeconds: 300,
+    actualBreakSeconds: 300, distractions: 1, completed: false, quizScore: 3, quizTotal: 5,
+  },
+  metricSources: {
+    goal: "corrected", topic: "measured", targetSeconds: "measured", elapsedSeconds: "corrected",
+    actualStudySeconds: "measured", focusedSeconds: "corrected", actualBreakSeconds: "corrected",
+    distractions: "corrected", quizResult: "corrected",
+  },
+};
+
+test("session history filters keep all-history and short-trip basis explicit", () => {
+  const html = renderToStaticMarkup(React.createElement(panelModule.exports.AdminSessionFilters, {
+    days: "all", durationBasis: "actual", onDaysChange() {}, onDurationBasisChange() {},
+  }));
+  assert.match(html, /id="admin-session-period"/u);
+  assert.match(html, /<option value="all" selected="">Toàn bộ lịch sử<\/option>/u);
+  assert.match(html, /id="admin-session-duration"/u);
+  assert.match(html, /≤ 60 giây/u);
+  assert.match(html, /value="actual" selected=""/u);
+  assert.match(html, /Chỉ lọc khi được chọn/u);
+  assert.match(html, /thời lượng thực tế đã trôi qua.*bao gồm thời gian nghỉ và vắng mặt/u);
+});
+
+test("global session history ignores a previously selected account or group", () => {
+  assert.deepEqual(panelModule.exports.adminSessionApiFilters("global", "selected-account", "selected-group", "actual"), {
+    durationBasis: "actual",
+  });
+  assert.deepEqual(panelModule.exports.adminSessionApiFilters("account", "selected-account", "selected-group", "planned"), {
+    accountId: "selected-account", durationBasis: "planned",
+  });
+  assert.deepEqual(panelModule.exports.adminSessionApiFilters("group", "selected-account", "selected-group", ""), {
+    groupId: "selected-group",
+  });
+  assert.equal(panelModule.exports.defaultAdminSessionPeriod, "all");
+  assert.equal(panelModule.exports.adminSessionOwnerLabel({ accountId: null }), "Phiên khách");
+  assert.equal(panelModule.exports.adminSessionOwnerLabel({ accountId: "00000000-0000-4000-8000-000000000001" }), "Phiên tài khoản");
+});
+
+test("session corrections send only changed fields and preserve explicit resets", () => {
+  const draft = {
+    goal: "",
+    topic: "biology",
+    targetSeconds: "3600",
+    elapsedSeconds: "3661.25",
+    actualStudySeconds: "3300",
+    focusedSeconds: "3200",
+    actualBreakSeconds: "360.5",
+    distractions: "2",
+    quizScore: "4",
+    quizTotal: "5",
+  };
+  const legacyDetail = { ...adminSessionDetail, goal: "", measuredContent: { goal: "", topic: "biology" } };
+  const changes = panelModule.exports.buildAdminSessionChanges(
+    legacyDetail, draft, new Set(["actualBreakSeconds", "quizResult"]),
+  );
+  assert.deepEqual(changes, {
+    elapsedSeconds: 3661.25,
+    actualBreakSeconds: null,
+    quizResult: null,
+  });
+  assert.deepEqual(panelModule.exports.buildAdminSessionChanges(
+    legacyDetail, { ...draft, elapsedSeconds: String(legacyDetail.metrics.elapsedSeconds) }, new Set(),
+  ), {});
+  assert.equal(panelModule.exports.adminSessionDraftValidationError(legacyDetail, draft, new Set()), "");
+  assert.match(panelModule.exports.adminSessionDraftValidationError(
+    legacyDetail, { ...draft, goal: "xy" }, new Set(),
+  ), /Mục tiêu mới cần có từ 3 đến 500 ký tự/u);
+});
+
+test("session correction editor shows effective and measured values, immutable settlement timestamps, and paged audit", () => {
+  const html = renderToStaticMarkup(React.createElement(panelModule.exports.AdminSessionEditor, {
+    detail: adminSessionDetail,
+    removed: false,
+    loading: false,
+    error: "",
+    mutationBusy: false,
+    mutationError: "",
+    auditActions: [{
+      actorId: "00000000-0000-4000-8000-000000000123",
+      targetOwnerId: adminSessionDetail.ownerId,
+      sessionId: adminSessionDetail.id,
+      action: "correction",
+      beforeVersion: 1,
+      afterVersion: 2,
+      before: { status: "active", correctionVersion: 1, goal: "Mục tiêu ban đầu", topic: "biology", metrics: adminSessionDetail.measuredMetrics },
+      after: { status: "active", correctionVersion: 2, goal: adminSessionDetail.goal, topic: "biology", metrics: adminSessionDetail.metrics },
+      reason: "Đối chiếu hồ sơ.", createdAt: "2026-10-21T05:00:00.000Z",
+    }],
+    auditLoading: false,
+    auditError: "",
+    auditTotal: 30,
+    auditOffset: 25,
+    onReload() {}, onSave() {}, onDelete() {}, onAuditOffsetChange() {}, onAuditRetry() {},
+  }));
+  assert.match(html, /Đang áp dụng/u);
+  assert.match(html, /Theo ghi nhận ban đầu/u);
+  assert.match(html, /Đã hiệu chỉnh/u);
+  assert.match(html, /Mốc bắt đầu và kết thúc đã đo khi chốt phiên; đây là dữ kiện đo, không thể chỉnh sửa/u);
+  assert.match(html, /step="any"/u);
+  assert.match(html, /Tôi xác nhận gỡ phiên khỏi lịch sử/u);
+  assert.match(html, /beforeVersion|Phiên bản 1 → 2/u);
+  assert.match(html, /26–30/u);
+});
+
+test("session conflicts ask for a reload and removed sessions stop showing correction controls", () => {
+  assert.match(panelModule.exports.adminSessionMutationProblem(new TestApiError(409, "stale")), /tải lại phiên/u);
+  assert.match(panelModule.exports.adminSessionMutationProblem(new TestApiError(410, "removed")), /đã được gỡ/u);
+  const html = renderToStaticMarkup(React.createElement(panelModule.exports.AdminSessionEditor, {
+    detail: adminSessionDetail,
+    removed: true,
+    loading: false,
+    error: "",
+    mutationBusy: false,
+    mutationError: "",
+    auditActions: [], auditLoading: false, auditError: "", auditTotal: 0, auditOffset: 0,
+    onReload() {}, onSave() {}, onDelete() {}, onAuditOffsetChange() {}, onAuditRetry() {},
+  }));
+  assert.match(html, /Phiên học đã được gỡ khỏi lịch sử/u);
+  assert.doesNotMatch(html, /Lưu hiệu chỉnh/u);
+  assert.match(html, /Nhật ký hiệu chỉnh phiên/u);
 });

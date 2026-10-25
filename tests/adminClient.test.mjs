@@ -159,3 +159,67 @@ test("admin profile and recoverable deletion requests carry expected versions an
   assert.deepEqual(JSON.parse(requests[1].init.body), { deleted: true, expectedVersion: 9, reason: "Xóa có thể khôi phục." });
   for (const { init } of requests) { assert.equal(init.method, "PUT"); assert.equal(init.cache, "no-store"); }
 });
+
+test("session history supports all-history and explicit planned or actual short-trip filters", async () => {
+  const requests = [];
+  const api = client(async () => "test-token", async (url, init) => {
+    requests.push({ url, init });
+    return { sessions: [], total: 0, limit: 25, offset: 0, days: "all", timezone: "UTC" };
+  });
+  const accountId = "00000000-0000-4000-8000-000000000042";
+  const controller = new AbortController();
+
+  await api.fetchAdminSessions("all", { accountId, durationBasis: "planned" }, 25, 0, controller.signal);
+  await api.fetchAdminSessions(30, { groupId: "group-id", durationBasis: "actual" }, 25, 25, controller.signal);
+
+  const first = new URL(requests[0].url, "https://api.example.invalid");
+  assert.equal(first.pathname, "/admin/sessions");
+  assert.equal(first.searchParams.get("days"), "all");
+  assert.equal(first.searchParams.get("accountId"), accountId);
+  assert.equal(first.searchParams.get("durationBasis"), "planned");
+  assert.equal(first.searchParams.get("limit"), "25");
+  assert.equal(first.searchParams.get("offset"), "0");
+  assert.equal(requests[0].init.signal, controller.signal);
+  const second = new URL(requests[1].url, "https://api.example.invalid");
+  assert.equal(second.searchParams.get("days"), "30");
+  assert.equal(second.searchParams.get("groupId"), "group-id");
+  assert.equal(second.searchParams.get("durationBasis"), "actual");
+  assert.equal(second.searchParams.get("offset"), "25");
+});
+
+test("session detail, correction, removal and audit use the accepted admin session contract", async () => {
+  const sessionId = "00000000-0000-4000-8000-000000000042";
+  const requests = [];
+  const api = client(async () => "test-token", async (url, init) => {
+    requests.push({ url, init });
+    return {};
+  });
+  const controller = new AbortController();
+  const changes = { elapsedSeconds: 501.5, quizResult: null };
+
+  await api.fetchAdminSession(sessionId, controller.signal);
+  await api.updateAdminSession(sessionId, { expectedVersion: 4, reason: "Sửa theo dữ liệu đã rà soát.", changes });
+  await api.removeAdminSession(sessionId, { expectedVersion: 5, reason: "Phiên được yêu cầu gỡ." });
+  await api.fetchAdminSessionAudit(sessionId, 25, 50, controller.signal);
+
+  assert.equal(requests[0].url, `/admin/sessions/${sessionId}`);
+  assert.equal(requests[0].init.cache, "no-store");
+  assert.equal(requests[0].init.signal, controller.signal);
+  assert.equal(requests[1].url, `/admin/sessions/${sessionId}`);
+  assert.equal(requests[1].init.method, "PATCH");
+  assert.deepEqual(JSON.parse(requests[1].init.body), {
+    expectedVersion: 4, reason: "Sửa theo dữ liệu đã rà soát.", changes,
+  });
+  assert.equal(requests[1].init.cache, "no-store");
+  assert.equal(requests[2].url, `/admin/sessions/${sessionId}`);
+  assert.equal(requests[2].init.method, "DELETE");
+  assert.deepEqual(JSON.parse(requests[2].init.body), {
+    expectedVersion: 5, reason: "Phiên được yêu cầu gỡ.",
+  });
+  assert.equal(requests[3].init.signal, controller.signal);
+  const audit = new URL(requests[3].url, "https://api.example.invalid");
+  assert.equal(audit.pathname, `/admin/sessions/${sessionId}/audit`);
+  assert.equal(audit.searchParams.get("limit"), "25");
+  assert.equal(audit.searchParams.get("offset"), "50");
+  assert.equal(requests[3].init.cache, "no-store");
+});
