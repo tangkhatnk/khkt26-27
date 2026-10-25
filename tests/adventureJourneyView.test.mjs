@@ -182,6 +182,41 @@ test("corrected quiz metrics stay separate from the original grade feedback", ()
   assert.match(markup, /Original explanation\./u);
 });
 
+test("a corrected trip topic keeps the original quiz score and feedback visible", () => {
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "owner-a",
+    session: {
+      id: "trip-a",
+      topic: "history",
+      goal: "Review cells",
+      correctionVersion: 1,
+      effectiveMetrics: {
+        targetSeconds: 60, elapsedSeconds: 60, actualStudySeconds: 60, focusedSeconds: 45,
+        plannedBreakSeconds: 0, actualBreakSeconds: 0, distractions: 1, completed: true,
+        quizScore: 0, quizTotal: 1,
+      },
+      correctionFlags: { goal: false, topic: true, targetSeconds: false, elapsedSeconds: false,
+        actualStudySeconds: false, focusedSeconds: false, actualBreakSeconds: false,
+        distractions: false, quizResult: false },
+      quiz: { score: 0, total: 1, feedback: [{ questionId: "original-q", question: "Original question?",
+        options: ["A", "B"], selected: 0, correctIndex: 1, correct: false,
+        explanation: "Original feedback stays here.", knowledgePoint: "Cells" }] },
+    },
+    canUseAI: true,
+    needsLogin: false,
+    onGenerate: async () => [],
+    onSaveDraft: () => {},
+    onGrade: async () => ({}),
+    onLogin: () => {},
+    onStartReview: () => {},
+  }));
+
+  assert.match(markup, /Chủ đề chuyến đã được hiệu chỉnh; điểm và phản hồi dưới đây vẫn là kết quả chấm ban đầu\./u);
+  assert.match(markup, /Điểm chấm ban đầu: 0\/1/u);
+  assert.match(markup, /Original feedback stays here\./u);
+  assert.doesNotMatch(markup, /Điểm theo lịch sử đã điều chỉnh/u);
+});
+
 test("boarding pass shows the honest pending code copy unless given a valid history code", () => {
   for (const tripCode of [undefined, "V-abcdef012345", "V-ABCDEF01234"]) {
     const markup = boardingTicket({ tripCode });

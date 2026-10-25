@@ -16,6 +16,7 @@ import {
   updateAdminAccountProfile,
   updateAdminAccountDeletion,
 } from "../services/admin";
+import { studyTopics } from "./topics";
 import type {
   AdminAccount,
   AdminActionAudit,
@@ -795,7 +796,11 @@ export function AdminSessionEditor({
             <button type="button" disabled={mutationBusy || detail.metricSources.goal !== "corrected"} onClick={() => resetField("goal")}>Đặt lại theo dữ liệu đo</button>
           </label>
           <label htmlFor="admin-session-topic">Chủ đề
-            <input id="admin-session-topic" maxLength={100} value={draft.topic} disabled={mutationBusy} onChange={(event) => updateField("topic", event.target.value)} />
+            <input id="admin-session-topic" maxLength={100} value={draft.topic} list="admin-session-topic-suggestions" disabled={mutationBusy} onChange={(event) => updateField("topic", event.target.value)} />
+            <datalist id="admin-session-topic-suggestions">
+              {studyTopics.map((topic) => <option key={topic.id} value={topic.id} label={`${topic.name} (${topic.id})`} />)}
+            </datalist>
+            <small>Gợi ý mã chủ đề đã đăng ký; giá trị cũ ngoài danh sách vẫn được giữ nếu chưa đổi.</small>
             <small>Đang áp dụng: {detail.topic} · Theo ghi nhận ban đầu: {detail.measuredContent.topic} · {adminMetricSource(detail.metricSources.topic)}</small>
             <button type="button" disabled={mutationBusy || detail.metricSources.topic !== "corrected"} onClick={() => resetField("topic")}>Đặt lại theo dữ liệu đo</button>
           </label>

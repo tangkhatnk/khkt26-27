@@ -12,12 +12,19 @@ const source = readFileSync(resolve("src/adventure/AdminPanel.tsx"), "utf8");
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const topicSource = readFileSync(resolve("backend/src/adventure/topics.ts"), "utf8");
+const topicCompiled = ts.transpileModule(topicSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const topicsModule = { exports: {} };
+new Function("require", "module", "exports", topicCompiled)(require, topicsModule, topicsModule.exports);
 const panelModule = { exports: {} };
 class TestApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 const panelRequire = (specifier) => {
   if (specifier === "./admin.css") return {};
+  if (specifier === "./topics") return topicsModule.exports;
   if (specifier === "../services/api") return { ApiError: TestApiError };
   if (specifier === "../services/admin") return {};
   return require(specifier);
@@ -424,6 +431,37 @@ test("session correction editor shows effective and measured values, immutable s
   assert.match(html, /Tôi xác nhận gỡ phiên khỏi lịch sử/u);
   assert.match(html, /beforeVersion|Phiên bản 1 → 2/u);
   assert.match(html, /26–30/u);
+});
+
+test("session topic editor suggests registered IDs and preserves an unregistered legacy value", () => {
+  const legacyTopic = "retired-curriculum";
+  const detail = {
+    ...adminSessionDetail,
+    topic: legacyTopic,
+    measuredContent: { ...adminSessionDetail.measuredContent, topic: legacyTopic },
+  };
+  const html = renderToStaticMarkup(React.createElement(panelModule.exports.AdminSessionEditor, {
+    detail,
+    removed: false,
+    loading: false,
+    error: "",
+    mutationBusy: false,
+    mutationError: "",
+    auditActions: [], auditLoading: false, auditError: "", auditTotal: 0, auditOffset: 0,
+    onReload() {}, onSave() {}, onDelete() {}, onAuditOffsetChange() {}, onAuditRetry() {},
+  }));
+
+  const topicInput = html.match(/<input\b[^>]*id="admin-session-topic"[^>]*>/u)?.[0];
+  assert.ok(topicInput, "the topic input should render");
+  assert.match(topicInput, /value="retired-curriculum"/u);
+  assert.match(topicInput, /list="admin-session-topic-suggestions"/u);
+  assert.match(html, /Gợi ý mã chủ đề đã đăng ký/u);
+  const optionsMarkup = html.match(/<datalist id="admin-session-topic-suggestions">([\s\S]*?)<\/datalist>/u)?.[1];
+  assert.ok(optionsMarkup, "the topic field should render registered topic suggestions");
+  const suggestedIds = [...optionsMarkup.matchAll(/<option value="([^"]+)"/gu)].map((match) => match[1]);
+  assert.deepEqual(suggestedIds, topicsModule.exports.studyTopics.map(({ id }) => id));
+  assert.ok(suggestedIds.includes("history"), "admins should be able to choose the registered history ID");
+  assert.ok(!suggestedIds.includes(legacyTopic), "a legacy value should not be presented as registered");
 });
 
 test("session conflicts ask for a reload and removed sessions stop showing correction controls", () => {
