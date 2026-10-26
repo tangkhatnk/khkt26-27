@@ -14,6 +14,7 @@ const session: Session = {
 describe("automatic trip history projections", () => {
   it("projects saved session metrics and HMAC identities without publication metadata", () => {
     const record = experimentRecord(session, "server-secret");
+    const otherTrip = experimentRecord({ ...session, id: "c0d3e52c-08e6-4f36-a33e-004c26c90b47" }, "server-secret");
     expect(record).toMatchObject({ elapsedSeconds: 60, focusedSeconds: 40, distractions: 1,
       completed: true, quizScore: 2, quizTotal: 3, goalSummary: session.goal });
     expect(record.testerCode).toMatch(/^T-[A-F0-9]{10}$/);
@@ -24,6 +25,9 @@ describe("automatic trip history projections", () => {
     expect(record).not.toHaveProperty("completionPercent");
     expect(record.testerCode).toBe(experimentRecord(session, "server-secret").testerCode);
     expect(record.testerCode).not.toBe(experimentRecord({ ...session, userId: "different-owner" }, "server-secret").testerCode);
+    expect(otherTrip.id).not.toBe(record.id);
+    expect(otherTrip.tripCode).not.toBe(record.tripCode);
+    expect(otherTrip.testerCode).toBe(record.testerCode);
   });
 
   it("uses the corrected effective projection and sanitizes the current goal summary", () => {
@@ -67,6 +71,55 @@ describe("automatic trip history projections", () => {
     expect(record.goalSummary).toBe(correctedGoal);
     expect(record.correctionFlags).toMatchObject({ goal: true, topic: false, quizResult: false });
     expect(record).not.toHaveProperty("goal");
+  });
+
+  it("records scheduled rest separately from study completion and early-ending", () => {
+    const completed = experimentRecord({
+      ...session,
+      started: 1000,
+      ended: 661000,
+      target: 600,
+      breakPlan: { count: 1, seconds: 60 },
+      segments: [
+        { start: 1000, end: 301000, kind: "focus" },
+        { start: 301000, end: 361000, kind: "break" },
+        { start: 361000, end: 661000, kind: "focus" },
+      ],
+      seconds: 600,
+    }, "server-secret");
+    const early = experimentRecord({
+      ...session,
+      started: 1000,
+      ended: 331000,
+      target: 600,
+      breakPlan: { count: 1, seconds: 60 },
+      segments: [
+        { start: 1000, end: 301000, kind: "focus" },
+        { start: 301000, end: 331000, kind: "break" },
+      ],
+      seconds: 300,
+    }, "server-secret");
+
+    expect(completed).toMatchObject({ elapsedSeconds: 660, studyElapsedSeconds: 600,
+      breakSeconds: 60, plannedBreakSeconds: 60, completed: true });
+    expect(early).toMatchObject({ elapsedSeconds: 330, studyElapsedSeconds: 300,
+      breakSeconds: 30, plannedBreakSeconds: 60, completed: false });
+    const csv = experimentCsv([completed]);
+    expect(csv).toContain("study_elapsed_seconds");
+    expect(csv).toContain("planned_break_seconds");
+    expect(csv).toContain("break_seconds");
+  });
+
+  it("keeps only coarse device categories and treats legacy missing values explicitly", () => {
+    const current = experimentRecord({ ...session, deviceCategory: "tablet" }, "server-secret");
+    const legacy = experimentRecord(session, "server-secret");
+
+    expect(current.deviceCategory).toBe("tablet");
+    expect(legacy.deviceCategory).toBeNull();
+    expect(JSON.stringify(current)).not.toContain("userAgent");
+    const csv = experimentCsv([current]);
+    expect(csv).toContain("device_category");
+    expect(csv).toContain('"tablet"');
   });
 
   it("includes sanitized goals in CSV and escapes formula-leading values", () => {
