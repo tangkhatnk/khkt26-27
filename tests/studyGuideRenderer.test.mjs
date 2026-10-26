@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { StudyGuideArticle, StudyGuideInlineText } from '../src/adventure/StudyGuideRenderer.ts';
 import { createStudyGuideReviewState, hasPendingStudyGuide, reduceStudyGuideReview } from '../src/adventure/studyGuideReview.ts';
+
+const studyGuideStyles = readFileSync(new URL('../src/adventure/studyGuide.css', import.meta.url), 'utf8');
 
 function renderArticle(title, text) {
   return renderToStaticMarkup(createElement(StudyGuideArticle, { title, text }));
@@ -26,6 +29,113 @@ test('renders guide Markdown as readable article structure and typesets common c
   assert.match(html, /<msup>/);
   assert.match(html, /→/);
   assert.match(html, /<article class="study-guide__article" aria-label="Bản xem trước: Ôn tập quang hợp" tabindex="0">/);
+});
+
+test('repairs flattened AI headings, lists, tables, and worked steps for display only', () => {
+  const fence = String.fromCharCode(96).repeat(3);
+  const source = [
+    '## 2. Lý thuyết',
+    "Đạo hàm là một trong những khái niệm nền tảng của giải tích toán học. Để học tốt, ta sẽ đi qua các bước từ định nghĩa đến ứng dụng chuyên sâu. ### 1. Định nghĩa và ý nghĩa đạo hàm Cho hàm số $y=f(x)$ xác định trên khoảng mở chứa $x_0$. Đạo hàm của hàm số tại điểm $x_0$ là giới hạn hữu hạn (nếu có).",
+    "Quy tắc tính: - Đạo hàm hàm hằng: $(C)' = 0$. - Đạo hàm hàm lũy thừa: $(x^n)' = nx^{n-1}$.",
+    '',
+    '## 4. So sánh',
+    "Khi học giải tích, ta thường phân biệt rõ hai khái niệm có liên quan mật thiết nhưng khác bản chất là Đạo hàm và Vi phân. | Tiêu chí | Đạo hàm | Vi phân |||---|---|---|| Ký hiệu | $f'(x)$ hoặc $dy/dx$ | $dy = f'(x)dx$ || Bản chất | Đại lượng vô hướng (tốc độ thay đổi tức thời) | Đại lượng tuyến tính xấp xỉ số gia của hàm số || Vai trò | Xác định tính đồng biến, nghịch biến, cực trị | Ước lượng sai số, tính toán gần đúng |",
+    '',
+    '## 5. Ví dụ minh họa',
+    'Xét bài toán tìm phương trình tiếp tuyến của đồ thị hàm số tại một điểm. Các bước giải chi tiết như sau: Bước 1: Tính giá trị tung độ của tiếp điểm. Thay điểm vào hàm số để tìm tung độ. Bước 2: Tính đạo hàm của hàm số để tìm hệ số góc. Bước 3: Thay hoành độ vào đạo hàm để tìm hệ số góc tiếp tuyến. Bước 4: Viết phương trình tiếp tuyến theo công thức.',
+    '',
+    `Inline ${String.fromCharCode(96)}### 8. literal - item | --- |${String.fromCharCode(96)} and $x_{n-1}$ stay inline.`,
+    `${fence}txt`,
+    '### 9. literal - item | --- |',
+    fence,
+  ].join('\n');
+  const aiHtml = renderToStaticMarkup(createElement(StudyGuideArticle, {
+    title: 'Đạo hàm', text: source, aiGenerated: true,
+  }));
+  const userHtml = renderArticle('Đạo hàm', source);
+
+  assert.match(aiHtml, /<h4>1\. Định nghĩa và ý nghĩa đạo hàm<\/h4>/u);
+  assert.match(aiHtml, /<p>Cho hàm số/u);
+  assert.match(aiHtml, /<ul><li>Đạo hàm hàm hằng:/u);
+  assert.match(aiHtml, /<table>/u);
+  assert.match(aiHtml, /<th scope="col">Tiêu chí<\/th>/u);
+  assert.match(aiHtml, /<ol><li>Bước 1: Tính giá trị tung độ/u);
+  assert.match(aiHtml, /<code>### 8\. literal - item \| --- \|<\/code>/u);
+  assert.match(aiHtml, /<pre><code>### 9\. literal - item \| --- \|<\/code><\/pre>/u);
+  assert.match(aiHtml, /class="katex"/u);
+  assert.doesNotMatch(userHtml, /<h4>1\. Định nghĩa|<ul>|<table>|<ol>/u);
+  assert.match(source, /### 1\. Định nghĩa và ý nghĩa đạo hàm Cho hàm số/u);
+  assert.match(source, /\| Tiêu chí \| Đạo hàm \| Vi phân \|\|\|---/u);
+  const ambiguousTitle = renderToStaticMarkup(createElement(StudyGuideArticle, {
+    title: 'Đạo hàm', text: '## 2. Lý thuyết\nÝ nghĩa được trình bày như sau. ### 1. Ý nghĩa đạo hàm Đạo hàm mô tả tốc độ thay đổi của hàm số.', aiGenerated: true,
+  }));
+  assert.doesNotMatch(ambiguousTitle, /<h4>1\. Ý nghĩa đạo hàm/u);
+  assert.match(ambiguousTitle, /### 1\. Ý nghĩa đạo hàm Đạo hàm mô tả/u);
+});
+
+test('repairs lowercase and mixed-case flattened step labels without changing source text or ordinary prose', () => {
+  const source = '## 5. Ví dụ minh họa\nGiải lần lượt: bước 1: tính giá trị. bƯớC 2: thay vào công thức.\nTrong phần mô tả, từ bước này chỉ là lời văn; không phải nhãn bước 1.';
+  const original = source;
+  const html = renderToStaticMarkup(createElement(StudyGuideArticle, {
+    title: 'Ôn tập', text: source, aiGenerated: true,
+  }));
+
+  assert.match(html, /<p>Giải lần lượt:<\/p><ol><li>bước 1: tính giá trị\.<\/li><li>bƯớC 2: thay vào công thức\.<\/li><\/ol>/u);
+  assert.match(html, /Trong phần mô tả, từ bước này chỉ là lời văn; không phải nhãn bước 1\./u);
+  assert.equal(source, original);
+});
+
+test('renders typed study-guide illustrations as accessible app-owned primitives', () => {
+  const illustrations = [
+    {
+      kind: 'coordinate-plot', afterSection: 'theory', title: 'Đạo hàm tại một điểm',
+      description: 'Đường tiếp tuyến biểu diễn tốc độ thay đổi tại điểm được chọn.',
+      xAxis: { label: 'Thời gian phản ứng khi điều chỉnh nồng độ dung dịch', min: -2, max: 2 },
+      yAxis: { label: 'Số lượng sản phẩm tạo thành sau thời điểm quan sát', min: -2, max: 3 },
+      series: [{ label: 'Quá trình tạo sản phẩm theo điều kiện thay đổi', points: [[-2, 2], [-1, -1], [0, 0], [1, 1], [2, 2]] }],
+      markers: [{ x: 1, y: 1, label: 'Thời điểm phản ứng đạt trạng thái cân bằng đã được ước tính' }],
+    },
+    {
+      kind: 'sequence', afterSection: 'examples', title: 'Các bước giải',
+      description: 'Thực hiện theo thứ tự.',
+      steps: [{ label: 'Tính giá trị', detail: 'Thay hoành độ vào hàm số.' }, { label: 'Tính hệ số góc' }],
+    },
+  ];
+  const html = renderToStaticMarkup(createElement(StudyGuideArticle, {
+    title: 'Đạo hàm', text: '## 2. Lý thuyết\nĐạo hàm mô tả tốc độ thay đổi.\n\n## 5. Ví dụ minh họa\nTìm tiếp tuyến.', aiGenerated: true, illustrations,
+  }));
+
+  assert.match(html, /<figure class="study-guide__illustration study-guide__illustration--plot">/u);
+  assert.match(html, /<svg[^>]+role="img"[^>]+aria-label="Đạo hàm tại một điểm/u);
+  assert.match(html, /<polyline/u);
+  assert.match(html, /class="study-guide__diagram-legend"/u);
+  assert.match(html, /Thời gian phản ứng khi điều chỉnh nồng độ dung dịch/u);
+  assert.match(html, /Số lượng sản phẩm tạo thành sau thời điểm quan sát/u);
+  assert.match(html, /Quá trình tạo sản phẩm theo điều kiện thay đổi/u);
+  assert.match(html, /Thời điểm phản ứng đạt trạng thái cân bằng đã được ước tính/u);
+  const svg = html.slice(html.indexOf('<svg'), html.indexOf('</svg>') + '</svg>'.length);
+  assert.doesNotMatch(svg, /Thời gian phản ứng|Số lượng sản phẩm|Quá trình tạo sản phẩm|Thời điểm phản ứng đạt trạng thái/u);
+  assert.match(svg, /class="study-guide__plot-label">1<\/text>/u);
+  assert.match(html, /<figure class="study-guide__illustration study-guide__illustration--sequence">/u);
+  assert.match(html, /<ol role="list"><li><span class="study-guide__sequence-number" aria-hidden="true">01<\/span><strong>Tính giá trị<\/strong>/u);
+  assert.doesNotMatch(html, /<script\b|<img\b|<path\b/u);
+  const repeated = renderToStaticMarkup(createElement('div', null,
+    createElement(StudyGuideArticle, { title: 'Đạo hàm', text: 'Nội dung.', aiGenerated: true, illustrations: [illustrations[0]] }),
+    createElement(StudyGuideArticle, { title: 'Đạo hàm', text: 'Nội dung.', aiGenerated: true, illustrations: [illustrations[0]] })));
+  const descriptionIds = [...repeated.matchAll(/<desc id="([^"]+)"/gu)].map(match => match[1]);
+  assert.equal(descriptionIds.length, 2);
+  assert.equal(new Set(descriptionIds).size, 2);
+});
+
+test('gives each plot series a distinct dark-theme stroke and legend color', () => {
+  const palette = ['#6bc4df', '#d39be0', '#f0a978'];
+
+  palette.forEach((color, index) => {
+    assert.ok(studyGuideStyles.includes(`html[data-theme="dark"] .adventure .study-guide__plot-series--${index} { stroke: ${color}; }`));
+    assert.ok(studyGuideStyles.includes(`html[data-theme="dark"] .adventure .study-guide__legend-swatch--${index} { background: ${color}; }`));
+  });
+  const mobileStyles = studyGuideStyles.split('@media (max-width: 600px)')[1];
+  assert.match(mobileStyles, /\.adventure \.study-guide__plot-label, \.adventure \.study-guide__plot-axis-label, \.adventure \.study-guide__plot-tick \{ font-size: 16px; \}/u);
 });
 
 test('keeps amino-acid charge signs separate from following bonds', () => {
@@ -161,6 +271,19 @@ test('switches between preview and editing without replacing the original editab
   assert.equal(edited.draft.text, `${draft.text}\nGhi chú riêng.`);
   assert.equal(preview.view, 'preview');
   assert.equal(preview.draft.text, `${draft.text}\nGhi chú riêng.`);
+});
+
+test('clears generated illustrations as soon as the draft Markdown changes', () => {
+  const draft = {
+    title: 'Ôn Toán', text: '## 2. Lý thuyết\nĐạo hàm là tốc độ thay đổi.',
+    illustrations: [{ kind: 'sequence', afterSection: 'theory', title: 'Các bước', description: 'Theo thứ tự.', steps: [{ label: 'Một' }, { label: 'Hai' }] }],
+  };
+  const generated = reduceStudyGuideReview(createStudyGuideReviewState(), { type: 'generated', draft });
+  const edited = reduceStudyGuideReview(generated, { type: 'edit-text', text: `${draft.text}\nGhi chú.` });
+
+  assert.equal(generated.draft.illustrations, draft.illustrations);
+  assert.equal(edited.draft.text, `${draft.text}\nGhi chú.`);
+  assert.equal(edited.draft.illustrations, undefined);
 });
 
 test('keeps generated guide confirmation pending across review changes and clears it only on explicit discard', () => {

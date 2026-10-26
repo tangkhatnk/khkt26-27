@@ -20,9 +20,22 @@ test('the downloaded guide preserves the user-edited content and its AI origin',
   assert.match(exported, /AI/);
   assert.match(studyGuideSource('guide-2', edited).text, /ti thể tạo ATP/);
 });
+test('an accepted guide keeps its typed illustrations beside the raw Markdown source', () => {
+  const illustrations = [{ kind: 'sequence', afterSection: 'examples', title: 'Các bước', description: 'Theo thứ tự.', steps: [{ label: 'Một' }, { label: 'Hai' }] }];
+  const source = studyGuideSource('guide-illustrated', { ...draft, illustrations });
+
+  assert.equal(source.text, draft.text);
+  assert.deepEqual(source.illustrations, illustrations);
+  assert.match(studyGuideDownload({ ...draft, illustrations }), /Cấu trúc tế bào/);
+  assert.doesNotMatch(studyGuideDownload({ ...draft, illustrations }), /Các bước|Theo thứ tự/u);
+});
 test('blank and oversized edited guides cannot be accepted or downloaded', () => {
   for (const value of [{title:'',text:draft.text}, {title:draft.title,text:' '}, {title:draft.title,text:'a'.repeat(20001)}]) {
     assert.throws(() => studyGuideSource('guide-3', value));
     assert.throws(() => studyGuideDownload(value));
   }
+  assert.throws(() => studyGuideSource('guide-4', {
+    ...draft,
+    illustrations: [{ kind: 'sequence', afterSection: 'theory', title: 'Các bước', description: 'Theo thứ tự.', steps: [{ label: 'Một' }] }],
+  }), /Hình minh họa/u);
 });

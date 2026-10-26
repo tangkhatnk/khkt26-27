@@ -48,6 +48,34 @@
 .adventure .study-guide__article blockquote { margin: 14px 0; padding: 4px 14px; border-left: 3px solid #a7bca1; color: #52675a; }
 .adventure .study-guide__article hr { border: 0; border-top: 1px solid #d7e0d3; }
 .adventure .study-guide__table-wrap { max-width: 100%; overflow-x: auto; margin: 16px 0 22px; }
+.adventure .study-guide__illustration { min-width: 0; margin: 18px 0 22px; padding: 14px 16px; border: 1px solid #d7e0d3; border-radius: 12px; background: #f8faf5; }
+.adventure .study-guide__illustration figcaption { margin-bottom: 10px; }
+.adventure .study-guide__illustration figcaption strong { display: block; }
+.adventure .study-guide__illustration figcaption p { margin: 3px 0 0; color: #52675a; font-size: .92em; }
+.adventure .study-guide__illustration--sequence ol { margin: 0; padding: 0; list-style: none; }
+.adventure .study-guide__illustration--sequence li { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 0 10px; margin: 0; padding: 0 0 15px; min-width: 0; }
+.adventure .study-guide__illustration--sequence li:not(:last-child)::after { position: absolute; top: 28px; bottom: 0; left: 13px; width: 2px; background: #a9bfa5; content: ""; }
+.adventure .study-guide__sequence-number { z-index: 1; grid-column: 1; grid-row: 1 / span 2; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #7d9b79; border-radius: 50%; background: #edf3e9; color: #315b40; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.adventure .study-guide__illustration--sequence li strong { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.adventure .study-guide__illustration--sequence li .study-guide__sequence-detail { grid-column: 2; min-width: 0; color: #52675a; overflow-wrap: anywhere; }
+.adventure .study-guide__plot-wrap { width: 100%; min-width: 0; }
+.adventure .study-guide__plot-wrap svg { display: block; width: 100%; height: auto; overflow: hidden; }
+.adventure .study-guide__plot-grid { stroke: #dce5dc; stroke-width: 1; }
+.adventure .study-guide__plot-axis { stroke: #687b6d; stroke-width: 1.4; }
+.adventure .study-guide__plot-series { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.adventure .study-guide__plot-marker { fill: #fffefa; stroke: #6c4f22; stroke-width: 2; }
+.adventure .study-guide__plot-label, .adventure .study-guide__plot-axis-label { fill: #35483a; font-size: 12px; }
+.adventure .study-guide__plot-tick { fill: #687b6d; font-size: 10px; }
+.adventure .study-guide__plot-axis-names { display: grid; gap: 2px; min-width: 0; margin-top: 5px; }
+.adventure .study-guide__plot-axis-names p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.adventure .study-guide__diagram-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 0; padding: 0; list-style: none; font-size: .88em; }
+.adventure .study-guide__diagram-legend li { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; max-width: 100%; margin: 0; overflow-wrap: anywhere; }
+.adventure .study-guide__legend-swatch { width: 12px; height: 3px; border-radius: 2px; }
+.adventure .study-guide__legend-swatch--0 { background: #176b87; }
+.adventure .study-guide__legend-swatch--1 { background: #8b4d9b; }
+.adventure .study-guide__legend-swatch--2 { background: #b45b27; }
+.adventure .study-guide__plot-marker-number { flex: 0 0 auto; display: inline-grid; place-items: center; width: 17px; height: 17px; border: 1px solid #8d744b; border-radius: 50%; font-size: 10px; line-height: 1; }
+.adventure .study-guide__illustration-note { margin: 10px 0 0 !important; color: #66736a; font-size: .82em !important; line-height: 1.45 !important; }
 .adventure .study-guide__article table { width: 100%; border-collapse: collapse; text-align: left; }
 .adventure .study-guide__article th, .adventure .study-guide__article td { padding: 9px 12px; border: 1px solid #d7e0d3; vertical-align: top; }
 .adventure .study-guide__article th { background: #edf3e9; color: #315b40; }
@@ -71,10 +99,25 @@ html[data-theme="dark"] .adventure .study-guide__article blockquote { border-col
 html[data-theme="dark"] .adventure .study-guide__article hr { border-color: var(--line); }
 html[data-theme="dark"] .adventure .study-guide__article th, html[data-theme="dark"] .adventure .study-guide__article td { border-color: var(--line); color: var(--text); }
 html[data-theme="dark"] .adventure .study-guide__article th { background: var(--surface-raised); color: #d0e8d3; }
+html[data-theme="dark"] .adventure .study-guide__illustration { border-color: var(--line); background: var(--surface-raised); }
+html[data-theme="dark"] .adventure .study-guide__illustration figcaption p, html[data-theme="dark"] .adventure .study-guide__illustration--sequence li span, html[data-theme="dark"] .adventure .study-guide__illustration-note { color: var(--text-muted); }
+html[data-theme="dark"] .adventure .study-guide__illustration--sequence .study-guide__sequence-number { border-color: #839879; background: #355446; color: #eff5e8; }
+html[data-theme="dark"] .adventure .study-guide__illustration--sequence li:not(:last-child)::after { background: #66846c; }
+html[data-theme="dark"] .adventure .study-guide__plot-grid { stroke: #46554a; }
+html[data-theme="dark"] .adventure .study-guide__plot-axis { stroke: #a8b7a9; }
+html[data-theme="dark"] .adventure .study-guide__plot-label, html[data-theme="dark"] .adventure .study-guide__plot-axis-label { fill: #e4ede4; }
+html[data-theme="dark"] .adventure .study-guide__plot-tick { fill: #aab7aa; }
+html[data-theme="dark"] .adventure .study-guide__plot-series--0 { stroke: #6bc4df; }
+html[data-theme="dark"] .adventure .study-guide__plot-series--1 { stroke: #d39be0; }
+html[data-theme="dark"] .adventure .study-guide__plot-series--2 { stroke: #f0a978; }
+html[data-theme="dark"] .adventure .study-guide__legend-swatch--0 { background: #6bc4df; }
+html[data-theme="dark"] .adventure .study-guide__legend-swatch--1 { background: #d39be0; }
+html[data-theme="dark"] .adventure .study-guide__legend-swatch--2 { background: #f0a978; }
 @media (max-width: 600px) {
   .study-guide { padding: 16px; }
   .study-guide__generate { justify-self: stretch; }
   .study-guide__outline { grid-template-columns: 1fr; }
   .adventure .study-guide__article { padding: 16px; }
   .adventure .study-guide__article th, .adventure .study-guide__article td { padding: 7px 9px; }
+  .adventure .study-guide__plot-label, .adventure .study-guide__plot-axis-label, .adventure .study-guide__plot-tick { font-size: 16px; }
 }

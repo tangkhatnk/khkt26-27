@@ -44,8 +44,131 @@ function formatFractionTerm(term: string) {
   return Array.from(value).length > 1 ? `(${value})` : value;
 }
 
-/** Normalizes legacy AI-generated text for display without changing its saved source. */
-export const normalizeStudyGuideAiTextForDisplay = normalizeStudyGuideAiText;
+function splitExplicitHeadings(line: string, depth = 0): string {
+  if (depth >= 8) return line;
+  const markers = [...line.matchAll(/#{1,6}\s+\d+[.)]\s+/gu)];
+  const sentenceStarts = /(?:^|\s)(Cho|Khi|Nếu|Trong|Tại|Một|Với|Xét|Giả sử|Ta có|Để|Sau đó|Trước hết|Cần|Khi đó|Ví dụ)(?=\s|[,.:;!?])/gu;
+  const incompleteTitleEnds = new Set(["và", "của", "với", "trong", "tại", "cho", "đến", "những", "các", "một"]);
+  for (let index = 0; index < markers.length; index += 1) {
+    const marker = markers[index];
+    const markerStart = marker.index ?? 0;
+    const titleStart = markerStart + marker[0].length;
+    const tailEnd = markers[index + 1]?.index ?? line.length;
+    const tail = line.slice(titleStart, tailEnd);
+    let boundary: number | undefined;
+    for (const candidate of tail.matchAll(sentenceStarts)) {
+      const phraseStart = (candidate.index ?? 0) + candidate[0].lastIndexOf(candidate[1]);
+      const title = tail.slice(0, phraseStart).trim();
+      const titleWords = title.split(/\s+/u).filter(Boolean);
+      const lastWord = titleWords.at(-1)?.toLocaleLowerCase("vi");
+      if (title.length >= 18 && title.length <= 64 && titleWords.length >= 3 &&
+          !incompleteTitleEnds.has(lastWord ?? "") && tail.slice(phraseStart).trim().length >= 12) {
+        boundary = phraseStart;
+        break;
+      }
+    }
+
+    // Explicit terminal punctuation is recoverable only when the whole bounded
+    // marker segment is a short title; punctuation inside a long definition is not.
+    const shortTail = tail.trim();
+    if (boundary === undefined && shortTail.length <= 40 && /[?!.:]$/u.test(shortTail)) boundary = shortTail.length;
+    if (boundary === undefined || boundary <= 0) continue;
+
+    const title = tail.slice(0, boundary).trimEnd();
+    const before = line.slice(0, markerStart).trimEnd();
+    const after = line.slice(titleStart + boundary).trimStart();
+    return [before, `${marker[0].trimEnd()} ${title}`, ...(after ? [splitExplicitHeadings(after, depth + 1)] : [])]
+      .filter(Boolean).join("\n");
+  }
+  return line;
+}
+
+function splitConsecutiveSteps(line: string) {
+  const stepPattern = /(?:^|\s)(bước)\s+(\d+)\s*[:.)-]\s+/giu;
+  const matches = [...line.matchAll(stepPattern)];
+  if (matches.length < 2 || matches.some((match, index) => Number(match[2]) !== index + 1)) return line;
+  const starts = matches.map(match => (match.index ?? 0) + match[0].lastIndexOf(match[1]));
+  const prefix = line.slice(0, starts[0]).trimEnd();
+  const output = prefix ? [prefix] : [];
+  for (let index = 0; index < starts.length; index += 1) {
+    const end = starts[index + 1] ?? line.length;
+    output.push(`${index + 1}. ${line.slice(starts[index], end).trim()}`);
+  }
+  return output.join("\n");
+}
+
+function splitDashItems(line: string) {
+  const itemPattern = /(?:^|:\s+|[.!?;]\s+)([-+*])\s+/gu;
+  const matches = [...line.matchAll(itemPattern)];
+  if (matches.length < 2) return line;
+  const starts = matches.map(match => (match.index ?? 0) + match[0].lastIndexOf(match[1]));
+  const prefix = line.slice(0, starts[0]).trimEnd();
+  if (prefix && !/[:.!?;]$/u.test(prefix)) return line;
+  const output = prefix ? [prefix] : [];
+  for (let index = 0; index < starts.length; index += 1) {
+    const end = starts[index + 1] ?? line.length;
+    output.push(line.slice(starts[index], end).trim());
+  }
+  return output.join("\n");
+}
+
+function normalizeCollapsedRow(segment: string) {
+  const cells = segment.trim().replace(/^\|/u, "").replace(/\|$/u, "").split("|").map(cell => cell.trim());
+  return `| ${cells.join(" | ")} |`;
+}
+
+function splitCollapsedTable(line: string) {
+  let attempts = 0;
+  for (let start = line.indexOf("|"); start >= 0; start = line.indexOf("|", start + 1)) {
+    if (attempts >= 16) break;
+    attempts += 1;
+    const suffix = line.slice(start);
+    const segments = suffix.split(/\|{2,}/u);
+    if (segments.length < 3) continue;
+    const rows = segments.map(normalizeCollapsedRow);
+    const headers = rows[0].trim().replace(/^\||\|$/gu, "").split("|");
+    if (headers.length < 2 || !/^\s*\|/u.test(rows[0]) || !/^\s*\|/u.test(rows[1]) ||
+        !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/u.test(rows[1])) continue;
+    const columnCount = headers.length;
+    if (rows.length < 3 || rows.slice(2).some(row => row.trim().replace(/^\||\|$/gu, "").split("|").length !== columnCount)) continue;
+    const prefix = line.slice(0, start).trimEnd();
+    return `${prefix ? `${prefix}\n` : ""}${rows.join("\n")}`;
+  }
+  return line;
+}
+
+function recoverFlattenedLine(line: string) {
+  const protectedSpans: string[] = [];
+  const sentinel = Array.from({ length: 16 }, (_, index) => String.fromCharCode(0xe100 + index))
+    .find(candidate => !line.includes(candidate));
+  if (!sentinel) return line;
+  const protectedLine = line.replace(/(`+[^`\n]*`+|\$\$[^$\n]*\$\$|(?<!\\)\$(?!\$)[^$\n]+(?<!\\)\$|\\\([^\n]*?\\\)|\\\[[^\n]*?\\\]|\\ce\s*\{[^}\n]*\})/gu,
+    span => `${sentinel}${protectedSpans.push(span) - 1}\uE101`);
+  const restore = (value: string) => value.replace(new RegExp(`${sentinel}(\\d+)\\uE101`, "gu"), (_match, index: string) => protectedSpans[Number(index)] ?? _match);
+  const headings = splitExplicitHeadings(protectedLine);
+  const recovered = headings.split("\n").map(part => splitCollapsedTable(splitDashItems(splitConsecutiveSteps(part)))).join("\n");
+  return restore(recovered);
+}
+
+/** Repairs only explicit high-confidence Markdown markers for AI display; saved text remains untouched. */
+export function normalizeStudyGuideAiTextForDisplay(value: string) {
+  const normalized = normalizeStudyGuideAiText(value);
+  let fence: { marker: "`" | "~"; length: number } | undefined;
+  return normalized.split("\n").map(line => {
+    const opening = line.match(/^[\t ]{0,3}(`{3,}|~{3,})/u)?.[1];
+    if (fence) {
+      const closing = opening && opening[0] === fence.marker && opening.length >= fence.length &&
+        /^[\t ]*(?=$)/u.test(line.slice(line.indexOf(opening) + opening.length));
+      if (closing) fence = undefined;
+      return line;
+    }
+    if (opening) {
+      fence = { marker: opening[0] as "`" | "~", length: opening.length };
+      return line;
+    }
+    return recoverFlattenedLine(line);
+  }).join("\n");
+}
 
 function mathParts(source: string): StudyGuideMathPart[] {
   let value = source.trim();

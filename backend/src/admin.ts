@@ -935,24 +935,6 @@ async function mutateAdminSession(
       afterState = { status: "removed", correctionVersion: nextOverride.version };
     }
 
-    const accountOwner = z.uuid().safeParse(session.userId);
-    if (accountOwner.success) {
-      const testerRows = await tx.$queryRaw<{ session_id: string }[]>`
-        SELECT session_id::text FROM tester_runs
-        WHERE user_id = ${accountOwner.data}::uuid AND session_id = ${sessionId}::uuid AND withdrawn_at IS NULL
-        FOR UPDATE`;
-      if (action === "correction" && testerRows.length > 0) {
-        const metrics = projectSessionMetrics(session, nextOverride).effectiveMetrics;
-        // The legacy tester_runs elapsed column is target-capped; public responses use the
-        // shared session projection so actual rest time remains visible without rewriting raw time.
-        await tx.$executeRaw`
-          UPDATE tester_runs SET topic = ${projectSessionMetrics(session, nextOverride).topic},
-            target_seconds = ${metrics.targetSeconds}, elapsed_seconds = ${Math.min(metrics.elapsedSeconds, metrics.targetSeconds)},
-            focused_seconds = ${metrics.focusedSeconds}, distractions = ${metrics.distractions}, completed = ${metrics.completed}
-          WHERE user_id = ${accountOwner.data}::uuid AND session_id = ${sessionId}::uuid AND withdrawn_at IS NULL`;
-      }
-    }
-
     world.sessionOverrides ??= {};
     world.sessionOverrides[sessionId] = nextOverride;
     world.revision = (world.revision ?? 0) + 1;
@@ -971,6 +953,7 @@ async function mutateAdminSession(
       },
     });
 
+    const accountOwner = z.uuid().safeParse(session.userId);
     return action === "removal"
       ? { id: sessionId, ownerId: session.userId, accountId: accountOwner.success ? session.userId : null,
           status: "removed" as const, correctionVersion: nextOverride.version }

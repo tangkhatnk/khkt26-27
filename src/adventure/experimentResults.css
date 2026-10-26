@@ -96,11 +96,22 @@
   line-height: 1.5;
 }
 
-.experiment-results .experiment-completion-summary {
+.experiment-results .experiment-goal-summary {
   display: grid;
-  min-width: 170px;
-  gap: 4px;
+  min-width: 190px;
+  max-width: 320px;
+  gap: 6px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-goal-summary span:first-child {
+  color: #344b3e;
+}
+
+.experiment-results .experiment-goal-summary span:last-child {
+  color: #5d6c60;
+  font-size: 11px;
 }
 
 .experiment-results .experiment-time-summary,

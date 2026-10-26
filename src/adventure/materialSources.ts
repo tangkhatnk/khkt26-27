@@ -1,3 +1,5 @@
+import { isValidStudyGuideIllustrations, type StudyGuideIllustration } from "./studyGuideIllustrations.ts";
+
 /** Private, owner-scoped document content, independent from editable personal notes. */
 export type MaterialSource = {
   id: string;
@@ -8,6 +10,8 @@ export type MaterialSource = {
   reviewed: boolean;
   /** Explicitly reviewed combined text recovered from older saved imports. */
   covers?: string[];
+  /** Separate, unverified display aid attached only to AI-generated study guides. */
+  illustrations?: StudyGuideIllustration[];
 };
 export function createMaterialSource(id: string, result: {
   name: string; text: string; source?: string; quality?: string; status?: string;
@@ -20,6 +24,11 @@ export function reviewMaterialSource(source: MaterialSource, text: string): Mate
   if (text.trim().length < 10) throw new Error('Cần ít nhất 10 ký tự nội dung đã kiểm tra từ tài liệu.');
   if (text.length > 50000) throw new Error('Nguồn tài liệu vượt 50.000 ký tự. Hãy chọn phần cần học.');
   return {...source, text, reviewed: true};
+}
+export function editMaterialSourceText(source: MaterialSource, text: string): MaterialSource {
+  const updated = { ...source, text, reviewed: false };
+  delete updated.illustrations;
+  return updated;
 }
 export function quizSourceText(notes: string, sources: MaterialSource[] = [], materials: {name:string;sourceId?:string}[] = []): string | undefined {
   if (!materials.every(material => sources.some(source => (material.sourceId ? source.id === material.sourceId : source.name === material.name || source.covers?.includes(material.name))))) {
@@ -44,7 +53,8 @@ export function validMaterialSources(value: unknown): value is MaterialSource[] 
     source && typeof source === 'object' &&
     ['id','name','text','source'].every(key => typeof source[key] === 'string') &&
     source.text.length <= 50000 && (source.covers === undefined || (Array.isArray(source.covers) && source.covers.length <= 10 && source.covers.every((name: unknown) => typeof name === 'string'))) && typeof source.requiresReview === 'boolean' &&
-    typeof source.reviewed === 'boolean');
+    typeof source.reviewed === 'boolean' && (source.illustrations === undefined ||
+      (source.source === "ai-generated" && isValidStudyGuideIllustrations(source.illustrations))));
 }
 
 export function recoveredMaterialSource(notes: string, materials: {name:string}[]): MaterialSource {

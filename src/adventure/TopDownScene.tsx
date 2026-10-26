@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   SCENE_ENGINE_CENTER_X,
@@ -6,8 +6,9 @@ import {
   SCENE_WORLD_TILE_WIDTH,
   sceneMotionCanInterpolate,
   sceneMotionDistanceGapCanInterpolate,
-  sceneMotionInterpolationOffsets,
   sceneMotionInterpolationDurationMs,
+  sceneMotionInterpolatedOffset,
+  sceneMotionRebaseOffset,
   sceneMotionForStudyElapsed,
   sceneStationScreenX,
   sceneStationWorldX,
@@ -149,9 +150,16 @@ export function TopDownScene({
     allowed: boolean;
     elapsedStudySeconds: number;
     worldDistance: number;
+    periodicOrigin: number;
     viewportWorldWidth: number;
     animationFrame: "a" | "b";
-    animation: { active: boolean; fromOffset: number; toOffset: number; durationMs: number };
+    animation: {
+      active: boolean;
+      fromOffset: number;
+      toOffset: number;
+      durationMs: number;
+      startedAt: number | null;
+    };
   } | null>(null);
   const previousSample = previousMotionSample.current;
   const hasNewElapsedSample = Boolean(
@@ -185,7 +193,19 @@ export function TopDownScene({
   );
   const worldInterpolate = canStartWorldAnimation || canPreserveWorldAnimation;
   const animationOffsets = canStartWorldAnimation && previousSample
-    ? sceneMotionInterpolationOffsets(previousSample.worldDistance, worldDistance, periodicOrigin)
+    ? (() => {
+        const renderedOffset = previousSample.animation.active
+          ? sceneMotionInterpolatedOffset(previousSample.animation, performance.now())
+          : previousSample.periodicOrigin - previousSample.worldDistance;
+        return {
+          fromOffset: sceneMotionRebaseOffset(
+            renderedOffset,
+            previousSample.periodicOrigin,
+            periodicOrigin,
+          ),
+          toOffset: periodicOrigin - worldDistance,
+        };
+      })()
     : canPreserveWorldAnimation && previousSample
       ? previousSample.animation
       : { fromOffset: periodicOffset, toOffset: periodicOffset };
@@ -194,11 +214,17 @@ export function TopDownScene({
     : canPreserveWorldAnimation && previousSample
       ? previousSample.animation.durationMs
       : 0;
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const animationStartedAt = canStartWorldAnimation
+      ? performance.now()
+      : canPreserveWorldAnimation && previousSample
+        ? previousSample.animation.startedAt
+        : null;
     previousMotionSample.current = {
       allowed: cameraMotionAllowed,
       elapsedStudySeconds,
       worldDistance,
+      periodicOrigin,
       viewportWorldWidth: viewBoxWidth,
       animationFrame: worldAnimationFrame,
       animation: {
@@ -206,13 +232,18 @@ export function TopDownScene({
         fromOffset: animationOffsets.fromOffset,
         toOffset: animationOffsets.toOffset,
         durationMs: worldAnimationDurationMs,
+        startedAt: animationStartedAt,
       },
     };
   }, [
     animationOffsets.fromOffset,
     animationOffsets.toOffset,
+    canPreserveWorldAnimation,
+    canStartWorldAnimation,
     cameraMotionAllowed,
     elapsedStudySeconds,
+    periodicOrigin,
+    previousSample,
     viewBoxWidth,
     worldAnimationDurationMs,
     worldAnimationFrame,

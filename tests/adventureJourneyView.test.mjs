@@ -13,7 +13,6 @@ let BoardingTicket;
 let JourneyView;
 let tripSceneTiming;
 let StudyGuideComposer;
-let ExperimentShareMineStatus;
 let QuizPanel;
 let SessionCorrectionNotice;
 
@@ -28,7 +27,6 @@ before(async () => {
   ({ BoardingTicket } = await vite.ssrLoadModule("/src/adventure/BoardingTicket.tsx"));
   ({ JourneyView } = await vite.ssrLoadModule("/src/adventure/JourneyView.tsx"));
   ({ StudyGuideComposer } = await vite.ssrLoadModule("/src/adventure/StudyGuideComposer.tsx"));
-  ({ ExperimentShareMineStatus } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
   ({ QuizPanel } = await vite.ssrLoadModule("/src/adventure/QuizPanel.tsx"));
   ({ SessionCorrectionNotice } = await vite.ssrLoadModule("/src/adventure/SessionCorrectionNotice.tsx"));
   ({ tripSceneTiming } = await vite.ssrLoadModule("/src/adventure/focus.ts"));
@@ -90,18 +88,6 @@ test("pending AI guide review exposes a clearly primary confirmation and explici
   assert.match(markup, /<button class="primary"[^>]*>Xác nhận và dùng làm tài liệu<\/button>/u);
   assert.match(markup, /Bản AI chưa là tài liệu/u);
   assert.match(markup, /Bỏ bản nháp AI/u);
-});
-
-test("unknown experiment publication state stays visible and offers a retry", () => {
-  const markup = renderToStaticMarkup(React.createElement(ExperimentShareMineStatus, {
-    status: "unknown",
-    disabled: false,
-    onRetry: () => {},
-  }));
-
-  assert.match(markup, /role="alert"/u);
-  assert.match(markup, /Chưa kiểm tra được phiên này đã công khai chưa/u);
-  assert.match(markup, /Thử kiểm tra lại/u);
 });
 
 test("quiz generation exposes a distinct primary action", () => {

@@ -60,7 +60,7 @@ function makeApp(client: PrismaClient, bootstrapIds: readonly string[]) {
     request.userId = authorization.slice("Bearer ".length);
   };
   adminRoutes(app, client, authenticate, bootstrapIds);
-  experimentRoutes(app, client, authenticate);
+  experimentRoutes(app, client);
   return app;
 }
 
@@ -96,20 +96,6 @@ async function holdAdventureState(client: PrismaClient) {
   const lockAcquired = new Promise<void>((resolve) => { acquired = resolve; });
   const transaction = client.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT state FROM adventure_state WHERE id = 1 FOR UPDATE`;
-    acquired();
-    await new Promise<void>((resolve) => { release = resolve; });
-  });
-  await lockAcquired;
-  return { release: () => release(), done: transaction };
-}
-
-async function holdTesterRun(client: PrismaClient, userId: string, sessionId: string) {
-  let release!: () => void;
-  let acquired!: () => void;
-  const lockAcquired = new Promise<void>((resolve) => { acquired = resolve; });
-  const transaction = client.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM tester_runs WHERE user_id = ${userId}::uuid
-      AND session_id = ${sessionId}::uuid FOR UPDATE`;
     acquired();
     await new Promise<void>((resolve) => { release = resolve; });
   });
@@ -222,6 +208,10 @@ describe("native PostgreSQL admin mutation and token locks", () => {
       headers: { authorization: `Bearer ${bootstrapId}` } });
     expect(detail.statusCode, detail.body).toBe(200);
     expect(detail.json().correctionVersion).toBe(1);
+    const history = await firstApp.inject({ url: "/api/v1/experiments?limit=100" });
+    const identity = tripIdentity(target.id, sessionId, config.JWT_SECRET);
+    const run = history.json().runs.find((candidate: { id: string }) => candidate.id === identity.id);
+    expect(run).toMatchObject({ topic: "history", correctionFlags: { topic: true } });
   });
 
   it("rolls back the correction when its append-only audit insert fails", async () => {
@@ -256,105 +246,21 @@ describe("native PostgreSQL admin mutation and token locks", () => {
     }
   });
 
-  it("keeps publication consistent when correction races it under the adventure-state lock", async () => {
+  it("admin removal suppresses the automatically listed trip", async () => {
     const target = await createUser();
     const sessionId = await seedSession(target.id);
-    const blocker = await holdAdventureState(secondDb);
-    const correction = firstApp.inject({
-      method: "PATCH", url: `/api/v1/admin/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${bootstrapId}` },
-      payload: { expectedVersion: 0, reason: "Native correction publication race", changes: { topic: "history" } },
-    });
-    const publication = secondApp.inject({
-      method: "POST", url: "/api/v1/experiments",
-      headers: { authorization: `Bearer ${target.id}` }, payload: { sessionId },
-    });
-    try {
-      await Promise.all([expectPending(correction), expectPending(publication)]);
-      await expectDatabaseLockWait("adventure_state", 2);
-    } finally {
-      blocker.release();
-    }
-    await blocker.done;
-    const [corrected, published] = await Promise.all([correction, publication]);
-    expect(corrected.statusCode, corrected.body).toBe(200);
-    expect(published.statusCode, published.body).toBe(200);
-    const publicPage = await firstApp.inject({ url: "/api/v1/experiments?limit=100" });
+    const before = await firstApp.inject({ url: "/api/v1/experiments?limit=100" });
     const identity = tripIdentity(target.id, sessionId, config.JWT_SECRET);
-    const run = publicPage.json().runs.find((candidate: { id: string }) => candidate.id === identity.id);
-    expect(run).toMatchObject({ topic: "history", correctionFlags: { topic: true } });
-    expect(await db.adminSessionActionAudit.count({ where: { session_id: sessionId } })).toBe(1);
-  });
-
-  it("never republishes a tombstoned trip when removal races publication", async () => {
-    const target = await createUser();
-    const sessionId = await seedSession(target.id);
-    const blocker = await holdAdventureState(secondDb);
-    const removal = firstApp.inject({
+    expect(before.json().runs.some((candidate: { id: string }) => candidate.id === identity.id)).toBe(true);
+    const removed = await firstApp.inject({
       method: "DELETE", url: `/api/v1/admin/sessions/${sessionId}`,
       headers: { authorization: `Bearer ${bootstrapId}` },
-      payload: { expectedVersion: 0, reason: "Native remove publication race" },
+      payload: { expectedVersion: 0, reason: "Native automatic-history tombstone" },
     });
-    const publication = secondApp.inject({
-      method: "POST", url: "/api/v1/experiments",
-      headers: { authorization: `Bearer ${target.id}` }, payload: { sessionId },
-    });
-    try {
-      await Promise.all([expectPending(removal), expectPending(publication)]);
-      await expectDatabaseLockWait("adventure_state", 2);
-    } finally {
-      blocker.release();
-    }
-    await blocker.done;
-    const [removed, published] = await Promise.all([removal, publication]);
     expect(removed.statusCode, removed.body).toBe(200);
-    expect([200, 410]).toContain(published.statusCode);
-    const identity = tripIdentity(target.id, sessionId, config.JWT_SECRET);
     const publicPage = await firstApp.inject({ url: "/api/v1/experiments?limit=100" });
     expect(publicPage.json().runs.some((candidate: { id: string }) => candidate.id === identity.id)).toBe(false);
-    const mine = await firstApp.inject({ url: "/api/v1/experiments/mine", headers: { authorization: `Bearer ${target.id}` } });
-    expect(mine.json()).not.toContainEqual({ sessionId });
-    const replay = await secondApp.inject({ method: "POST", url: "/api/v1/experiments",
-      headers: { authorization: `Bearer ${target.id}` }, payload: { sessionId } });
-    expect(replay.statusCode).toBe(410);
     expect(await db.adminSessionActionAudit.count({ where: { session_id: sessionId, action: "removal" } })).toBe(1);
-  });
-
-  it("keeps owner withdrawal effective when it races administrator removal", async () => {
-    const target = await createUser();
-    const sessionId = await seedSession(target.id);
-    const published = await firstApp.inject({ method: "POST", url: "/api/v1/experiments",
-      headers: { authorization: `Bearer ${target.id}` }, payload: { sessionId } });
-    expect(published.statusCode, published.body).toBe(200);
-    const blocker = await holdTesterRun(secondDb, target.id, sessionId);
-    const removal = firstApp.inject({
-      method: "DELETE", url: `/api/v1/admin/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${bootstrapId}` },
-      payload: { expectedVersion: 0, reason: "Native remove withdrawal race" },
-    });
-    const withdrawal = secondApp.inject({ method: "DELETE", url: `/api/v1/experiments/${sessionId}`,
-      headers: { authorization: `Bearer ${target.id}` } });
-    try {
-      await Promise.all([expectPending(removal), expectPending(withdrawal)]);
-      await expectDatabaseLockWait("tester_runs", 2);
-    } finally {
-      blocker.release();
-    }
-    await blocker.done;
-
-    const [removed, withdrawn] = await Promise.all([removal, withdrawal]);
-    expect(removed.statusCode, removed.body).toBe(200);
-    expect(withdrawn.statusCode, withdrawn.body).toBe(200);
-    const run = await db.testerRun.findUniqueOrThrow({
-      where: { user_id_session_id: { user_id: target.id, session_id: sessionId } },
-    });
-    expect(run.withdrawn_at).toBeInstanceOf(Date);
-    const identity = tripIdentity(target.id, sessionId, config.JWT_SECRET);
-    const publicPage = await firstApp.inject({ url: "/api/v1/experiments?limit=100" });
-    expect(publicPage.json().runs.some((candidate: { id: string }) => candidate.id === identity.id)).toBe(false);
-    const audit = await db.adminSessionActionAudit.findMany({ where: { session_id: sessionId } });
-    expect(audit).toHaveLength(1);
-    expect(audit[0].action).toBe("removal");
   });
 
   it("serializes session corrections with revocation of the acting administrator", async () => {
@@ -389,39 +295,6 @@ describe("native PostgreSQL admin mutation and token locks", () => {
     const rows = await db.$queryRaw<{ override: unknown }[]>`
       SELECT state->'sessionOverrides'->${sessionId} AS override FROM adventure_state WHERE id = 1`;
     expect(rows[0]?.override !== null).toBe(corrected.statusCode === 200);
-  });
-
-  it("keeps withdrawn tester runs withdrawn when a correction races owner withdrawal", async () => {
-    const target = await createUser();
-    const sessionId = await seedSession(target.id);
-    const published = await firstApp.inject({ method: "POST", url: "/api/v1/experiments",
-      headers: { authorization: `Bearer ${target.id}` }, payload: { sessionId } });
-    expect(published.statusCode, published.body).toBe(200);
-    const blocker = await holdTesterRun(secondDb, target.id, sessionId);
-    const correction = firstApp.inject({
-      method: "PATCH", url: `/api/v1/admin/sessions/${sessionId}`,
-      headers: { authorization: `Bearer ${bootstrapId}` },
-      payload: { expectedVersion: 0, reason: "Native correction withdrawal race", changes: { topic: "history" } },
-    });
-    const withdrawal = secondApp.inject({ method: "DELETE", url: `/api/v1/experiments/${sessionId}`,
-      headers: { authorization: `Bearer ${target.id}` } });
-    try {
-      await Promise.all([expectPending(correction), expectPending(withdrawal)]);
-      await expectDatabaseLockWait("tester_runs", 2);
-    } finally {
-      blocker.release();
-    }
-    await blocker.done;
-    const [corrected, withdrawn] = await Promise.all([correction, withdrawal]);
-    expect(corrected.statusCode, corrected.body).toBe(200);
-    expect(withdrawn.statusCode, withdrawn.body).toBe(200);
-    const run = await db.testerRun.findUnique({ where: { user_id_session_id: { user_id: target.id, session_id: sessionId } } });
-    expect(run?.withdrawn_at).toBeInstanceOf(Date);
-    const publicPage = await firstApp.inject({ url: "/api/v1/experiments?limit=100" });
-    const identity = tripIdentity(target.id, sessionId, config.JWT_SECRET);
-    expect(publicPage.json().runs.some((candidate: { id: string }) => candidate.id === identity.id)).toBe(false);
-    const mine = await firstApp.inject({ url: "/api/v1/experiments/mine", headers: { authorization: `Bearer ${target.id}` } });
-    expect(mine.json()).not.toContainEqual({ sessionId });
   });
 
   it("serializes two clients removing each other through admin_control FOR UPDATE", async () => {

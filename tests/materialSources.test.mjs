@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { quizSourceText, createMaterialSource, reviewMaterialSource } from '../src/adventure/materialSources.ts';
+import * as materialSources from '../src/adventure/materialSources.ts';
+const { quizSourceText, createMaterialSource, reviewMaterialSource, validMaterialSources } = materialSources;
 const result = (overrides={}) => ({name:'Vocabulary.pdf',text:'cater: phục vụ\nprinciple: nguyên lý',source:'local-ocr',quality:'needs-review',...overrides});
 test('clearing personal notes keeps the verified attached source as the quiz basis',()=>{
  const source=reviewMaterialSource(createMaterialSource('source-1',result()),'cater: phục vụ\nprinciple: nguyên lý');
@@ -27,4 +28,21 @@ test('a user-reviewed combined legacy source repairs multiple old file metadata 
 test('partial selectable text is not silently approved as a complete source',()=>{
  const partial=createMaterialSource('part',result({source:'embedded-text',quality:undefined,status:'truncated'}));
  assert.equal(partial.reviewed,false);assert.throws(()=>quizSourceText('',[partial],[{name:'Vocabulary.pdf'}]),/kiểm tra/);
+});
+test('editing an illustrated AI source clears its diagram metadata without adding it to quiz text',()=>{
+ const illustration={kind:'sequence',afterSection:'theory',title:'Các bước',description:'Theo thứ tự.',steps:[{label:'Một'},{label:'Hai'}]};
+ const source={...createMaterialSource('guide',result({source:'ai-generated',quality:'needs-review'})),illustrations:[illustration]};
+ assert.throws(()=>quizSourceText('',[source]),/kiểm tra/);
+ const reviewedSource={...source,reviewed:true};
+ assert.equal(typeof materialSources.editMaterialSourceText,'function');
+ const edited=materialSources.editMaterialSourceText(source,'Nội dung đã sửa để kiểm tra.');
+
+ assert.equal(edited.text,'Nội dung đã sửa để kiểm tra.');
+ assert.equal(edited.reviewed,false);
+ assert.equal(edited.illustrations,undefined);
+ assert.equal(quizSourceText('',[reviewedSource]),'--- Vocabulary.pdf ---\ncater: phục vụ\nprinciple: nguyên lý');
+ assert.equal(validMaterialSources([reviewedSource]),true);
+ assert.equal(validMaterialSources([{...reviewedSource,illustrations:[{...illustration,steps:[{label:'Một'}]}]}]),false);
+ assert.equal(validMaterialSources([{...reviewedSource,source:'local-ocr'}]),false);
+ assert.equal(validMaterialSources([{...reviewedSource,illustrations:[{...illustration,svg:'<svg />'}]}]),false);
 });

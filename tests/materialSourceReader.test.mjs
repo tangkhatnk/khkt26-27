@@ -80,3 +80,21 @@ test('formats old AI guides for display without changing their saved source or e
   assert.match(html, /class="msupsub"/);
   assert.equal(source.text, original);
 });
+
+test('renders saved AI-source illustrations without merging them into the editable source text', () => {
+  const illustration = {
+    kind: 'coordinate-plot', afterSection: 'theory', title: 'Đồ thị hàm số',
+    description: 'Mẫu điểm được nối bằng đường thẳng.',
+    xAxis: { label: 'x', min: -1, max: 1 }, yAxis: { label: 'y', min: -1, max: 1 },
+    series: [{ label: 'f(x)', points: [[-1, -1], [0, 0], [1, 1]] }],
+  };
+  const original = '## 2. Lý thuyết\nĐồ thị là công cụ trực quan.';
+  const html = renderToStaticMarkup(createElement(MaterialSourceReader, {
+    title: 'Toán học.txt', text: original, aiGenerated: true, illustrations: [illustration], onChange: () => {},
+  }));
+
+  assert.match(html, /Đồ thị hàm số/u);
+  assert.match(html, /<polyline/u);
+  assert.doesNotMatch(html, /<textarea\b/u);
+  assert.equal(original, '## 2. Lý thuyết\nĐồ thị là công cụ trực quan.');
+});

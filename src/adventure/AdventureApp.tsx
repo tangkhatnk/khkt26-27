@@ -22,9 +22,9 @@ import { TopDownScene } from "./TopDownScene";
 import { detectDeviceCategory } from "./device";
 import { explorationProgress } from "./exploration";
 import type { MaterialExtractionProgress } from "./materialExtraction";
-import { createMaterialSource, reviewMaterialSource, recoveredMaterialSource, type MaterialSource } from "./materialSources";
+import { createMaterialSource, editMaterialSourceText, reviewMaterialSource, recoveredMaterialSource, type MaterialSource } from "./materialSources";
 import { DurationPicker } from "./DurationPicker";
-import { ExperimentResults, ExperimentShare } from "./ExperimentResults";
+import { ExperimentResults } from "./ExperimentResults";
 import { QuizPanel } from "./QuizPanel";
 import { HomeTripForm } from "./HomeTripForm";
 import { updateQuickTripDraft, type QuickTripDraft } from "./quickTripDraft";
@@ -170,7 +170,6 @@ function AdventureWorkspace() {
     if (view === "admin" && !adminAccess.allowed && !adminAccess.checking)
       adminNoticeHeading.current?.focus({ preventScroll: true });
   }, [view, adminAccess.allowed, adminAccess.checking]);
-  const workspaceNav = adminAccess.allowed ? [...nav, { id: "admin", icon: "▥", label: "Quản trị" }] : nav;
   const lastLocalDay = useRef(localDayKey(now));
   const [goal, setGoal] = useState(""),
     [topic, setTopic] = useState("biology"),
@@ -1299,7 +1298,7 @@ function AdventureWorkspace() {
         </a>
         <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
         <nav aria-label="Điều hướng chính">
-          {workspaceNav.map((n) => (
+          {nav.map((n) => (
             <button
               key={n.id}
               className={view === n.id ? "nav active" : "nav"}
@@ -1338,7 +1337,7 @@ function AdventureWorkspace() {
           <span>
             Không gian học tập <span className="slash">/</span>{" "}
             <strong>
-              {workspaceNav.find((n) => n.id === view)?.label ??
+              {nav.find((n) => n.id === view)?.label ??
                 (
                   {
                     ticket: "Vé học",
@@ -1617,7 +1616,7 @@ function AdventureWorkspace() {
                       </div>
                       {sources.map((source) => <details className="material-source" key={source.id} open={!source.reviewed}>
                         <summary>{source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra nội dung"}</summary>
-                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} disabled={busy} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => setSources((items) => items.map((item) => item.id === source.id ? {...item,text,reviewed:false} : item))} />
+                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => setSources((items) => items.map((item) => item.id === source.id ? editMaterialSourceText(item, text) : item))} />
                         <div className="choice-row">
                           <MaterialSourceReviewButton disabled={busy || source.text.trim().length < 10} onClick={() => { try { const reviewed = reviewMaterialSource(source, source.text); setSources((items) => items.map((item) => item.id === source.id ? reviewed : item)); setError(""); } catch(e) { setError(e instanceof Error ? e.message : "Không xác nhận được tài liệu."); } }} />
                           {source.source !== "ai-generated" && <button disabled={busy || !originalFiles.current.has(source.id) || !/\.(pdf|png|jpe?g|webp)$/i.test(source.name)} onClick={() => void readHandwriting(source.id)}>Đọc bằng AI · gửi tệp này</button>}
@@ -1722,7 +1721,7 @@ function AdventureWorkspace() {
                           ? "Đóng góp được máy chủ xác nhận sau phiên, tối đa 60 phút/ngày theo múi giờ đoàn."
                           : "Tiến độ được giữ trong hành trình cá nhân của bạn."}
                       </p>
-                      <p className="material-hint">Chuyến chỉ xuất hiện trong Kết quả tester nếu bạn đăng nhập, đồng bộ và chủ động công khai từ tổng kết. Mục tiêu riêng, tài liệu và ghi chú vẫn được giữ riêng.</p>
+                      <p className="material-hint">Phiên đã lưu tự động xuất hiện trong lịch sử chung; nơi đó hiển thị tóm tắt mục tiêu tối đa 200 ký tự. Tránh ghi thông tin riêng tư vào mục tiêu.</p>
                       <button
                         className="primary"
                         disabled={
@@ -1748,8 +1747,8 @@ function AdventureWorkspace() {
                         </button>
                       )}
                       <details className="info-box trip-rules">
-                        <summary>Quy tắc chuyến đi & quyền riêng tư</summary>
-                        <p>Chỉ phiên đã đồng bộ mà bạn chủ động chọn công khai từ tổng kết mới xuất hiện trong Kết quả tester. Có thể cập nhật mức hoàn thành tự đánh giá hoặc rút từng phiên bất cứ lúc nào. Bảng công khai không hiển thị mục tiêu riêng, email tài khoản, tài liệu, lời giải hay câu trả lời chi tiết.</p>
+                        <summary>Quy tắc chuyến đi & dữ liệu lịch sử</summary>
+                        <p>Phiên đã lưu tự động xuất hiện trong lịch sử chung; tóm tắt mục tiêu tối đa 200 ký tự được hiển thị. Tránh ghi thông tin riêng tư vào mục tiêu. Lịch sử không gửi email, mã tài khoản, tài liệu hay câu trả lời chi tiết thành các trường riêng.</p>
                         <p>
                           Khi bạn rời cửa sổ, đồng hồ vẫn tiếp tục nhưng khoảng đó được ghi là
                           xao nhãng và không cộng vào thời gian học. Khi quay lại, phiên tiếp
@@ -1862,7 +1861,7 @@ function AdventureWorkspace() {
                         <MaterialSourceReader title="Nội dung ôn tập" text={active.document} />
                       </details>
                     )}
-                    {active.sources?.map((source) => <details className="panel study-notes" key={source.id}><summary>Nguồn tài liệu · {source.name}{!source.reviewed && " · chưa kiểm tra"}</summary><MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} /></details>)}
+                    {active.sources?.map((source) => <details className="panel study-notes" key={source.id}><summary>Nguồn tài liệu · {source.name}{!source.reviewed && " · chưa kiểm tra"}</summary><MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} /></details>)}
                     {!!active.materials?.length && <div className="panel material-list" aria-label="Tệp của phiên học">{active.materials.map((file, i) => <p key={`${i}:${file.name}`}><strong>{file.name}</strong> · {file.message}</p>)}</div>}
                   </>
                 ) : (
@@ -2339,7 +2338,7 @@ function AdventureWorkspace() {
                   <Heading
                     kicker="NHỮNG CHẶNG ĐƯỜNG ĐÃ QUA"
                     title="Nỗ lực của bạn, được giữ lại."
-                    text="Phiên ngắn hay dài đều có giá trị. Kết quả chỉ được công khai nếu bạn chủ động chọn chia sẻ từ tổng kết."
+                    text="Phiên ngắn hay dài đều có giá trị. Các phiên đã lưu tự động xuất hiện trong lịch sử chung."
                   />
                   {sessions.length ? (
                     <div className="session-list">
@@ -2487,11 +2486,11 @@ function AdventureWorkspace() {
                       {!!saved.materials?.[summarySession.id]?.length && !saved.sources?.[summarySession.id]?.length && <div className="info-box"><p>Tài liệu này được lưu bằng phiên bản cũ. Khôi phục bản chép đã lưu hoặc dán nội dung đúng, rồi xác nhận làm nguồn câu hỏi.</p><button onClick={() => {const value = current.current;if(value.summarySessionId !== summarySession.id) return;invalidateQuizForSourceEdit(owner, summarySession.id);commitRef.current({...value,sources:{...value.sources,[summarySession.id]:[recoveredMaterialSource(value.notes[summarySession.id] ?? "",value.materials?.[summarySession.id] ?? [])]},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});}}>Khôi phục / nhập bản chép tài liệu cũ</button></div>}
                       {(saved.sources?.[summarySession.id] ?? []).map((source) => <details className="material-source" key={source.id} open={!source.reviewed}>
                         <summary>Nguồn câu hỏi · {source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra"}</summary>
-                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} textareaLabel="Bản chép tài liệu" onChange={(text) => {
+                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} textareaLabel="Bản chép tài liệu" onChange={(text) => {
                           const value = current.current;
                           if(value.summarySessionId !== summarySession.id) return;
                           invalidateQuizForSourceEdit(owner, summarySession.id);
-                          commitRef.current({...value,sources:{...value.sources,[summarySession.id]:(value.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? {...item,text,reviewed:false} : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
+                          commitRef.current({...value,sources:{...value.sources,[summarySession.id]:(value.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? editMaterialSourceText(item, text) : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
                         }} />
                         <MaterialSourceReviewButton disabled={source.text.trim().length < 10} onClick={() => {try {
                           const value = current.current;
@@ -2518,28 +2517,23 @@ function AdventureWorkspace() {
                         onStartReview={() => startReviewTrip(summarySession)}
                       />
                     </section>
-                    {owner === "guest" ? <section className="panel experiment-share">
-                      <h2>Đóng góp kết quả thực nghiệm</h2>
-                      <p>Phiên khách không được công khai tự động. Hãy bắt đầu phiên sau khi đăng nhập; khi phiên được đồng bộ, bạn có thể chọn công khai từ tổng kết.</p>
+                    {owner === "guest" && <section className="panel">
+                      <h2>Lịch sử chuyến đi</h2>
+                      <p>Phiên học đã lưu sẽ xuất hiện tự động trong lịch sử chung sau khi đồng bộ với máy chủ.</p>
                       <p role={guestPublication[summarySession.id]?.status === "suppression-failed" ? "alert" : "status"}>{guestPublication[summarySession.id]?.status === "suppression-failed"
                         ? guestPublication[summarySession.id].message ?? "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại."
                         : saved.guestPublished?.includes(summarySession.id)
-                          ? "Bản lưu khách đã được máy chủ nhận; phiên này vẫn chưa được công khai."
+                          ? "Phiên khách đã được máy chủ lưu và sẽ xuất hiện trong lịch sử tự động."
                         : guestPublication[summarySession.id]?.status === "save-failed"
-                          ? "Máy chủ đã nhận bản lưu khách, nhưng thiết bị chưa lưu xác nhận. Phiên này vẫn chưa được công khai."
+                          ? "Máy chủ đã nhận bản lưu khách, nhưng thiết bị chưa lưu xác nhận. Hãy đồng bộ lại để cập nhật lịch sử."
                           : guestPublication[summarySession.id]?.status === "sending"
-                            ? "Đang lưu bản khách riêng; phiên này chưa được công khai."
+                            ? "Đang đồng bộ phiên đã lưu với máy chủ."
                             : guestPublication[summarySession.id]?.status === "failed"
-                              ? `Chuyến vẫn lưu trên thiết bị; chưa gửi được bản khách riêng. ${guestPublication[summarySession.id].message ?? ""}`
-                              : "Chuyến khách được lưu trên thiết bị; không tự động công khai."}</p>
-                    </section> : <ExperimentShare
-                      key={summarySession.id}
-                      sessionId={summarySession.id}
-                      canPublish={Boolean(user) && !needsLogin}
-                      sync={sync}
-                    />}
+                              ? `Chuyến vẫn lưu trên thiết bị; chưa đồng bộ được với máy chủ. ${guestPublication[summarySession.id].message ?? ""}`
+                              : "Phiên khách đã lưu trên thiết bị; lịch sử chung sẽ cập nhật sau khi đồng bộ."}</p>
+                    </section>}
                     <div className="choice-row">
-                      <button onClick={() => go("experiments")}>Xem kết quả tester →</button>
+                      <button onClick={() => go("experiments")}>Xem lịch sử chuyến đi →</button>
                       {owner !== "guest" && saved.pending.some(session => session.id === summarySession.id) &&
                         <button disabled={busy || !online || needsLogin} onClick={() => void run(sync)}>Thử đồng bộ lại</button>}
                     </div>
@@ -2603,10 +2597,10 @@ function AdventureWorkspace() {
                         “Đọc bằng AI” gửi riêng tệp gốc đã chọn tới Google Gemini để nhận diện chữ.
                         Dữ liệu học của tài khoản được lưu trên máy chủ; đoàn chỉ xem toa và tiến độ chung.
                       </p>
-                      <p>Chỉ phiên đã đăng nhập và đồng bộ mà bạn chủ động chọn công khai từ tổng kết mới xuất hiện trong Kết quả tester. Bạn có thể cập nhật mức hoàn thành tự đánh giá hoặc rút từng phiên. Mục tiêu riêng, email, tên tài khoản, tài liệu, lời giải và câu trả lời chi tiết không xuất hiện công khai.</p>
+                      <p>Phiên đã lưu tự động xuất hiện trong lịch sử chung; tóm tắt mục tiêu tối đa 200 ký tự được hiển thị. Tránh ghi thông tin riêng tư vào mục tiêu. Lịch sử không gửi email, mã tài khoản, tài liệu hay câu trả lời chi tiết thành các trường riêng.</p>
                       <p>
                         Ở chế độ khách, tiến độ và tài liệu được giữ trong trình duyệt này;
-                        chuyến khách không được công khai tự động.
+                        phiên khách xuất hiện trong lịch sử chung sau khi đồng bộ với máy chủ.
                         Xuất bản sao trước khi xóa dữ liệu trình duyệt.
                       </p>
                       <p>Tên tài khoản gần nhất được giữ trên thiết bị để mở lại phiên offline. Đăng xuất sẽ xóa thông tin này; mật khẩu và token không được lưu lâu dài.</p>

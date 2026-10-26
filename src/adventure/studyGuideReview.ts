@@ -23,6 +23,11 @@ export function reduceStudyGuideReview(state: StudyGuideReviewState, action: Stu
     case "discard": return createStudyGuideReviewState();
     case "set-view": return { ...state, view: action.view };
     case "edit-title": return state.draft ? { ...state, draft: { ...state.draft, title: action.title } } : state;
-    case "edit-text": return state.draft ? { ...state, draft: { ...state.draft, text: action.text } } : state;
+    case "edit-text": {
+      if (!state.draft) return state;
+      const draft = { ...state.draft, text: action.text };
+      delete draft.illustrations;
+      return { ...state, draft };
+    }
   }
 }

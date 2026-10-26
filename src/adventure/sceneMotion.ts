@@ -126,6 +126,32 @@ export function sceneMotionInterpolationDurationMs(
   return Number.isFinite(delta) && delta > 0 ? delta * 1000 : 0;
 }
 
+/** Return the current offset of the linear CSS sample at a monotonic timestamp. */
+export function sceneMotionInterpolatedOffset(
+  animation: {
+    active: boolean;
+    fromOffset: number;
+    toOffset: number;
+    durationMs: number;
+    startedAt: number | null;
+  },
+  now: number,
+): number {
+  if (!animation.active || animation.startedAt === null || animation.durationMs <= 0) return animation.toOffset;
+  const elapsedMs = Number.isFinite(now) ? now - animation.startedAt : animation.durationMs;
+  const progress = Math.max(0, Math.min(1, elapsedMs / animation.durationMs));
+  return animation.fromOffset + (animation.toOffset - animation.fromOffset) * progress;
+}
+
+/** Re-express a rendered world offset after periodic scenery advances to another tile. */
+export function sceneMotionRebaseOffset(
+  offset: number,
+  previousPeriodicOrigin: number,
+  currentPeriodicOrigin: number,
+): number {
+  return offset + currentPeriodicOrigin - previousPeriodicOrigin;
+}
+
 /** Keep a single sampled camera step shorter than one periodic world tile. */
 export function sceneMotionDistanceGapCanInterpolate(previousDistance: number, currentDistance: number): boolean {
   const delta = currentDistance - previousDistance;

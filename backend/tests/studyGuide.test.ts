@@ -72,12 +72,18 @@ describe("prompt-generated study guide", () => {
     expect(request.model).toBe(config.GEMINI_MODEL);
     expect(request.config.responseMimeType).toBe("application/json");
     expect(request.config.responseJsonSchema).toEqual(studyGuideProviderResponseJsonSchema);
+    expect(request.config.maxOutputTokens).toBe(16_000);
     expect(request.config.systemInstruction).toBe(STUDY_GUIDE_SYSTEM_INSTRUCTION);
     expect(request.config.systemInstruction).toMatch(/không.*trích dẫn.*bịa|không.*bịa.*trích dẫn/iu);
     expect(request.config.systemInstruction).toMatch(/gia sư|người hướng dẫn/iu);
     expect(request.config.systemInstruction).toMatch(/từng bước|chia nhỏ|đoạn ngắn/iu);
     expect(request.config.systemInstruction).toMatch(/1\. Ý chính[\s\S]*2\. Lý thuyết[\s\S]*3\. Vai trò[\s\S]*4\. So sánh[\s\S]*5\. Ví dụ minh họa[\s\S]*6\. Nhầm lẫn thường gặp[\s\S]*7\. Câu hỏi thực tế[\s\S]*8\. Gợi ý đáp án/iu);
     expect(request.config.systemInstruction).toMatch(/theory là phần trọng tâm và chi tiết nhất/iu);
+    expect(request.config.systemInstruction).toMatch(/mỗi khối Markdown.*dòng riêng/iu);
+    expect(request.config.systemInstruction).toMatch(/mỗi hàng.*bảng.*dòng riêng/iu);
+    expect(request.config.systemInstruction).toMatch(/dùng danh sách đánh số Markdown.*mỗi bước trên dòng riêng/iu);
+    expect(request.config.systemInstruction).toMatch(/không gộp các câu “Bước 1: …, Bước 2: …” trong một đoạn/iu);
+    expect(request.config.systemInstruction).toMatch(/coordinate-plot.*đạo hàm.*sequence.*quy trình/iu);
     expect(request.config.systemInstruction).toMatch(/Tạo 3–5 cặp practice[\s\S]{0,240}trong cùng một đối tượng/iu);
     expect(request.config.systemInstruction).toMatch(/\$H_2O\$/u);
     expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
@@ -136,6 +142,32 @@ describe("prompt-generated study guide", () => {
     expect(result.text).toContain("| Chất | Vai trò |\n| --- | --- |\n| Oxy | Sản phẩm |");
     expect(result.text).not.toContain(`${backslash}n|`);
     expect(result.text.length).toBeLessThanOrEqual(20_000);
+  });
+
+  it("preserves line-separated provider blocks and returns typed illustrations outside the Markdown text", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    const illustrations = [{
+      kind: "sequence",
+      afterSection: "examples",
+      title: "Các bước giải",
+      description: "Làm theo thứ tự.",
+      steps: [{ label: "Tính giá trị" }, { label: "Tính hệ số góc" }],
+    }];
+    const structuredDraft = {
+      ...providerDraft,
+      theory: `${providerDraft.theory}\n\n### Định nghĩa\nĐạo hàm mô tả tốc độ thay đổi.\n\n- Xét giới hạn\n- So sánh tốc độ`,
+      comparison: `${providerDraft.comparison}\n\n| Tiêu chí | Đạo hàm | Vi phân |\n| --- | --- | --- |\n| Ký hiệu | $f'(x)$ | $dy$ |`,
+      examples: `${providerDraft.examples}\n\n1. Bước 1: Tính giá trị.\n2. Bước 2: Tính đạo hàm.`,
+      illustrations,
+    };
+    generateContent.mockResolvedValue({ text: JSON.stringify(structuredDraft) });
+
+    const result = await generateStudyGuide(input);
+
+    expect(result.text).toContain("### Định nghĩa\nĐạo hàm mô tả tốc độ thay đổi.");
+    expect(result.text).toContain("| Tiêu chí | Đạo hàm | Vi phân |\n| --- | --- | --- |\n| Ký hiệu | $f'(x)$ | $dy$ |");
+    expect(result.text).toContain("1. Bước 1: Tính giá trị.\n2. Bước 2: Tính đạo hàm.");
+    expect(result.illustrations).toEqual(illustrations);
   });
 
   it("rejects an empty trailing practice pair instead of guessing question-answer alignment", async () => {

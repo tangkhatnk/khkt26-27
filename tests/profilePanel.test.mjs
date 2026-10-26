@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
+import { readFile } from "node:fs/promises";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { tmpdir } from "node:os";
@@ -98,6 +99,17 @@ test("confirmed administrators get a clear opener while unconfirmed accounts get
   assert.match(unconfirmed, /Kiểm tra lại quyền/u);
   assert.match(unconfirmed, /Sao chép mã tài khoản/u);
   assert.doesNotMatch(unconfirmed, /Cấp quyền quản trị|Trở thành quản trị viên/u);
+});
+
+test("profile keeps the Admin route while the separate sidebar item is absent", async () => {
+  const app = await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8");
+  const sidebar = app.match(/<nav aria-label="Điều hướng chính">([\s\S]*?)<\/nav>/u)?.[1];
+
+  assert.ok(sidebar);
+  assert.match(sidebar, /\{nav\.map\(/u);
+  assert.doesNotMatch(sidebar, /admin|Quản trị/iu);
+  assert.match(app, /onOpenAdmin:\s*\(\)\s*=>\s*go\("admin"\)/u);
+  assert.match(app, /view === "admin" && \(adminAccess\.allowed/u);
 });
 
 test("guest profile keeps the supplied sign-in form and explains how to reach protected admin access", () => {
