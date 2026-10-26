@@ -6,7 +6,11 @@ vi.mock("@google/genai", async importOriginal => {
 });
 import { config } from "../src/config.js";
 import { generateStudyGuide, STUDY_GUIDE_SYSTEM_INSTRUCTION } from "../src/studyGuide.js";
-import { studyGuideProviderResponseJsonSchema } from "../src/studyGuideSchemas.js";
+import {
+  STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE,
+  STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE,
+  studyGuideProviderResponseJsonSchema,
+} from "../src/studyGuideSchemas.js";
 
 const input = {
   topic: "biology",
@@ -84,6 +88,13 @@ describe("prompt-generated study guide", () => {
     expect(request.config.systemInstruction).toMatch(/dùng danh sách đánh số Markdown.*mỗi bước trên dòng riêng/iu);
     expect(request.config.systemInstruction).toMatch(/không gộp các câu “Bước 1: …, Bước 2: …” trong một đoạn/iu);
     expect(request.config.systemInstruction).toMatch(/coordinate-plot.*đạo hàm.*sequence.*quy trình/iu);
+    expect(request.config.systemInstruction).toMatch(/illustrations.*mảng.*chuỗi JSON/iu);
+    expect(request.config.systemInstruction).toContain("{kind: sequence, afterSection, title, description, steps}");
+    expect(request.config.systemInstruction).toContain("{kind: coordinate-plot, afterSection, title, description, xAxis, yAxis, series}");
+    expect(request.config.systemInstruction).toContain(STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE);
+    expect(request.config.systemInstruction).toContain(STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE);
+    expect(request.config.systemInstruction).toMatch(/afterSection.*theory.*examples.*tối đa 192 điểm.*markers.*tối đa 8.*bỏ các khóa không áp dụng/iu);
+    expect(request.config.systemInstruction).toMatch(/trục.*[-−]1\.000\.000.*1\.000\.000.*min < max.*points.*trong khoảng của cả hai trục/iu);
     expect(request.config.systemInstruction).toMatch(/Tạo 3–5 cặp practice[\s\S]{0,240}trong cùng một đối tượng/iu);
     expect(request.config.systemInstruction).toMatch(/\$H_2O\$/u);
     expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
@@ -158,7 +169,7 @@ describe("prompt-generated study guide", () => {
       theory: `${providerDraft.theory}\n\n### Định nghĩa\nĐạo hàm mô tả tốc độ thay đổi.\n\n- Xét giới hạn\n- So sánh tốc độ`,
       comparison: `${providerDraft.comparison}\n\n| Tiêu chí | Đạo hàm | Vi phân |\n| --- | --- | --- |\n| Ký hiệu | $f'(x)$ | $dy$ |`,
       examples: `${providerDraft.examples}\n\n1. Bước 1: Tính giá trị.\n2. Bước 2: Tính đạo hàm.`,
-      illustrations,
+      illustrations: illustrations.map(value => JSON.stringify(value)),
     };
     generateContent.mockResolvedValue({ text: JSON.stringify(structuredDraft) });
 
@@ -168,6 +179,23 @@ describe("prompt-generated study guide", () => {
     expect(result.text).toContain("| Tiêu chí | Đạo hàm | Vi phân |\n| --- | --- | --- |\n| Ký hiệu | $f'(x)$ | $dy$ |");
     expect(result.text).toContain("1. Bước 1: Tính giá trị.\n2. Bước 2: Tính đạo hàm.");
     expect(result.illustrations).toEqual(illustrations);
+  });
+
+  it.each([
+    ["malformed illustration JSON", ["["]],
+    ["an illustration item over the byte limit", [" ".repeat(16 * 1024 + 1)]],
+    ["a non-array illustration value", JSON.stringify([STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE])],
+    ["a non-string illustration item", [{ kind: "sequence", title: "Không được tự bọc" }]],
+    ["an illustration rejected by the strict schema", [JSON.stringify({ kind: "sequence", title: "Thiếu trường bắt buộc" })]],
+  ])("rejects %s as invalid AI output", async (_name, illustrations) => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    generateContent.mockResolvedValue({ text: JSON.stringify({ ...providerDraft, illustrations }) });
+
+    await expect(generateStudyGuide(input)).rejects.toMatchObject({
+      status: 502,
+      kind: "invalid-ai-output",
+    });
+    expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an empty trailing practice pair instead of guessing question-answer alignment", async () => {

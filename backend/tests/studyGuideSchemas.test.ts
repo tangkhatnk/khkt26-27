@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE,
+  STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE,
+  parseStudyGuideProviderResponse,
   studyGuideProviderResponseJsonSchema,
   studyGuideProviderResponseSchema,
   studyGuideRequestSchema,
@@ -97,7 +100,60 @@ describe("study guide response contracts", () => {
     expect(studyGuideProviderResponseSchema.parse(providerResponse)).not.toHaveProperty("illustrations");
     expect(studyGuideResponseSchema.parse({ title: "Ôn tập", text, illustrations }).illustrations).toEqual(illustrations);
     expect(studyGuideResponseSchema.parse({ title: "Ôn tập", text })).not.toHaveProperty("illustrations");
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.type).toBe("array");
     expect(studyGuideProviderResponseJsonSchema.properties.illustrations.maxItems).toBe(3);
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.items.type).toBe("string");
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.description).toMatch(/mảng.*chuỗi JSON.*16 KiB/iu);
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.description).toMatch(/sequence.*steps.*2.*8.*coordinate-plot.*xAxis.*yAxis.*series/iu);
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.description).toMatch(/afterSection.*theory.*examples.*192.*markers.*8/iu);
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.description).toContain(STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE);
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.description).toContain(STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE);
+  });
+
+  it("decodes one JSON object per illustration string before applying the strict provider schema", () => {
+    const parsed = parseStudyGuideProviderResponse({
+      ...providerResponse,
+      illustrations: illustrations.map(value => JSON.stringify(value)),
+    });
+
+    expect(parsed.illustrations).toEqual(illustrations);
+    expect(parseStudyGuideProviderResponse(providerResponse)).not.toHaveProperty("illustrations");
+    expect(parseStudyGuideProviderResponse({
+      ...providerResponse,
+      illustrations: JSON.parse(STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE),
+    }).illustrations?.[0]?.kind).toBe("sequence");
+    expect(parseStudyGuideProviderResponse({
+      ...providerResponse,
+      illustrations: JSON.parse(STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE),
+    }).illustrations?.[0]?.kind).toBe("coordinate-plot");
+  });
+
+  it.each([
+    { name: "malformed JSON", value: ["["] },
+    { name: "a non-string item", value: [illustrations[0]] },
+    { name: "a non-array wire value", value: JSON.stringify(illustrations) },
+    { name: "more than three items", value: Array.from({ length: 4 }, () => JSON.stringify(illustrations[0])) },
+    { name: "an individual item over the UTF-8 byte limit", value: [" ".repeat(16 * 1024 + 1)] },
+    { name: "a diagram rejected by the strict union", value: [JSON.stringify({ ...illustrations[0], svg: "<svg/>" })] },
+  ])("rejects $name instead of dropping or wrapping provider data", ({ value }) => {
+    expect(() => parseStudyGuideProviderResponse({ ...providerResponse, illustrations: value })).toThrow();
+  });
+
+  it("rejects aggregate illustration JSON text over the UTF-8 byte limit", () => {
+    const encodedIllustration = JSON.stringify({
+      kind: "sequence",
+      afterSection: "theory",
+      title: "Đ".repeat(120),
+      description: "ế".repeat(240),
+      steps: Array.from({ length: 8 }, () => ({ label: "ậ".repeat(80), detail: "ừ".repeat(240) })),
+    });
+    expect(Buffer.byteLength(encodedIllustration, "utf8")).toBeLessThan(16 * 1024);
+    expect(Buffer.byteLength(encodedIllustration.repeat(2), "utf8")).toBeGreaterThan(16 * 1024);
+
+    expect(() => parseStudyGuideProviderResponse({
+      ...providerResponse,
+      illustrations: [encodedIllustration, encodedIllustration],
+    })).toThrow();
   });
 
   it.each([
