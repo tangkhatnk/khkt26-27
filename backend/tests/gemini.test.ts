@@ -128,6 +128,16 @@ describe("Gemini adapter", () => {
     expect(request.config.systemInstruction).toContain("không bù kiến thức ngoài tài liệu");
     expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
   });
+  it("asks the model to wrap math questions and options in supported inline delimiters", async () => {
+    config.GEMINI_API_KEY = "test-only-key";
+    generateContent.mockResolvedValue({ text: JSON.stringify([question]) });
+
+    await generateGeminiQuiz({ topic: "biology", count: 1 });
+
+    const instruction = generateContent.mock.calls[0][0].config.systemInstruction as string;
+    expect(instruction).toContain("nếu câu hỏi hoặc lựa chọn có biểu thức toán/TeX, hãy bọc biểu thức bằng $...$");
+    expect(instruction).toContain("giữ nguyên chữ hoa/thường và ký hiệu toán");
+  });
   it("keeps exact choice bounds without expanding the quiz array into fixed output bounds", () => {
     const schema = quizResponseSchema();
     expect(schema).toMatchObject({
@@ -372,7 +382,7 @@ describe("Gemini adapter", () => {
     await assertion;
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
-  it("bounds primary and fallback calls while leaving enough time for source repair", async () => {
+  it("uses exact 35/40 second provider budgets and leaves fifteen seconds for source repair", async () => {
     vi.useFakeTimers();
     config.GEMINI_API_KEY = "test-only-key";
     config.GEMINI_MODEL = "gemini-primary";
@@ -389,24 +399,28 @@ describe("Gemini adapter", () => {
       topic: "biology", documentAttached: true, documentText: sourceText, count: 1,
     });
     await Promise.resolve();
-    expect(generateContent.mock.calls[0][0].config.httpOptions.timeout).toBeLessThanOrEqual(55_000);
-    await vi.advanceTimersByTimeAsync(55_000);
+    const signal = generateContent.mock.calls[0][0].config.abortSignal;
+    const primaryBudget = generateContent.mock.calls[0][0].config.httpOptions.timeout;
+    await vi.advanceTimersByTimeAsync(35_000);
     rejectPrimary({ status: 503, message: JSON.stringify({ error: { status: "UNAVAILABLE" } }) });
     await Promise.resolve();
     await Promise.resolve();
 
     expect(generateContent.mock.calls[1][0].model).toBe("gemini-fallback");
-    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBeLessThanOrEqual(20_000);
-    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBeGreaterThanOrEqual(11_000);
-    await vi.advanceTimersByTimeAsync(20_000);
+    const fallbackBudget = generateContent.mock.calls[1][0].config.httpOptions.timeout;
+    expect(generateContent.mock.calls[1][0].config.abortSignal).toBe(signal);
+    await vi.advanceTimersByTimeAsync(40_000);
     resolveFallback({ text: JSON.stringify([unsupported]) });
     await Promise.resolve();
     await Promise.resolve();
 
     expect(generateContent).toHaveBeenCalledTimes(3);
-    expect(generateContent.mock.calls[2][0].config.httpOptions.timeout).toBeLessThanOrEqual(15_000);
-    expect(generateContent.mock.calls[2][0].config.httpOptions.timeout).toBeGreaterThanOrEqual(11_000);
+    const repairBudget = generateContent.mock.calls[2][0].config.httpOptions.timeout;
+    expect(generateContent.mock.calls[2][0].config.abortSignal).toBe(signal);
     expect(await operation).toEqual([groundedQuestion]);
+    expect(primaryBudget).toBe(35_000);
+    expect(fallbackBudget).toBe(40_000);
+    expect(repairBudget).toBe(15_000);
     expect(generateContent).toHaveBeenCalledTimes(3);
   });
   it("reports insufficiency only after a second empty response and explains the requested count could not be grounded", async () => {
@@ -476,7 +490,7 @@ describe("Gemini adapter", () => {
     await expect(generateGeminiQuiz({ topic: "biology", count: 1 })).resolves.toEqual([question]);
     expect(generateContent).toHaveBeenCalledTimes(2);
     expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual(["gemini-primary", "gemini-fallback"]);
-    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBe(20_000);
+    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBe(40_000);
     expect(generateContent.mock.calls[0][0].config.abortSignal).toBe(generateContent.mock.calls[1][0].config.abortSignal);
   });
   it("does not make more than one fallback attempt when both models are overloaded", async () => {
@@ -597,9 +611,9 @@ describe("Gemini adapter", () => {
     const assertion = expect(operation).rejects.toMatchObject({ status: 504, kind: "upstream-timeout" });
     await Promise.resolve();
     const signal = generateContent.mock.calls[0][0].config.abortSignal;
-    expect(generateContent.mock.calls[0][0].config.httpOptions.timeout).toBe(55_000);
+    const primaryBudget = generateContent.mock.calls[0][0].config.httpOptions.timeout;
 
-    await vi.advanceTimersByTimeAsync(55_000);
+    await vi.advanceTimersByTimeAsync(35_000);
     rejectPrimary({ status: 503, message: JSON.stringify({ error: { status: "UNAVAILABLE" } }) });
     await Promise.resolve();
     await Promise.resolve();
@@ -607,10 +621,10 @@ describe("Gemini adapter", () => {
 
     expect(generateContent).toHaveBeenCalledTimes(2);
     expect(generateContent.mock.calls[1][0].model).toBe("gemini-fallback");
-    expect(generateContent.mock.calls[1][0].config.httpOptions.timeout).toBe(20_000);
+    const fallbackBudget = generateContent.mock.calls[1][0].config.httpOptions.timeout;
     expect(generateContent.mock.calls[1][0].config.abortSignal).toBe(signal);
 
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     resolveFallback({ text: "not json" });
     await Promise.resolve();
     await Promise.resolve();
@@ -626,6 +640,8 @@ describe("Gemini adapter", () => {
 
     await vi.advanceTimersByTimeAsync(15_000);
     await assertion;
+    expect(primaryBudget).toBe(35_000);
+    expect(fallbackBudget).toBe(40_000);
     expect(generateContent).toHaveBeenCalledTimes(3);
   });
   it("reserves the original deadline for one structured-output repair without source text", async () => {
