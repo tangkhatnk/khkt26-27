@@ -1863,6 +1863,7 @@ it("requires an authenticated owner to inspect a public summary share", async ()
   expect(foreignStatus.statusCode).toBe(404);
   const ownerStatus = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers });
   expect(ownerStatus.statusCode).toBe(200);
+  expect(ownerStatus.headers["cache-control"]).toBe("no-store");
   expect(ownerStatus.json()).toEqual({ summary: null, version: 0, approvedAt: null });
 });
 
@@ -1894,6 +1895,7 @@ it("publishes only the exact confirmed copy in public GET and never in CSV", asy
   expect(published.json()).toMatchObject({ summary, version: 1, approvedAt: expect.any(String) });
 
   const history = await app.inject({ url: "/api/v1/experiments" });
+  expect(history.headers["cache-control"]).toBe("no-store");
   const run = history.json().runs.find((row: { id: string }) => row.id === tripIdentity(userId, id, config.JWT_SECRET).id);
   expect(run.documentSummary).toBe(summary);
   for (const privateField of ["sourceId", "sourceText", "sourceName", "ownerId", "sessionId"])

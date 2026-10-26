@@ -80,7 +80,8 @@ export function publicMaterialSummaryRoutes(
   app.get("/api/v1/material-summaries/mine", {
     ...authenticated,
     config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
-  }, async (request) => {
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
     const { sessionId } = statusQuerySchema.parse(request.query);
     return db.$transaction(async (tx) => {
       await lockShareContext(tx, request.userId, sessionId, true, false);

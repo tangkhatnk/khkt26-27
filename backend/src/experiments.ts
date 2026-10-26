@@ -91,7 +91,8 @@ export function experimentRoutes(app: FastifyInstance, db: PrismaClient) {
       THEN (entry.value->>'ended')::bigint ELSE 0 END DESC, entry.key DESC
     LIMIT ${limit} OFFSET ${offset}`;
 
-  app.get("/api/v1/experiments", async req => {
+  app.get("/api/v1/experiments", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
     const { limit, offset } = z.object({
       limit: z.coerce.number().int().min(1).max(100).default(50),
       offset: z.coerce.number().int().min(0).max(100000).default(0),
