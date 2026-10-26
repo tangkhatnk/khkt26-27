@@ -65,7 +65,7 @@ test("history uses compact semantic columns while retaining every run detail", (
   const focusCells = [...markup.matchAll(/<div class="experiment-time-summary">([\s\S]*?)<\/div>/gu)].map(([, body]) => body);
   assert.equal(focusCells.length, 2);
   for (const cell of focusCells) {
-    assert.match(cell, /<strong>1 giờ 22 phút thực học<\/strong>/u);
+    assert.match(cell, /<strong>1 giờ 22 phút<\/strong>/u);
     assert.match(cell, /<span class="experiment-run-card__meta">Mục tiêu: 1 giờ 30 phút · 1 lượt nghỉ<\/span>/u);
     assert.equal((cell.match(/<span\b/gu) ?? []).length, 1);
     assert.doesNotMatch(cell, /tổng chuyến|dự kiến|giải lao/u);
@@ -158,7 +158,7 @@ test("history displays focused seconds and rounded efficiency as the only primar
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
     runs: [{ ...fixture, focusedSeconds: 46, studyElapsedSeconds: 60, targetSeconds: 120 }],
   }));
-  assert.equal((markup.match(/<strong>46 giây thực học<\/strong>/gu) ?? []).length, 2);
+  assert.equal((markup.match(/<strong>46 giây<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<strong>77%<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<span class="experiment-run-card__meta">Mục tiêu: 2 phút · 1 lượt nghỉ<\/span>/gu) ?? []).length, 2);
 });

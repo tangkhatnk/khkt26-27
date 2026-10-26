@@ -131,7 +131,7 @@ function RunDetails({ run }: { run: ExperimentRun }) {
 
 function JourneyTime({ run }: { run: ExperimentRun }) {
   return <div className="experiment-time-summary">
-    <strong>{formatExperimentDuration(run.focusedSeconds)} thực học</strong>
+    <strong>{formatExperimentDuration(run.focusedSeconds)}</strong>
     <span className="experiment-run-card__meta">Mục tiêu: {formatExperimentDuration(run.targetSeconds)} · {run.plannedBreakCount == null
       ? "Chưa ghi nhận lượt nghỉ"
       : `${run.plannedBreakCount} lượt nghỉ`}</span>
