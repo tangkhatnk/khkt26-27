@@ -517,6 +517,14 @@ html[data-theme="dark"] .adventure .experiment-goal small {
   color: #b4c9b5;
 }
 
+html[data-theme="dark"] .adventure .experiment-goal-summary span:first-child {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .experiment-goal-summary span:last-child {
+  color: var(--text-muted);
+}
+
 html[data-theme="dark"] .adventure .connection {
   color: #b9d0bd;
 }
