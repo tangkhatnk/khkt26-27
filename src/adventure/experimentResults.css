@@ -200,7 +200,7 @@
 
 .experiment-results .experiment-details dl > div {
   display: grid;
-  grid-template-columns: minmax(88px, auto) 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(8ch, 1fr);
   gap: 9px;
   align-items: baseline;
 }

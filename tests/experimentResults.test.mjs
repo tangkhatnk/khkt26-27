@@ -92,6 +92,21 @@ test("history uses compact semantic columns while retaining every run detail", (
   assert.match(markup, /<dt>Kết thúc \(giờ địa phương của bạn\)<\/dt><dd><time dateTime="2026-10-21T04:45:00\.000Z">[^<]*:\d{2}:\d{2}[^<]*<\/time>/u);
 });
 
+test("history details retain the full anonymous ID and the complete duration text", () => {
+  const fullAnonymousId = "0123456789abcdef".repeat(4);
+  const run = {
+    ...fixture,
+    id: fullAnonymousId,
+    targetSeconds: 15 * 60,
+    elapsedSeconds: 15 * 60,
+    studyElapsedSeconds: 15 * 60,
+  };
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [run] }));
+
+  assert.match(markup, new RegExp(`<dt>ID chuyến ẩn danh</dt><dd><code>${fullAnonymousId}</code></dd>`, "u"));
+  assert.match(markup, /<dt>Khoảng học đã diễn ra \(không tính nghỉ\)<\/dt><dd>15 phút<\/dd>/u);
+});
+
 test("history explains that saved sessions appear automatically and summarizes goal privacy", () => {
   const markup = renderToStaticMarkup(React.createElement(ExperimentResults));
 
