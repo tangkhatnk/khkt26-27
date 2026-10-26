@@ -12,6 +12,11 @@ import {
 type SnapshotSession = Snapshot["sessions"][number];
 export type SessionHistoryEntry = Session & Partial<Pick<SnapshotSession,
   "correctionVersion" | "effectiveMetrics" | "correctionFlags">>;
+export type MaterialSummaryCacheEntry = {
+  sourceFingerprint: string;
+  summary: string;
+  generatedAt: number;
+};
 export type Saved = {
   active: ActiveTrip | null;
   pending: Session[];
@@ -25,7 +30,10 @@ export type Saved = {
   removedSessionIds?: string[];
   quizDrafts?: Record<string, QuizDraft>;
   summarySessionId?: string;
+  materialSummaries?: Record<string, Record<string, MaterialSummaryCacheEntry>>;
 };
+export const MAX_MATERIAL_SUMMARY_CACHE_ENTRIES = 20;
+export const MAX_MATERIAL_SUMMARY_LENGTH = 4_000;
 /** A sync continuation may write only while its captured owner, auth identity, and workspace agree. */
 export function isCurrentOwnerWorkspace(
   expectedOwner: string,
@@ -114,6 +122,59 @@ function validCorrectionFlags(value: unknown) {
 }
 const validRemovedSessionIds = (value: unknown) => Array.isArray(value) &&
   value.every((id) => typeof id === "string" && id.length > 0) && new Set(value).size === value.length;
+function validMaterialSummaries(value: unknown): value is Saved["materialSummaries"] {
+  if (!record(value)) return false;
+  let entryCount = 0;
+  for (const [sessionId, sources] of Object.entries(value)) {
+    if (!sessionId || sessionId.length > 200 || !record(sources)) return false;
+    for (const [sourceId, entry] of Object.entries(sources)) {
+      entryCount++;
+      if (entryCount > MAX_MATERIAL_SUMMARY_CACHE_ENTRIES || !sourceId || sourceId.length > 200 ||
+          !record(entry) || typeof entry.sourceFingerprint !== "string" ||
+          Object.keys(entry).length !== 3 ||
+          !["sourceFingerprint", "summary", "generatedAt"].every((key) => key in entry) ||
+          !/^[0-9a-f]{64}$/u.test(entry.sourceFingerprint) ||
+          typeof entry.summary !== "string" || entry.summary.trim().length === 0 ||
+          entry.summary.length > MAX_MATERIAL_SUMMARY_LENGTH ||
+          !Number.isSafeInteger(entry.generatedAt) || Number(entry.generatedAt) < 0) return false;
+    }
+  }
+  return true;
+}
+function validMaterialSummaryCacheEntry(value: unknown): value is MaterialSummaryCacheEntry {
+  return validMaterialSummaries({ session: { source: value } });
+}
+export function cacheMaterialSummary(
+  saved: Saved,
+  sessionId: string,
+  sourceId: string,
+  entry: MaterialSummaryCacheEntry,
+): Saved {
+  if (!sessionId || sessionId.length > 200 || !sourceId || sourceId.length > 200 ||
+      !validMaterialSummaryCacheEntry(entry)) throw new Error("Invalid private material summary cache entry.");
+  const materialSummaries = Object.fromEntries(Object.entries(saved.materialSummaries ?? {})
+    .map(([cachedSessionId, sources]) => [cachedSessionId, { ...sources }])) as NonNullable<Saved["materialSummaries"]>;
+  materialSummaries[sessionId] = { ...materialSummaries[sessionId], [sourceId]: entry };
+  const oldestFirst = Object.entries(materialSummaries).flatMap(([cachedSessionId, sources]) =>
+    Object.entries(sources).map(([cachedSourceId, cachedEntry]) => ({
+      sessionId: cachedSessionId, sourceId: cachedSourceId, generatedAt: cachedEntry.generatedAt,
+    }))).sort((left, right) => left.generatedAt - right.generatedAt);
+  while (oldestFirst.length > MAX_MATERIAL_SUMMARY_CACHE_ENTRIES) {
+    const oldest = oldestFirst.shift()!;
+    delete materialSummaries[oldest.sessionId][oldest.sourceId];
+    if (Object.keys(materialSummaries[oldest.sessionId]).length === 0)
+      delete materialSummaries[oldest.sessionId];
+  }
+  return { ...saved, materialSummaries };
+}
+export function removeMaterialSummaryCacheEntry(saved: Saved, sessionId: string, sourceId: string): Saved {
+  const materialSummaries = { ...saved.materialSummaries };
+  if (!materialSummaries[sessionId]?.[sourceId]) return saved;
+  materialSummaries[sessionId] = { ...materialSummaries[sessionId] };
+  delete materialSummaries[sessionId][sourceId];
+  if (Object.keys(materialSummaries[sessionId]).length === 0) delete materialSummaries[sessionId];
+  return { ...saved, materialSummaries };
+}
 const validMaterials = (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 10 &&
   v.every((file) => record(file) && number(file.size) && (file.sourceId === undefined || typeof file.sourceId === "string") &&
     [file.name, file.type, file.status, file.message].every((field) => typeof field === "string")));
@@ -153,6 +214,7 @@ function validSaved(v: unknown): v is Saved {
         new Set(v.guestPublished).size !== v.guestPublished.length)) ||
       (v.removedSessionIds !== undefined && !validRemovedSessionIds(v.removedSessionIds)) ||
       (v.quizDrafts !== undefined && !isValidQuizDraftMap(v.quizDrafts)) ||
+      (v.materialSummaries !== undefined && !validMaterialSummaries(v.materialSummaries)) ||
       (v.summarySessionId !== undefined &&
         (typeof v.summarySessionId !== "string" || v.summarySessionId.length === 0)) ||
       !Object.values(v.notes).every((note) => typeof note === "string") ||
@@ -196,6 +258,9 @@ export function suppressRemovedSessions(saved: Saved, sessionIds: readonly strin
     .filter(([key, session]) => !removed.has(key) && !removed.has(session.id)));
   const quizDrafts = { ...saved.quizDrafts };
   for (const id of removed) delete quizDrafts[id];
+  const materialSummaries = saved.materialSummaries
+    ? Object.fromEntries(Object.entries(saved.materialSummaries).filter(([sessionId]) => !removed.has(sessionId)))
+    : undefined;
   const snapshot = saved.snapshot
     ? {
         ...saved.snapshot,
@@ -210,6 +275,7 @@ export function suppressRemovedSessions(saved: Saved, sessionIds: readonly strin
     snapshot,
     removedSessionIds,
     quizDrafts,
+    ...(materialSummaries === undefined ? {} : { materialSummaries }),
     ...(saved.summarySessionId && removed.has(saved.summarySessionId) ? { summarySessionId: undefined } : {}),
   };
 }

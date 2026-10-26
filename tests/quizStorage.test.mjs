@@ -107,6 +107,77 @@ test("old saved data without quiz fields and score-only quiz records remain read
   assert.equal(read.pending[0].quiz?.feedback, undefined);
 });
 
+test("owner-local material summary cache is backward-compatible, source-bound, and bounded", () => {
+  rows.clear();
+  const oldSaved = emptySaved();
+  delete oldSaved.materialSummaries;
+  rows.set("train-adventure:v1:owner-a", JSON.stringify(oldSaved));
+  assert.equal(readSaved("owner-a").materialSummaries, undefined);
+
+  assert.equal(typeof storage.cacheMaterialSummary, "function",
+    "the owner-local cache needs a bounded insertion helper");
+  if (typeof storage.cacheMaterialSummary !== "function") return;
+
+  let saved = emptySaved();
+  for (let index = 0; index < 20; index++) {
+    saved = storage.cacheMaterialSummary(saved, `session-${index}`, `source-${index}`, {
+      sourceFingerprint: String(index).padStart(64, "0"),
+      summary: `Summary ${index}`,
+      generatedAt: index + 1,
+    });
+  }
+  const savedBeforeEviction = saved;
+  const beforeEviction = structuredClone(savedBeforeEviction);
+  saved = storage.cacheMaterialSummary(savedBeforeEviction, "session-20", "source-20", {
+    sourceFingerprint: "20".padStart(64, "0"),
+    summary: "Summary 20",
+    generatedAt: 21,
+  });
+  assert.deepEqual(savedBeforeEviction, beforeEviction);
+  const entries = Object.entries(saved.materialSummaries ?? {}).flatMap(([sessionId, sources]) =>
+    Object.entries(sources).map(([sourceId, entry]) => ({ sessionId, sourceId, ...entry })));
+  assert.equal(entries.length, 20);
+  assert.equal(entries.some(({ sessionId }) => sessionId === "session-0"), false);
+  assert.equal(entries.some(({ sessionId }) => sessionId === "session-20"), true);
+
+  const tombstoned = suppressRemovedSessions(saved, ["session-20"]);
+  assert.equal(tombstoned.materialSummaries?.["session-20"], undefined);
+
+  assert.equal(typeof storage.removeMaterialSummaryCacheEntry, "function",
+    "edited or re-reviewed sources need their cached summary invalidated");
+  if (typeof storage.removeMaterialSummaryCacheEntry === "function") {
+    const withoutSummary = storage.removeMaterialSummaryCacheEntry(saved, "session-20", "source-20");
+    assert.equal(withoutSummary.materialSummaries?.["session-20"], undefined);
+  }
+});
+
+test("invalid material summary cache data is rejected without overwriting the saved backup", () => {
+  rows.clear();
+  const saved = emptySaved();
+  saved.materialSummaries = {
+    "session-a": {
+      "source-a": { sourceFingerprint: "not-a-sha256", summary: "Summary", generatedAt: 1 },
+    },
+  };
+  rows.set("train-adventure:v1:owner-a", JSON.stringify(saved));
+  assert.throws(() => readSaved("owner-a"), /Dữ liệu đã lưu không hợp lệ/u);
+  assert.ok(rows.has("train-adventure:v1:owner-a"));
+
+  const unexpectedSourceCopy = emptySaved();
+  unexpectedSourceCopy.materialSummaries = {
+    "session-a": {
+      "source-a": {
+        sourceFingerprint: "a".repeat(64), summary: "Summary", generatedAt: 1,
+        sourceText: "The original document must never enter the cache record.",
+      },
+    },
+  };
+  rows.set("train-adventure:v1:owner-a", JSON.stringify(unexpectedSourceCopy));
+  assert.throws(() => readSaved("owner-a"), /Dữ liệu đã lưu không hợp lệ/u);
+  assert.ok(rows.has("train-adventure:v1:owner-a"));
+});
+
+
 test("malformed persisted feedback fails validation while preserving the backup", () => {
   rows.clear();
   const saved = emptySaved();

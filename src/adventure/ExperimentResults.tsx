@@ -16,7 +16,8 @@ export type ExperimentRun = {
   distractions: number;
   breakSeconds: number | null;
   plannedBreakSeconds: number | null;
-  studyElapsedSeconds: number;
+  plannedBreakCount: number | null;
+  studyElapsedSeconds: number | null;
   deviceCategory: DeviceCategory | null;
   completed: boolean;
   quizScore: number | null;
@@ -41,6 +42,13 @@ export function formatExperimentDuration(seconds: number): string {
 
 export function experimentStudySeconds(run: ExperimentRun): number {
   return run.studyElapsedSeconds ?? Math.max(0, run.elapsedSeconds - (run.breakSeconds ?? 0));
+}
+
+export function experimentEfficiencyPercent(run: ExperimentRun): number | null {
+  const denominator = run.studyElapsedSeconds;
+  if (!Number.isFinite(denominator) || denominator === null || denominator <= 0 ||
+      !Number.isFinite(run.focusedSeconds) || run.focusedSeconds < 0) return null;
+  return Math.round(run.focusedSeconds / denominator * 100);
 }
 
 function compactDateTime(value: string, options: Intl.DateTimeFormatOptions): string {
@@ -85,17 +93,9 @@ function CorrectionBadge({ run }: { run: ExperimentRun }) {
   return <span className="experiment-correction-badge" aria-label="Phiên có chỉ số đã hiệu chỉnh">Đã hiệu chỉnh</span>;
 }
 
-function completionStatusText(run: ExperimentRun) {
-  const statusSource = run.correctionFlags?.targetSeconds || run.correctionFlags?.actualStudySeconds
-    ? "theo số liệu đang áp dụng"
-    : "theo dữ liệu đo ban đầu";
-  return `${run.completed ? "Đạt mục tiêu" : "Chưa đạt mục tiêu"} ${statusSource}`;
-}
-
 function GoalSummary({ run }: { run: ExperimentRun }) {
   return <div className="experiment-goal-summary">
     <span>{run.goalSummary || "Không ghi mục tiêu"}</span>
-    <span>{completionStatusText(run)}</span>
   </div>;
 }
 
@@ -115,32 +115,33 @@ function RunDetails({ run }: { run: ExperimentRun }) {
       <div><dt>Thiết bị</dt><dd>{deviceLabel(run.deviceCategory)}</dd></div>
       <div><dt>Bắt đầu (giờ địa phương của bạn)</dt><dd><time dateTime={run.startedAt}>{startedDate}</time></dd></div>
       <div><dt>Kết thúc (giờ địa phương của bạn)</dt><dd><time dateTime={run.endedAt}>{endedDate}</time></dd></div>
+      <div><dt>Mục tiêu thời gian</dt><dd>{formatExperimentDuration(run.targetSeconds)}</dd></div>
+      <div><dt>Thời lượng chuyến</dt><dd>{formatExperimentDuration(run.elapsedSeconds)}</dd></div>
+      <div><dt>Khoảng học đã diễn ra (không tính nghỉ)</dt><dd>{run.studyElapsedSeconds == null
+        ? "Chưa ghi nhận khoảng học đã diễn ra"
+        : formatExperimentDuration(run.studyElapsedSeconds)}</dd></div>
+      <div><dt>Thời gian thực học</dt><dd>{formatExperimentDuration(run.focusedSeconds)}</dd></div>
       {run.correctionFlags?.elapsedSeconds && <div><dt>Ghi chú thời gian</dt><dd>Mốc bắt đầu và kết thúc là dữ kiện đo ban đầu; thời lượng chuyến đã được hiệu chỉnh.</dd></div>}
       <div><dt>Xao nhãng</dt><dd>{run.distractions} lần</dd></div>
       <div><dt>Giải lao thực tế</dt><dd>{run.breakSeconds == null ? "Chưa có thời gian giải lao" : formatExperimentDuration(run.breakSeconds)}</dd></div>
       <div><dt>Giải lao dự kiến</dt><dd>{run.plannedBreakSeconds == null ? "Không ghi nhận lịch nghỉ" : formatExperimentDuration(run.plannedBreakSeconds)}</dd></div>
-      <div><dt>Trạng thái mục tiêu</dt><dd>{completionStatusText(run)}</dd></div>
     </dl>
   </details>;
 }
 
 function JourneyTime({ run }: { run: ExperimentRun }) {
-  const studyTarget = formatExperimentDuration(run.targetSeconds);
-  const journeyTarget = formatExperimentDuration(run.targetSeconds + (run.plannedBreakSeconds ?? 0));
   return <div className="experiment-time-summary">
-    <strong>{formatExperimentDuration(experimentStudySeconds(run))} học</strong>
-    <span className="experiment-run-card__meta">{studyTarget} mục tiêu</span>
-    <span className="experiment-run-card__meta">
-      {formatExperimentDuration(run.elapsedSeconds)} tổng chuyến / {journeyTarget} dự kiến
-    </span>
+    <strong>{formatExperimentDuration(run.focusedSeconds)} thực học</strong>
+    <span className="experiment-run-card__meta">Mục tiêu: {formatExperimentDuration(run.targetSeconds)} · {run.plannedBreakCount == null
+      ? "Chưa ghi nhận lượt nghỉ"
+      : `${run.plannedBreakCount} lượt nghỉ`}</span>
   </div>;
 }
 
-function RestAndFocus({ run }: { run: ExperimentRun }) {
-  return <div className="experiment-rest-summary">
-    <strong>{formatExperimentDuration(run.focusedSeconds)} tập trung</strong>
-    <span className="experiment-run-card__meta">{run.breakSeconds == null ? "Chưa có thời gian giải lao" : `${formatExperimentDuration(run.breakSeconds)} giải lao thực tế`}</span>
-    <span className="experiment-run-card__meta">{run.plannedBreakSeconds == null ? "Không ghi nhận lịch nghỉ" : `${formatExperimentDuration(run.plannedBreakSeconds)} giải lao dự kiến`}</span>
+function EfficiencySummary({ run }: { run: ExperimentRun }) {
+  const efficiency = experimentEfficiencyPercent(run);
+  return <div className="experiment-efficiency-summary">
+    <strong>{efficiency === null ? "Chưa có dữ liệu hiệu suất" : `${efficiency}%`}</strong>
   </div>;
 }
 
@@ -153,8 +154,8 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           <th scope="col">Mã chuyến</th>
           <th scope="col">Khởi hành</th>
           <th scope="col">Chủ đề</th>
-          <th scope="col">Thời gian học và chuyến</th>
-          <th scope="col">Tập trung và nghỉ</th>
+          <th scope="col">Thời gian học</th>
+          <th scope="col">Hiệu suất</th>
           <th scope="col">Tóm tắt mục tiêu</th>
           <th scope="col">Quiz</th>
         </tr></thead>
@@ -171,7 +172,7 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           </td>
           <td className="experiment-topic"><strong>{topicLabel(run.topic)}</strong><CorrectionBadge run={run} /></td>
           <td><JourneyTime run={run} /></td>
-          <td><RestAndFocus run={run} /></td>
+          <td><EfficiencySummary run={run} /></td>
           <td><GoalSummary run={run} /></td>
           <td><QuizBadge run={run} /></td>
         </tr>)}</tbody>
@@ -189,8 +190,8 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
         <h3>{topicLabel(run.topic)}</h3>
         <CorrectionBadge run={run} />
         <div className="experiment-run-card__metrics">
-          <div><span className="experiment-run-card__metric-label">Thời gian học và chuyến</span><JourneyTime run={run} /></div>
-          <div><span className="experiment-run-card__metric-label">Tập trung và nghỉ</span><RestAndFocus run={run} /></div>
+          <div><span className="experiment-run-card__metric-label">Thời gian học</span><JourneyTime run={run} /></div>
+          <div><span className="experiment-run-card__metric-label">Hiệu suất</span><EfficiencySummary run={run} /></div>
           <div><span className="experiment-run-card__metric-label">Tóm tắt mục tiêu</span><GoalSummary run={run} /></div>
           <div><span className="experiment-run-card__metric-label">Quiz</span><QuizBadge run={run} /></div>
         </div>
@@ -235,6 +236,6 @@ export function ExperimentResults() {
         : <div className="panel"><h2>Chưa có phiên học</h2><p>Phiên học đã lưu sẽ xuất hiện tự động tại đây.</p></div>}
       <div className="choice-row"><button disabled={loading || offset === 0} onClick={() => { setLoading(true); setData(null); setOffset(Math.max(0, offset - 50)); }}>Trang trước</button>
         <button disabled={loading || offset + 50 >= data.total} onClick={() => { setLoading(true); setData(null); setOffset(offset + 50); }}>Trang sau</button></div></>}
-    <p className="material-hint">Thời gian học không tính khoảng nghỉ; thời gian tập trung không tính khoảng xao nhãng. Mục tiêu hoàn thành dựa trên thời gian học hiệu lực. CSV chứa tối đa 10.000 phiên gần nhất.</p>
+    <p className="material-hint">Khoảng học đã diễn ra không tính giờ nghỉ; thời gian thực học không tính xao nhãng. CSV chứa tối đa 10.000 phiên gần nhất.</p>
   </section>;
 }

@@ -21,7 +21,8 @@ export function experimentRecord(session: Session, secret: string, override?: Se
   const metrics = projected.effectiveMetrics;
   const identity = tripIdentity(session.userId, session.id, secret);
   const testerHash = createHmac("sha256", secret).update(`tester:${session.userId}`).digest("hex");
-  const validBreakPlan = session.breakPlan && isValidBreakPlan(session.breakPlan, session.target)
+  const hasBreakPlan = session.breakPlan != null;
+  const validBreakPlan = hasBreakPlan && isValidBreakPlan(session.breakPlan, session.target)
     ? session.breakPlan
     : undefined;
 
@@ -35,6 +36,7 @@ export function experimentRecord(session: Session, secret: string, override?: Se
     studyElapsedSeconds: metrics.actualStudySeconds,
     breakSeconds: metrics.actualBreakSeconds,
     plannedBreakSeconds: validBreakPlan ? validBreakPlan.count * validBreakPlan.seconds : 0,
+    plannedBreakCount: hasBreakPlan ? validBreakPlan?.count ?? null : 0,
     focusedSeconds: metrics.focusedSeconds,
     distractions: metrics.distractions,
     deviceCategory: session.deviceCategory ?? null,

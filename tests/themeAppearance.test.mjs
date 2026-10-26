@@ -4,6 +4,8 @@ import test from "node:test";
 
 const themeCssUrl = new URL("../src/adventure/theme.css", import.meta.url);
 const css = await readFile(themeCssUrl, "utf8");
+const experimentCssUrl = new URL("../src/adventure/experimentResults.css", import.meta.url);
+const experimentCss = await readFile(experimentCssUrl, "utf8");
 const adventureCssUrl = new URL("../src/adventure/adventure.css", import.meta.url);
 const adventureCss = await readFile(adventureCssUrl, "utf8");
 const boardingCssUrl = new URL("../src/adventure/boarding.css", import.meta.url);
@@ -69,8 +71,16 @@ test("boarding ticket landscape stays behind readable content and scales for nar
 
 test("dark status and experiment metadata use readable muted colors", () => {
   assert.match(rule('html[data-theme="dark"] .adventure .experiment-started-cell small'), /color:\s*#b4c9b5/u);
+  assert.match(rule('html[data-theme="dark"] .adventure .experiment-efficiency-summary strong'), /color:\s*#dce8db/u);
   assert.match(rule('html[data-theme="dark"] .adventure .experiment-goal small'), /color:\s*#b4c9b5/u);
   assert.match(rule('html[data-theme="dark"] .adventure .connection'), /color:\s*#b9d0bd/u);
   assert.match(rule('html[data-theme="dark"] .adventure .connection.offline'), /color:\s*#f0c184/u);
   assert.match(rule('html[data-theme="dark"] .adventure .chapter'), /color:\s*#b4cbb8/u);
+});
+
+test("single-span public goal summaries have readable light and dark colors", () => {
+  assert.match(experimentCss, /\.experiment-results \.experiment-goal-summary\s*\{[^}]*color:\s*#344b3e/u);
+  assert.doesNotMatch(experimentCss, /experiment-goal-summary span:(?:first|last)-child/u);
+  assert.match(css, /html\[data-theme="dark"\] \.adventure \.experiment-goal-summary\s*\{[^}]*color:\s*var\(--text\)/u);
+  assert.doesNotMatch(css, /experiment-goal-summary span:/u);
 });

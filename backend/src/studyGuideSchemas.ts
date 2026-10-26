@@ -178,6 +178,34 @@ export const studyGuideProviderResponseSchema = z.object({
 
 export type StudyGuideProviderResponse = z.infer<typeof studyGuideProviderResponseSchema>;
 
+/** Decode one JSON string per illustration, then apply the unchanged strict contract. */
+export function parseStudyGuideProviderResponse(value: unknown): StudyGuideProviderResponse {
+  if (value !== null && typeof value === "object" && !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, "illustrations")) {
+    const providerResponse = value as Record<string, unknown>;
+    const encodedIllustrations = providerResponse.illustrations;
+    if (!Array.isArray(encodedIllustrations) || encodedIllustrations.length > STUDY_GUIDE_MAX_ILLUSTRATIONS)
+      throw new Error("Study-guide illustrations must be a bounded array of JSON strings.");
+    let totalBytes = 0;
+    const illustrations = encodedIllustrations.map(encodedIllustration => {
+      if (typeof encodedIllustration !== "string")
+        throw new Error("Each study-guide illustration must be a JSON string.");
+      const bytes = Buffer.byteLength(encodedIllustration, "utf8");
+      if (bytes > STUDY_GUIDE_MAX_ILLUSTRATION_BYTES)
+        throw new Error("A study-guide illustration exceeds the byte limit.");
+      totalBytes += bytes;
+      if (totalBytes > STUDY_GUIDE_MAX_ILLUSTRATION_BYTES)
+        throw new Error("Study-guide illustrations exceed the total byte limit.");
+      return JSON.parse(encodedIllustration);
+    });
+    return studyGuideProviderResponseSchema.parse({
+      ...providerResponse,
+      illustrations,
+    });
+  }
+  return studyGuideProviderResponseSchema.parse(value);
+}
+
 /** External API contract stays an editable Markdown draft with title and text. */
 export const studyGuideResponseSchema = z.object({
   title: z.string().trim().min(1).max(STUDY_GUIDE_FIELD_LIMITS.title),
@@ -192,105 +220,25 @@ function boundedText(description: string, maximumCharacters: number, minimumChar
   };
 }
 
-const illustrationText = (description: string, maximumCharacters: number, minimumCharacters = 1) => ({
-  type: "string" as const,
-  description,
-  minLength: minimumCharacters,
-  maxLength: maximumCharacters,
-});
-const illustrationCoordinateJson = { type: "number" as const, minimum: -1_000_000, maximum: 1_000_000 };
-const illustrationPointJson = {
-  type: "array" as const,
-  prefixItems: [illustrationCoordinateJson, illustrationCoordinateJson],
-  minItems: 2,
-  maxItems: 2,
-};
-const illustrationSectionJson = { type: "string" as const, enum: ["theory", "examples"] };
-const sequenceIllustrationJson = {
-  type: "object" as const,
-  additionalProperties: false,
-  required: ["kind", "afterSection", "title", "description", "steps"],
-  properties: {
-    kind: { type: "string" as const, enum: ["sequence"] },
-    afterSection: illustrationSectionJson,
-    title: illustrationText("Short diagram title.", 120),
-    description: illustrationText("A concise accessible description.", 240),
-    steps: {
-      type: "array" as const,
-      minItems: 2,
-      maxItems: 8,
-      items: {
-        type: "object" as const,
-        additionalProperties: false,
-        required: ["label"],
-        properties: {
-          label: illustrationText("One step label.", 80),
-          detail: illustrationText("Optional short step detail.", 240, 0),
-        },
-      },
-    },
-  },
-};
-const coordinatePlotIllustrationJson = {
-  type: "object" as const,
-  additionalProperties: false,
-  required: ["kind", "afterSection", "title", "description", "xAxis", "yAxis", "series"],
-  properties: {
-    kind: { type: "string" as const, enum: ["coordinate-plot"] },
-    afterSection: illustrationSectionJson,
-    title: illustrationText("Short diagram title.", 120),
-    description: illustrationText("A concise accessible description.", 240),
-    xAxis: {
-      type: "object" as const,
-      additionalProperties: false,
-      required: ["label", "min", "max"],
-      properties: {
-        label: illustrationText("Horizontal axis label.", 80),
-        min: illustrationCoordinateJson,
-        max: illustrationCoordinateJson,
-      },
-    },
-    yAxis: {
-      type: "object" as const,
-      additionalProperties: false,
-      required: ["label", "min", "max"],
-      properties: {
-        label: illustrationText("Vertical axis label.", 80),
-        min: illustrationCoordinateJson,
-        max: illustrationCoordinateJson,
-      },
-    },
-    series: {
-      type: "array" as const,
-      minItems: 1,
-      maxItems: 3,
-      items: {
-        type: "object" as const,
-        additionalProperties: false,
-        required: ["label", "points"],
-        properties: {
-          label: illustrationText("Series label.", 80),
-          points: { type: "array" as const, minItems: 2, maxItems: 96, items: illustrationPointJson },
-        },
-      },
-    },
-    markers: {
-      type: "array" as const,
-      minItems: 0,
-      maxItems: 8,
-      items: {
-        type: "object" as const,
-        additionalProperties: false,
-        required: ["x", "y", "label"],
-        properties: {
-          x: illustrationCoordinateJson,
-          y: illustrationCoordinateJson,
-          label: illustrationText("Point label.", 80),
-        },
-      },
-    },
-  },
-};
+export const STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE = JSON.stringify([JSON.stringify({
+  kind: "sequence",
+  afterSection: "theory",
+  title: "Tiêu đề",
+  description: "Mô tả sơ đồ.",
+  steps: [{ label: "Nhãn 1" }, { label: "Nhãn 2" }],
+})]);
+export const STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE = JSON.stringify([JSON.stringify({
+  kind: "coordinate-plot",
+  afterSection: "theory",
+  title: "Tiêu đề",
+  description: "Mô tả sơ đồ.",
+  xAxis: { label: "x", min: 0, max: 1 },
+  yAxis: { label: "y", min: 0, max: 1 },
+  series: [{ label: "Chuỗi 1", points: [[0, 0], [1, 1]] }],
+})]);
+
+export const STUDY_GUIDE_ILLUSTRATIONS_JSON_DESCRIPTION =
+  `Trường illustrations là tùy chọn. Khi có ích, hãy trả về mảng 0–3 chuỗi JSON; mỗi chuỗi mã hóa đúng một đối tượng minh họa, tổng UTF-8 của tất cả chuỗi không quá 16 KiB và mỗi chuỗi cũng không quá 16 KiB. Nếu không có hình hữu ích, bỏ hẳn trường. Mọi hình bắt buộc có afterSection (chỉ theory hoặc examples), title (1–120 ký tự sau trim) và description (1–240 ký tự sau trim). Dạng sequence có đúng các khóa bắt buộc {kind: sequence, afterSection, title, description, steps}; steps có 2–8 phần tử, mỗi phần tử có label (1–80 ký tự) và detail tùy chọn (tối đa 240 ký tự). Ví dụ format-only hợp lệ cho sequence: ${STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE}. Dạng coordinate-plot có đúng các khóa bắt buộc {kind: coordinate-plot, afterSection, title, description, xAxis, yAxis, series}; mỗi trục có đúng {label, min, max}, label 1–80 ký tự, min và max là số hữu hạn trong [-1.000.000, 1.000.000] với min < max. series có 1–3 phần tử, mỗi phần tử có đúng {label, points}; label 1–80 ký tự và points có 2–96 cặp [x, y] hữu hạn trong khoảng của cả hai trục. Tổng số điểm trên mọi coordinate-plot tối đa 192 điểm. markers là khóa tùy chọn của coordinate-plot, tối đa 8 phần tử {x, y, label}; tọa độ hữu hạn và nằm trong khoảng trục, label 1–80 ký tự. Ví dụ format-only hợp lệ cho coordinate-plot: ${STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE}. Chỉ dùng đúng các khóa đã nêu, không trộn khóa giữa hai dạng; bỏ các khóa không áp dụng và khóa tùy chọn khi không dùng. Không HTML, SVG, URL, đường dẫn, style, hàm hoặc biểu thức cần tính toán; nhãn là văn bản thuần. Hình chỉ mang tính minh họa, chưa được kiểm chứng.`;
 
 export const studyGuideProviderResponseJsonSchema = {
   type: "object" as const,
@@ -327,8 +275,11 @@ export const studyGuideProviderResponseJsonSchema = {
       type: "array" as const,
       minItems: 0,
       maxItems: STUDY_GUIDE_MAX_ILLUSTRATIONS,
-      description: "Tối đa 3 hình minh họa phụ trợ. Chỉ trả về dữ liệu cho kind sequence hoặc coordinate-plot; không trả HTML, SVG, URL, đường dẫn, style, hàm hay biểu thức cần tính toán. Các hình mang tính minh họa và chưa được kiểm chứng.",
-      items: { anyOf: [sequenceIllustrationJson, coordinatePlotIllustrationJson] },
+      description: STUDY_GUIDE_ILLUSTRATIONS_JSON_DESCRIPTION,
+      items: {
+        type: "string" as const,
+        description: "Một chuỗi JSON hợp lệ mã hóa đúng một đối tượng sequence hoặc coordinate-plot theo lược đồ mô tả ở trên.",
+      },
     },
   },
 };
