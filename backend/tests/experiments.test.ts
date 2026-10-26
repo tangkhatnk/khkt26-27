@@ -110,11 +110,12 @@ describe("automatic trip history projections", () => {
     expect(csv).toContain("break_seconds");
   });
 
-  it("exposes planned break count only from a valid saved plan", () => {
+  it("defaults absent plans to zero and exposes counts only from valid saved plans", () => {
     const planned = experimentRecord({ ...session, target: 180,
       breakPlan: { count: 2, seconds: 60 } }, "server-secret");
     const noBreaks = experimentRecord({ ...session, target: 120,
       breakPlan: { count: 0, seconds: 60 } }, "server-secret");
+    const nullPlan = experimentRecord({ ...session, breakPlan: null as unknown as Session["breakPlan"] }, "server-secret");
     const legacyBreakSegments = experimentRecord({ ...session, target: 120,
       segments: [{ start: 1000, end: 21000, kind: "focus" },
         { start: 21000, end: 31000, kind: "break" },
@@ -124,7 +125,9 @@ describe("automatic trip history projections", () => {
 
     expect(planned.plannedBreakCount).toBe(2);
     expect(noBreaks.plannedBreakCount).toBe(0);
-    expect(legacyBreakSegments.plannedBreakCount).toBeNull();
+    expect(experimentRecord(session, "server-secret").plannedBreakCount).toBe(0);
+    expect(nullPlan.plannedBreakCount).toBe(0);
+    expect(legacyBreakSegments.plannedBreakCount).toBe(0);
     expect(invalidPlan.plannedBreakCount).toBeNull();
     expect(experimentCsv([planned])).not.toContain("planned_break_count");
   });

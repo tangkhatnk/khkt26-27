@@ -101,21 +101,13 @@
   min-width: 190px;
   max-width: 320px;
   gap: 6px;
+  color: #344b3e;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.experiment-results .experiment-goal-summary span:first-child {
-  color: #344b3e;
-}
-
-.experiment-results .experiment-goal-summary span:last-child {
-  color: #5d6c60;
-  font-size: 11px;
-}
-
 .experiment-results .experiment-time-summary,
-.experiment-results .experiment-rest-summary {
+.experiment-results .experiment-efficiency-summary {
   display: grid;
   min-width: 170px;
   gap: 4px;
@@ -124,7 +116,7 @@
 }
 
 .experiment-results .experiment-time-summary strong,
-.experiment-results .experiment-rest-summary strong {
+.experiment-results .experiment-efficiency-summary strong {
   color: #2d4f3d;
   white-space: nowrap;
 }
@@ -301,7 +293,7 @@
 }
 
 .experiment-results .experiment-run-card .experiment-time-summary,
-.experiment-results .experiment-run-card .experiment-rest-summary {
+.experiment-results .experiment-run-card .experiment-efficiency-summary {
   min-width: 0;
 }
 

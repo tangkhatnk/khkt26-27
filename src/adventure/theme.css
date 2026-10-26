@@ -517,12 +517,8 @@ html[data-theme="dark"] .adventure .experiment-goal small {
   color: #b4c9b5;
 }
 
-html[data-theme="dark"] .adventure .experiment-goal-summary span:first-child {
+html[data-theme="dark"] .adventure .experiment-goal-summary {
   color: var(--text);
-}
-
-html[data-theme="dark"] .adventure .experiment-goal-summary span:last-child {
-  color: var(--text-muted);
 }
 
 html[data-theme="dark"] .adventure .connection {
@@ -551,7 +547,7 @@ html[data-theme="dark"] .adventure .experiment-results .experiment-table tbody t
 
 html[data-theme="dark"] .adventure .experiment-trip-code,
 html[data-theme="dark"] .adventure .experiment-time-summary strong,
-html[data-theme="dark"] .adventure .experiment-rest-summary strong,
+html[data-theme="dark"] .adventure .experiment-efficiency-summary strong,
 html[data-theme="dark"] .adventure .experiment-run-card__header time,
 html[data-theme="dark"] .adventure .experiment-run-card__topic,
 html[data-theme="dark"] .adventure .experiment-details dd {
