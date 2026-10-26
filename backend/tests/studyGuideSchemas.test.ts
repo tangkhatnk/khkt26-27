@@ -37,6 +37,25 @@ const providerResponse = {
   ],
   verificationNote: "",
 };
+const illustrations = [
+  {
+    kind: "sequence",
+    afterSection: "examples",
+    title: "Các bước giải",
+    description: "Làm theo thứ tự.",
+    steps: [{ label: "Tính giá trị" }, { label: "Tính hệ số góc", detail: "Lấy đạo hàm tại điểm." }],
+  },
+  {
+    kind: "coordinate-plot",
+    afterSection: "theory",
+    title: "Đạo hàm tại một điểm",
+    description: "Đường tiếp tuyến biểu diễn tốc độ thay đổi tại điểm được chọn.",
+    xAxis: { label: "x", min: -2, max: 2 },
+    yAxis: { label: "y", min: -2, max: 3 },
+    series: [{ label: "f(x)", points: [[-2, 2], [-1, -1], [0, 0], [1, 1], [2, 2]] }],
+    markers: [{ x: 1, y: 1, label: "Tiếp điểm" }],
+  },
+];
 
 describe("study guide request contract", () => {
   it("accepts prompt-only requests and trims their bounded fields", () => {
@@ -70,6 +89,52 @@ describe("study guide response contracts", () => {
       ...providerResponse,
       verificationNote: "Đối chiếu thuật ngữ với giáo trình của lớp.",
     }).success).toBe(true);
+  });
+
+  it("accepts bounded typed illustrations while keeping them optional on provider and API responses", () => {
+    const text = "Nội dung Markdown đủ dài để lưu tài liệu ôn tập. ".repeat(3);
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, illustrations }).illustrations).toEqual(illustrations);
+    expect(studyGuideProviderResponseSchema.parse(providerResponse)).not.toHaveProperty("illustrations");
+    expect(studyGuideResponseSchema.parse({ title: "Ôn tập", text, illustrations }).illustrations).toEqual(illustrations);
+    expect(studyGuideResponseSchema.parse({ title: "Ôn tập", text })).not.toHaveProperty("illustrations");
+    expect(studyGuideProviderResponseJsonSchema.properties.illustrations.maxItems).toBe(3);
+  });
+
+  it.each([
+    { illustrations: Array.from({ length: 4 }, () => illustrations[0]) },
+    { illustrations: [{ ...illustrations[0], steps: [{ label: "Chỉ một bước" }] }] },
+    { illustrations: [{ ...illustrations[1], xAxis: { ...illustrations[1].xAxis, max: Infinity } }] },
+    { illustrations: [{ ...illustrations[1], series: [{ label: "f(x)", points: [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [7, 7], [8, 8], [9, 9], [10, 10], [11, 11], [12, 12], [13, 13], [14, 14], [15, 15], [16, 16], [17, 17], [18, 18], [19, 19], [20, 20], [21, 21], [22, 22], [23, 23], [24, 24], [25, 25], [26, 26], [27, 27], [28, 28], [29, 29], [30, 30], [31, 31], [32, 32], [33, 33], [34, 34], [35, 35], [36, 36], [37, 37], [38, 38], [39, 39], [40, 40], [41, 41], [42, 42], [43, 43], [44, 44], [45, 45], [46, 46], [47, 47], [48, 48], [49, 49], [50, 50], [51, 51], [52, 52], [53, 53], [54, 54], [55, 55], [56, 56], [57, 57], [58, 58], [59, 59], [60, 60], [61, 61], [62, 62], [63, 63], [64, 64], [65, 65]] }] }] },
+    { illustrations: [{ ...illustrations[0], svg: "<svg onload=alert(1)>" }] },
+    { illustrations: [{ ...illustrations[1], imageUrl: "https://example.com/diagram.svg" }] },
+    { illustrations: Array.from({ length: 3 }, () => ({
+      ...illustrations[0],
+      steps: Array.from({ length: 8 }, () => ({ label: "á".repeat(80), detail: "ừ".repeat(240) })),
+    })) },
+  ])("rejects invalid illustration input %j", invalid => {
+    expect(studyGuideProviderResponseSchema.safeParse({ ...providerResponse, ...invalid }).success).toBe(false);
+  });
+
+  it("bounds sampled points across all illustrations in one guide", () => {
+    const series = (label: string) => ({
+      label,
+      points: Array.from({ length: 64 }, (_, index) => [index, index] as [number, number]),
+    });
+    const plot = {
+      kind: "coordinate-plot",
+      afterSection: "theory",
+      title: "Đồ thị",
+      description: "Mẫu điểm trên hai trục.",
+      xAxis: { label: "x", min: 0, max: 63 },
+      yAxis: { label: "y", min: 0, max: 63 },
+      series: [series("a"), series("b"), series("c")],
+    };
+    const overBudget = [
+      plot,
+      { ...plot, series: [{ label: "d", points: [[0, 0], [1, 1]] as [number, number][] }] },
+    ];
+
+    expect(studyGuideProviderResponseSchema.safeParse({ ...providerResponse, illustrations: overBudget }).success).toBe(false);
   });
 
   it("normalizes escaped newlines in AI Markdown while preserving TeX and code literals", () => {

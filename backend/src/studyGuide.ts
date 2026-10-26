@@ -15,12 +15,16 @@ import {
 const GENERATION_TIMEOUT_MS = 90_000;
 const PRIMARY_MODEL_TIMEOUT_MS = 30_000;
 const MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024;
+// Keep bounded headroom for the 16 KiB illustration payload alongside guide text.
+const STUDY_GUIDE_MAX_OUTPUT_TOKENS = 16_000;
 
 class ModelAttemptTimeoutError extends Error {}
 
 export const STUDY_GUIDE_SYSTEM_INSTRUCTION =
   "Hãy soạn tài liệu ôn tập bằng tiếng Việt tự nhiên, rõ ràng và có chiều sâu. Đóng vai gia sư thân thiện, kiên nhẫn; nói trực tiếp với người học, không chào hỏi, tâng bốc quá mức hay tán gẫu. Giải thích thuật ngữ đơn giản, chia ý theo bước và dùng đoạn ngắn. " +
   "Trả về đúng JSON theo lược đồ được cung cấp. Các trường phải có nội dung theo thứ tự: keyPoints = 1. Ý chính; theory = 2. Lý thuyết; role = 3. Vai trò; comparison = 4. So sánh; examples = 5. Ví dụ minh họa; commonMisconceptions = 6. Nhầm lẫn thường gặp; practice gồm các cặp question và answerHint, lần lượt được máy chủ đưa vào 7. Câu hỏi thực tế và 8. Gợi ý đáp án; verificationNote = ghi chú kiểm chứng tùy chọn. Máy chủ sẽ thêm tiêu đề Markdown và đánh số cho các cặp; không lặp lại tiêu đề mục trong nội dung các trường. " +
+  "Mỗi khối Markdown phải bắt đầu trên dòng riêng: đặt tiêu đề tiểu mục, đoạn và mục danh sách thành các dòng riêng; cách các khối bằng dòng trống. Khi cần trình bày tuần tự, dùng danh sách đánh số Markdown, mỗi bước trên dòng riêng; không gộp các câu “Bước 1: …, Bước 2: …” trong một đoạn. Trong bảng so sánh phù hợp, mỗi hàng của bảng nằm trên một dòng riêng và có hàng phân cách Markdown. " +
+  "Chỉ thêm illustrations khi hình giúp giải thích nội dung: có thể dùng coordinate-plot với các điểm mẫu phù hợp cho chủ đề như đạo hàm, hoặc sequence để trình bày quy trình/quan hệ khái niệm ở chủ đề phi toán. Không bắt buộc tạo hình nếu không có ích; mọi nhãn phải là văn bản thuần, ngắn gọn. " +
   `Viết keyPoints thật gọn để định hướng. theory là phần trọng tâm và chi tiết nhất, chiếm khoảng 40% nội dung: giải thích nền tảng, khái niệm, mối quan hệ, cơ chế hoặc các bước, điều kiện, giới hạn và ngoại lệ; dùng tiêu đề tiểu mục cấp 3 trở lên khi có ích và đi từ dễ đến khó. Các mục còn lại ngắn hơn nhưng vẫn cụ thể và hữu ích. Giới hạn độ dài sau khi chuẩn hóa: keyPoints tối đa ${STUDY_GUIDE_FIELD_LIMITS.keyPoints.toLocaleString("en-US")}; theory ${STUDY_GUIDE_FIELD_LIMITS.theory.toLocaleString("en-US")}; role ${STUDY_GUIDE_FIELD_LIMITS.role.toLocaleString("en-US")}; comparison ${STUDY_GUIDE_FIELD_LIMITS.comparison.toLocaleString("en-US")}; examples ${STUDY_GUIDE_FIELD_LIMITS.examples.toLocaleString("en-US")}; commonMisconceptions ${STUDY_GUIDE_FIELD_LIMITS.commonMisconceptions.toLocaleString("en-US")}; mỗi practice.question ${STUDY_GUIDE_FIELD_LIMITS.practicalQuestion.toLocaleString("en-US")}; mỗi answerHint ${STUDY_GUIDE_FIELD_LIMITS.answerHint.toLocaleString("en-US")}; verificationNote ${STUDY_GUIDE_FIELD_LIMITS.verificationNote.toLocaleString("en-US")} ký tự. ` +
   "Trong role, giải thích vì sao kiến thức quan trọng và được vận dụng ở đâu. Trong comparison, dùng bảng Markdown với tiêu chí rõ ràng khi có đối tượng phù hợp để so sánh; nếu không có, so sánh các thành phần hoặc cách giải thích vì sao không có cặp đối chiếu tự nhiên. examples cần có tình huống cụ thể và các bước giải thích. commonMisconceptions nêu cách hiểu sai cùng cách sửa. Tạo 3–5 cặp practice; mỗi cặp gồm một câu hỏi thực tế gắn với tình huống và một answerHint nêu lập luận chính, không chỉ đưa đáp án một từ. Đặt câu hỏi và gợi ý tương ứng trong cùng một đối tượng. " +
   "Nếu cần nêu giả định hoặc thông tin chưa chắc chắn, ghi ngắn trong mục liên quan hoặc verificationNote; để verificationNote rỗng nếu không cần. Viết công thức và ký hiệu hóa học dễ đọc, dùng LaTeX như $H_2O$, $x^2$, $E=mc^2$ hoặc \\(\\alpha\\); không dùng HTML. " +
@@ -136,7 +140,7 @@ export async function generateStudyGuide(input: StudyGuideInput, callerSignal?: 
           systemInstruction: STUDY_GUIDE_SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseJsonSchema: studyGuideProviderResponseJsonSchema,
-          maxOutputTokens: 8_000,
+          maxOutputTokens: STUDY_GUIDE_MAX_OUTPUT_TOKENS,
           abortSignal: attemptController.signal,
           httpOptions: { timeout: attemptTimeoutMs },
         },
@@ -214,5 +218,9 @@ function formatStudyGuide(response: StudyGuideProviderResponse) {
   ];
   const verificationNote = response.verificationNote.trim();
   if (verificationNote) sections.push(`**Ghi chú giả định và kiểm chứng:** ${verificationNote}`);
-  return { title: response.title, text: sections.join("\n\n") };
+  return {
+    title: response.title,
+    text: sections.join("\n\n"),
+    ...(response.illustrations ? { illustrations: response.illustrations } : {}),
+  };
 }

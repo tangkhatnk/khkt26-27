@@ -19,6 +19,78 @@ export const STUDY_GUIDE_FIELD_LIMITS = {
   maxQuestions: 5,
 } as const;
 
+const STUDY_GUIDE_MAX_ILLUSTRATIONS = 3;
+const STUDY_GUIDE_MAX_ILLUSTRATION_POINTS = 192;
+const STUDY_GUIDE_MAX_ILLUSTRATION_BYTES = 16 * 1024;
+const illustrationTitle = z.string().trim().min(1).max(120);
+const illustrationDescription = z.string().trim().min(1).max(240);
+const illustrationLabel = z.string().trim().min(1).max(80);
+const illustrationCoordinate = z.number().finite().min(-1_000_000).max(1_000_000);
+const illustrationSection = z.enum(["theory", "examples"]);
+
+const sequenceIllustrationSchema = z.object({
+  kind: z.literal("sequence"),
+  afterSection: illustrationSection,
+  title: illustrationTitle,
+  description: illustrationDescription,
+  steps: z.array(z.object({
+    label: illustrationLabel,
+    detail: z.string().trim().max(240).optional(),
+  }).strict()).min(2).max(8),
+}).strict();
+
+const plotAxisSchema = z.object({
+  label: illustrationLabel,
+  min: illustrationCoordinate,
+  max: illustrationCoordinate,
+}).strict().refine(axis => axis.min < axis.max, "Axis minimum must be below its maximum.");
+
+const coordinatePlotIllustrationSchema = z.object({
+  kind: z.literal("coordinate-plot"),
+  afterSection: illustrationSection,
+  title: illustrationTitle,
+  description: illustrationDescription,
+  xAxis: plotAxisSchema,
+  yAxis: plotAxisSchema,
+  series: z.array(z.object({
+    label: illustrationLabel,
+    points: z.array(z.tuple([illustrationCoordinate, illustrationCoordinate])).min(2).max(96),
+  }).strict()).min(1).max(3),
+  markers: z.array(z.object({
+    x: illustrationCoordinate,
+    y: illustrationCoordinate,
+    label: illustrationLabel,
+  }).strict()).max(8).optional(),
+}).strict().superRefine((plot, context) => {
+  for (const [seriesIndex, series] of plot.series.entries()) {
+    for (const [pointIndex, [x, y]] of series.points.entries()) {
+      if (x < plot.xAxis.min || x > plot.xAxis.max || y < plot.yAxis.min || y > plot.yAxis.max)
+        context.addIssue({ code: "custom", path: ["series", seriesIndex, "points", pointIndex], message: "Plot points must be within both axis ranges." });
+    }
+  }
+  for (const [markerIndex, marker] of (plot.markers ?? []).entries()) {
+    if (marker.x < plot.xAxis.min || marker.x > plot.xAxis.max || marker.y < plot.yAxis.min || marker.y > plot.yAxis.max)
+      context.addIssue({ code: "custom", path: ["markers", markerIndex], message: "Plot markers must be within both axis ranges." });
+  }
+});
+
+const studyGuideIllustrationSchema = z.discriminatedUnion("kind", [
+  sequenceIllustrationSchema,
+  coordinatePlotIllustrationSchema,
+]);
+
+const studyGuideIllustrationsSchema = z.array(studyGuideIllustrationSchema).max(STUDY_GUIDE_MAX_ILLUSTRATIONS)
+  .superRefine((illustrations, context) => {
+    const pointCount = illustrations.reduce((total, illustration) => total +
+      (illustration.kind === "coordinate-plot"
+        ? illustration.series.reduce((seriesTotal, series) => seriesTotal + series.points.length, 0)
+        : 0), 0);
+    if (pointCount > STUDY_GUIDE_MAX_ILLUSTRATION_POINTS)
+      context.addIssue({ code: "custom", message: "Study-guide illustrations contain too many sampled points." });
+    if (Buffer.byteLength(JSON.stringify(illustrations), "utf8") > STUDY_GUIDE_MAX_ILLUSTRATION_BYTES)
+      context.addIssue({ code: "custom", message: "Study-guide illustrations exceed the byte limit." });
+  });
+
 // The provider fields total at most 19,550 characters; formatting adds at most 236.
 // Field-level validation runs after heading normalization, keeping accepted drafts below 20,000.
 
@@ -101,6 +173,7 @@ export const studyGuideProviderResponseSchema = z.object({
     .transform(normalizeMarkdownHeadingLevels)
     .transform(value => value.trim())
     .pipe(z.string().max(STUDY_GUIDE_FIELD_LIMITS.verificationNote)),
+  illustrations: studyGuideIllustrationsSchema.optional(),
 }).strict();
 
 export type StudyGuideProviderResponse = z.infer<typeof studyGuideProviderResponseSchema>;
@@ -109,6 +182,7 @@ export type StudyGuideProviderResponse = z.infer<typeof studyGuideProviderRespon
 export const studyGuideResponseSchema = z.object({
   title: z.string().trim().min(1).max(STUDY_GUIDE_FIELD_LIMITS.title),
   text: z.string().trim().min(100).max(STUDY_GUIDE_TEXT_LIMIT_CHARACTERS),
+  illustrations: studyGuideIllustrationsSchema.optional(),
 }).strict();
 
 function boundedText(description: string, maximumCharacters: number, minimumCharacters = 100) {
@@ -117,6 +191,106 @@ function boundedText(description: string, maximumCharacters: number, minimumChar
     description: `${description} Độ dài từ ${minimumCharacters.toLocaleString("en-US")} đến ${maximumCharacters.toLocaleString("en-US")} ký tự sau khi chuẩn hóa tiêu đề Markdown; máy chủ xác thực giới hạn này.`,
   };
 }
+
+const illustrationText = (description: string, maximumCharacters: number, minimumCharacters = 1) => ({
+  type: "string" as const,
+  description,
+  minLength: minimumCharacters,
+  maxLength: maximumCharacters,
+});
+const illustrationCoordinateJson = { type: "number" as const, minimum: -1_000_000, maximum: 1_000_000 };
+const illustrationPointJson = {
+  type: "array" as const,
+  prefixItems: [illustrationCoordinateJson, illustrationCoordinateJson],
+  minItems: 2,
+  maxItems: 2,
+};
+const illustrationSectionJson = { type: "string" as const, enum: ["theory", "examples"] };
+const sequenceIllustrationJson = {
+  type: "object" as const,
+  additionalProperties: false,
+  required: ["kind", "afterSection", "title", "description", "steps"],
+  properties: {
+    kind: { type: "string" as const, enum: ["sequence"] },
+    afterSection: illustrationSectionJson,
+    title: illustrationText("Short diagram title.", 120),
+    description: illustrationText("A concise accessible description.", 240),
+    steps: {
+      type: "array" as const,
+      minItems: 2,
+      maxItems: 8,
+      items: {
+        type: "object" as const,
+        additionalProperties: false,
+        required: ["label"],
+        properties: {
+          label: illustrationText("One step label.", 80),
+          detail: illustrationText("Optional short step detail.", 240, 0),
+        },
+      },
+    },
+  },
+};
+const coordinatePlotIllustrationJson = {
+  type: "object" as const,
+  additionalProperties: false,
+  required: ["kind", "afterSection", "title", "description", "xAxis", "yAxis", "series"],
+  properties: {
+    kind: { type: "string" as const, enum: ["coordinate-plot"] },
+    afterSection: illustrationSectionJson,
+    title: illustrationText("Short diagram title.", 120),
+    description: illustrationText("A concise accessible description.", 240),
+    xAxis: {
+      type: "object" as const,
+      additionalProperties: false,
+      required: ["label", "min", "max"],
+      properties: {
+        label: illustrationText("Horizontal axis label.", 80),
+        min: illustrationCoordinateJson,
+        max: illustrationCoordinateJson,
+      },
+    },
+    yAxis: {
+      type: "object" as const,
+      additionalProperties: false,
+      required: ["label", "min", "max"],
+      properties: {
+        label: illustrationText("Vertical axis label.", 80),
+        min: illustrationCoordinateJson,
+        max: illustrationCoordinateJson,
+      },
+    },
+    series: {
+      type: "array" as const,
+      minItems: 1,
+      maxItems: 3,
+      items: {
+        type: "object" as const,
+        additionalProperties: false,
+        required: ["label", "points"],
+        properties: {
+          label: illustrationText("Series label.", 80),
+          points: { type: "array" as const, minItems: 2, maxItems: 96, items: illustrationPointJson },
+        },
+      },
+    },
+    markers: {
+      type: "array" as const,
+      minItems: 0,
+      maxItems: 8,
+      items: {
+        type: "object" as const,
+        additionalProperties: false,
+        required: ["x", "y", "label"],
+        properties: {
+          x: illustrationCoordinateJson,
+          y: illustrationCoordinateJson,
+          label: illustrationText("Point label.", 80),
+        },
+      },
+    },
+  },
+};
 
 export const studyGuideProviderResponseJsonSchema = {
   type: "object" as const,
@@ -149,5 +323,12 @@ export const studyGuideProviderResponseJsonSchema = {
       },
     },
     verificationNote: boundedText("Ghi chú giả định hoặc thông tin cần kiểm chứng; để rỗng nếu không cần.", STUDY_GUIDE_FIELD_LIMITS.verificationNote, 0),
+    illustrations: {
+      type: "array" as const,
+      minItems: 0,
+      maxItems: STUDY_GUIDE_MAX_ILLUSTRATIONS,
+      description: "Tối đa 3 hình minh họa phụ trợ. Chỉ trả về dữ liệu cho kind sequence hoặc coordinate-plot; không trả HTML, SVG, URL, đường dẫn, style, hàm hay biểu thức cần tính toán. Các hình mang tính minh họa và chưa được kiểm chứng.",
+      items: { anyOf: [sequenceIllustrationJson, coordinatePlotIllustrationJson] },
+    },
   },
 };

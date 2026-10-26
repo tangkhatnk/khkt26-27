@@ -55,7 +55,7 @@ export function StudyGuideComposer({ disabled, canGenerate, unavailableReason, r
         <button type="button" aria-pressed={review.view === "preview"} disabled={disabled} onClick={() => onReviewAction({ type: "set-view", view: "preview" })}>Bản xem trước</button>
         <button type="button" aria-pressed={review.view === "edit"} disabled={disabled} onClick={() => onReviewAction({ type: "set-view", view: "edit" })}>Chỉnh sửa</button>
       </div>
-      {review.view === "preview" ? <StudyGuideArticle title={draft.title} text={draft.text} aiGenerated /> : <div className="study-guide__editor">
+      {review.view === "preview" ? <StudyGuideArticle title={draft.title} text={draft.text} aiGenerated illustrations={draft.illustrations} /> : <div className="study-guide__editor">
         <label htmlFor="study-guide-draft-title">Tiêu đề<input id="study-guide-draft-title" maxLength={120} value={draft.title} disabled={disabled} onChange={event => onReviewAction({ type: "edit-title", title: event.target.value })} /></label>
         <label htmlFor="study-guide-draft-text">Nội dung Markdown<textarea id="study-guide-draft-text" rows={14} maxLength={20000} value={draft.text} disabled={disabled} onChange={event => onReviewAction({ type: "edit-text", text: event.target.value })} /></label>
         <p className="material-hint">Bạn đang sửa bản Markdown gốc. Chuyển về bản xem trước để kiểm tra cách trình bày.</p>
