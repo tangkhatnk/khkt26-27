@@ -5,6 +5,21 @@ export const MAX_MATERIAL_BASE64_CHARS = 4 * Math.ceil(MAX_MATERIAL_BYTES / 3);
 export const MAX_MATERIAL_PAGES = 20;
 export const MAX_MATERIAL_TEXT_CHARS = 50_000;
 export const MATERIAL_READ_BODY_LIMIT_BYTES = 45 * 1024 * 1024;
+export const MAX_MATERIAL_SUMMARY_SOURCE_CODE_UNITS = 50_000;
+export const MAX_MATERIAL_SUMMARY_CODE_UNITS = 4_000;
+export const MATERIAL_SUMMARY_BODY_LIMIT_BYTES = 512 * 1024;
+
+export const materialSummaryRequestSchema = z.object({
+  text: z.string().max(MAX_MATERIAL_SUMMARY_SOURCE_CODE_UNITS)
+    .refine(value => value.length <= MAX_MATERIAL_SUMMARY_SOURCE_CODE_UNITS, "Source text must not exceed 50,000 UTF-16 code units.")
+    .refine(value => value.trim().length >= 10, "Source text must contain at least 10 non-whitespace characters."),
+}).strict();
+
+export type MaterialSummaryInput = z.infer<typeof materialSummaryRequestSchema>;
+
+export const materialSummaryResponseSchema = z.object({
+  summary: z.string().trim().min(1).max(MAX_MATERIAL_SUMMARY_CODE_UNITS),
+}).strict();
 
 const materialMimeType = z.enum([
   "application/pdf",
