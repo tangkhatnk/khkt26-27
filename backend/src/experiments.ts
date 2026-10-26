@@ -35,6 +35,7 @@ export function experimentRecord(session: Session, secret: string, override?: Se
     studyElapsedSeconds: metrics.actualStudySeconds,
     breakSeconds: metrics.actualBreakSeconds,
     plannedBreakSeconds: validBreakPlan ? validBreakPlan.count * validBreakPlan.seconds : 0,
+    plannedBreakCount: validBreakPlan?.count ?? null,
     focusedSeconds: metrics.focusedSeconds,
     distractions: metrics.distractions,
     deviceCategory: session.deviceCategory ?? null,

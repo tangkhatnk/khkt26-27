@@ -14,6 +14,9 @@ let refreshing: { generation: number; promise: Promise<void> } | null = null;
 let storageUpdates: Promise<void> = Promise.resolve();
 let onExpired: () => void = () => {};
 let generation = 0;
+export function getAuthGeneration() {
+  return generation;
+}
 export function setExpiredHandler(handler: () => void) {
   onExpired = handler;
 }

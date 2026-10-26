@@ -1814,6 +1814,11 @@ body {
 .material-source label { display: grid; gap: .6rem; }
 .material-source textarea { width: 100%; line-height: 1.6; }
 .material-source .choice-row { flex-wrap: wrap; margin-top: .7rem; }
+.material-summary-control { display: grid; gap: .6rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--line, #d7e0d5); }
+.material-summary-control > p { margin: 0; }
+.material-summary-result { padding: .8rem; border: 1px solid var(--line, #d7e0d5); border-radius: 10px; background: var(--surface, #fff); color: inherit; overflow-wrap: anywhere; }
+.material-summary-result h3 { margin: 0 0 .45rem; font-size: 1rem; }
+.material-summary-result p { margin: 0; line-height: 1.65; white-space: pre-wrap; }
 .material-title { margin: .5rem 0 0; font-size: 16px; }
 .form .material-ai-option { flex-direction: row; align-items: flex-start; gap: .6rem; line-height: 1.5; }
 .adventure .material-ai-option input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 1px 0 0; padding: 0; flex: 0 0 18px; accent-color: var(--green); }

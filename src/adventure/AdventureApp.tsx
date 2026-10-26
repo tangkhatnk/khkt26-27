@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { useBrowserView } from "./navigation";
 import { useAuthStore } from "@/store/authStore";
-import { post, request } from "@/services/api";
+import { getAuthGeneration, post, request } from "@/services/api";
+import { summarizeReviewedMaterial } from "@/services/materialSummary";
 import { AuthForm } from "./AuthForm";
 import { AdminPanel } from "./AdminPanel";
 import { ProfilePanel } from "./ProfilePanel";
@@ -12,6 +13,7 @@ import { BoardingTicket } from "./BoardingTicket";
 import { StudyNotesInput } from "./StudyNotesInput";
 import { StudyGuideComposer } from "./StudyGuideComposer";
 import { MaterialSourceReader, MaterialSourceReviewButton } from "./MaterialSourceReader";
+import { MaterialSummaryControl } from "./MaterialSummaryControl";
 import { FlipClock } from "./FlipClock";
 import { ThemeToggle } from "./theme";
 import { studyGuideDownload, studyGuideSource, type StudyGuideDraft } from "./studyGuide";
@@ -23,6 +25,7 @@ import { detectDeviceCategory } from "./device";
 import { explorationProgress } from "./exploration";
 import type { MaterialExtractionProgress } from "./materialExtraction";
 import { createMaterialSource, editMaterialSourceText, reviewMaterialSource, recoveredMaterialSource, type MaterialSource } from "./materialSources";
+import { cachedMaterialSummary, fingerprintMaterialSourceText, isCurrentMaterialSummaryScope, type MaterialSummaryScope } from "./materialSummary";
 import { DurationPicker } from "./DurationPicker";
 import { ExperimentResults } from "./ExperimentResults";
 import { QuizPanel } from "./QuizPanel";
@@ -60,6 +63,8 @@ import {
   reconcileOwnerSnapshot,
   suppressRemovedSessions,
   syncOwnerHistory,
+  cacheMaterialSummary,
+  removeMaterialSummaryCacheEntry,
   writeSaved,
   type Saved,
   type SessionHistoryEntry,
@@ -129,6 +134,22 @@ type QuizPrefetchUiState = {
 };
 type QuizSessionSource = Pick<SessionHistoryEntry, "id" | "topic" | "goal"> &
   Partial<Pick<SessionHistoryEntry, "correctionVersion" | "effectiveMetrics" | "correctionFlags" | "quiz">>;
+type MaterialSummaryUiState = MaterialSummaryScope & {
+  status: "pending" | "ready" | "failed";
+  summary?: string;
+  error?: string;
+};
+type ActiveMaterialSummaryRequest = {
+  controller: AbortController;
+  ownerId: string;
+  workspaceGeneration: number;
+  authGeneration: number;
+  sessionId: string;
+  sourceId: string;
+  sourceText: string;
+  sourceFingerprint: string;
+  requestGeneration: number;
+};
 
 function hasHttpStatus(error: unknown, expected: number): boolean {
   return typeof error === "object" && error !== null && "status" in error &&
@@ -148,10 +169,27 @@ function AdventureWorkspace() {
   const view = views.includes(requestedView) ? requestedView : "station";
   const { user, login, logout, offline: authOffline, needsLogin } = useAuthStore();
   const owner = user?.id ?? "guest";
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [saved, setSaved] = useState<Saved>(emptySaved);
   const current = useRef(saved),
     ownerRef = useRef(owner);
   const workspaceLive = useRef(false);
+  const materialSummaryWorkspaceGeneration = useRef(0);
+  const materialSummaryRequestGeneration = useRef(0);
+  const materialSummaryRequest = useRef<ActiveMaterialSummaryRequest | null>(null);
+  const [materialSummaryUi, setMaterialSummaryUi] = useState<MaterialSummaryUiState | null>(null);
+  const [materialSummaryFingerprints, setMaterialSummaryFingerprints] = useState<Record<string, { text: string; fingerprint: string }>>({});
+  const cancelMaterialSummaryRequest = useCallback((sessionId?: string, sourceId?: string, clearUi = true) => {
+    const active = materialSummaryRequest.current;
+    if (!active || (sessionId !== undefined && active.sessionId !== sessionId) ||
+        (sourceId !== undefined && active.sourceId !== sourceId)) return;
+    active.controller.abort();
+    materialSummaryRequest.current = null;
+    materialSummaryRequestGeneration.current++;
+    if (clearUi)
+      setMaterialSummaryUi((state) => state?.requestGeneration === active.requestGeneration ? null : state);
+  }, []);
   const [guestPublication, setGuestPublication] = useState<Record<string, GuestPublicationStatus>>({});
   const [guestNoticeStatus, setGuestNoticeStatus] = useState<GuestPublicationStatus | null>(null);
   const hasActiveTrip = Boolean(saved.active);
@@ -170,6 +208,10 @@ function AdventureWorkspace() {
     if (view === "admin" && !adminAccess.allowed && !adminAccess.checking)
       adminNoticeHeading.current?.focus({ preventScroll: true });
   }, [view, adminAccess.allowed, adminAccess.checking]);
+  useEffect(() => {
+    cancelMaterialSummaryRequest();
+    return () => cancelMaterialSummaryRequest(undefined, undefined, false);
+  }, [owner, needsLogin, cancelMaterialSummaryRequest]);
   const lastLocalDay = useRef(localDayKey(now));
   const [goal, setGoal] = useState(""),
     [topic, setTopic] = useState("biology"),
@@ -263,6 +305,7 @@ function AdventureWorkspace() {
   });
   useEffect(() => {
     ownerRef.current = owner;
+    materialSummaryWorkspaceGeneration.current++;
     let release: (() => void) | undefined,
       disposed = false;
     if (!navigator.locks) {
@@ -307,9 +350,10 @@ function AdventureWorkspace() {
     return () => {
       disposed = true;
       workspaceLive.current = false;
+      cancelMaterialSummaryRequest(undefined, undefined, false);
       release?.();
     };
-  }, [owner]);
+  }, [owner, cancelMaterialSummaryRequest]);
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -564,6 +608,38 @@ function AdventureWorkspace() {
   const summarySession = summarySessionId
     ? sessions.find((session) => session.id === summarySessionId && !removedIds.has(session.id)) ?? null
     : null;
+  const summaryMaterialSessionId = summarySession?.id;
+  const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
+    ? saved.sources?.[summaryMaterialSessionId] ?? []
+    : [], [view, saved.sources, summaryMaterialSessionId]);
+  useEffect(() => {
+    let cancelled = false;
+    if (view !== "summary" || !summarySessionId || summaryMaterialSources.length === 0) {
+      setMaterialSummaryFingerprints({});
+      return () => { cancelled = true; };
+    }
+    void Promise.all(summaryMaterialSources.filter((source) => source.reviewed).map(async (source) => [
+      JSON.stringify([summarySessionId, source.id]),
+      { text: source.text, fingerprint: await fingerprintMaterialSourceText(source.text) },
+    ] as const)).then((entries) => {
+      if (!cancelled) setMaterialSummaryFingerprints(Object.fromEntries(entries));
+    }).catch(() => {
+      if (!cancelled) setMaterialSummaryFingerprints({});
+    });
+    return () => { cancelled = true; };
+  }, [owner, view, summarySessionId, summaryMaterialSources]);
+  useEffect(() => {
+    setMaterialSummaryUi(null);
+    return () => cancelMaterialSummaryRequest(undefined, undefined, false);
+  }, [view, summarySessionId, owner, cancelMaterialSummaryRequest]);
+  useEffect(() => {
+    const active = materialSummaryRequest.current;
+    if (!active) return;
+    const source = summaryMaterialSources.find((item) => item.id === active.sourceId);
+    if (active.ownerId !== owner || active.sessionId !== summarySessionId ||
+        !source?.reviewed || source.text !== active.sourceText)
+      cancelMaterialSummaryRequest(active.sessionId, active.sourceId);
+  }, [owner, summarySessionId, summaryMaterialSources, cancelMaterialSummaryRequest]);
   const guestNotice = guestNoticeStatus ? guestPublicationNotice(guestNoticeStatus) : null;
   const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
     studyElapsedSeconds(
@@ -586,6 +662,111 @@ function AdventureWorkspace() {
     quizPrefetchUi.correctionVersion === summaryCorrectionVersion && quizPrefetchUi.count === summaryQuizCount
     ? quizPrefetchUi
     : null;
+  async function generateMaterialSummary(sessionId: string, sourceId: string) {
+    const ownerId = ownerRef.current;
+    const auth = useAuthStore.getState();
+    const value = current.current;
+    const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
+    const session = historySessions(value, ownerId).find((item) => item.id === sessionId);
+    const source = value.sources?.[sessionId]?.find((item) => item.id === sourceId);
+    if (ownerId === "guest" || !auth.user || auth.user.id !== ownerId || auth.needsLogin ||
+        !workspaceLive.current || viewRef.current !== "summary" || value.summarySessionId !== sessionId ||
+        removed.has(sessionId) || !session || session.userId !== ownerId || !source?.reviewed ||
+        source.text.trim().length < 10 || source.text.length > 50_000) return;
+
+    cancelMaterialSummaryRequest();
+    const requestGeneration = ++materialSummaryRequestGeneration.current;
+    const controller = new AbortController();
+    const active: ActiveMaterialSummaryRequest = {
+      controller,
+      ownerId,
+      workspaceGeneration: materialSummaryWorkspaceGeneration.current,
+      authGeneration: getAuthGeneration(),
+      sessionId,
+      sourceId,
+      sourceText: source.text,
+      sourceFingerprint: "",
+      requestGeneration,
+    };
+    materialSummaryRequest.current = active;
+    const currentScope = (): MaterialSummaryScope => ({
+      ownerId: ownerRef.current,
+      workspaceGeneration: materialSummaryWorkspaceGeneration.current,
+      authGeneration: getAuthGeneration(),
+      sessionId: current.current.summarySessionId ?? "",
+      sourceId: current.current.sources?.[sessionId]?.find((item) => item.id === sourceId)?.id ?? "",
+      sourceFingerprint: active.sourceFingerprint,
+      requestGeneration: materialSummaryRequestGeneration.current,
+    });
+    const isCurrent = () => {
+      const latest = current.current;
+      const latestAuth = useAuthStore.getState();
+      const latestRemoved = new Set([...(latest.removedSessionIds ?? []), ...(latest.snapshot?.removedSessionIds ?? [])]);
+      const latestSession = historySessions(latest, ownerId).find((item) => item.id === sessionId);
+      const latestSource = latest.sources?.[sessionId]?.find((item) => item.id === sourceId);
+      const expected: MaterialSummaryScope = {
+        ownerId: active.ownerId,
+        workspaceGeneration: active.workspaceGeneration,
+        authGeneration: active.authGeneration,
+        sessionId: active.sessionId,
+        sourceId: active.sourceId,
+        sourceFingerprint: active.sourceFingerprint,
+        requestGeneration: active.requestGeneration,
+      };
+      return materialSummaryRequest.current === active && !controller.signal.aborted &&
+        ownerRef.current === ownerId && workspaceLive.current &&
+        getAuthGeneration() === active.authGeneration &&
+        latestAuth.user?.id === ownerId && !latestAuth.needsLogin &&
+        viewRef.current === "summary" && latest.summarySessionId === sessionId &&
+        !latestRemoved.has(sessionId) && latestSession?.userId === ownerId &&
+        latestSource?.reviewed === true && latestSource.text === active.sourceText &&
+        isCurrentMaterialSummaryScope(expected, currentScope());
+    };
+    setMaterialSummaryUi({
+      ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
+      sessionId, sourceId, sourceFingerprint: "", requestGeneration, status: "pending",
+    });
+    try {
+      active.sourceFingerprint = await fingerprintMaterialSourceText(source.text);
+      if (!isCurrent()) return;
+      const existing = cachedMaterialSummary(current.current, sessionId, source, active.sourceFingerprint);
+      if (existing) {
+        setMaterialSummaryUi({
+          ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
+          sessionId, sourceId, sourceFingerprint: active.sourceFingerprint, requestGeneration,
+          status: "ready", summary: existing,
+        });
+        return;
+      }
+      const result = await summarizeReviewedMaterial(active.sourceText, controller.signal);
+      if (!isCurrent()) return;
+      const latestSource = current.current.sources?.[sessionId]?.find((item) => item.id === sourceId);
+      if (!latestSource || await fingerprintMaterialSourceText(latestSource.text) !== active.sourceFingerprint || !isCurrent()) return;
+      if (typeof result.summary !== "string" || result.summary.trim().length === 0 || result.summary.length > 4_000)
+        throw new Error("Gemini chưa trả về được bản tóm tắt. Hãy thử lại.");
+      const summary = result.summary;
+      const next = cacheMaterialSummary(current.current, sessionId, sourceId, {
+        sourceFingerprint: active.sourceFingerprint,
+        summary,
+        generatedAt: Date.now(),
+      });
+      commitRef.current(next);
+      if (!isCurrent()) return;
+      setMaterialSummaryUi({
+        ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
+        sessionId, sourceId, sourceFingerprint: active.sourceFingerprint, requestGeneration,
+        status: "ready", summary,
+      });
+    } catch (cause) {
+      if (isCurrent()) setMaterialSummaryUi({
+        ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
+        sessionId, sourceId, sourceFingerprint: active.sourceFingerprint, requestGeneration,
+        status: "failed", error: cause instanceof Error ? cause.message : "Chưa tạo được tóm tắt tài liệu.",
+      });
+    } finally {
+      if (materialSummaryRequest.current === active) materialSummaryRequest.current = null;
+    }
+  }
   const resolveCurrentQuizSession = useCallback((sessionId: string): QuizSessionSource => {
     const value = current.current;
     const trip = value.active?.id === sessionId ? value.active : null;
@@ -2484,23 +2665,63 @@ function AdventureWorkspace() {
                         học của bạn đã được lưu.
                       </p>
                       {!!saved.materials?.[summarySession.id]?.length && !saved.sources?.[summarySession.id]?.length && <div className="info-box"><p>Tài liệu này được lưu bằng phiên bản cũ. Khôi phục bản chép đã lưu hoặc dán nội dung đúng, rồi xác nhận làm nguồn câu hỏi.</p><button onClick={() => {const value = current.current;if(value.summarySessionId !== summarySession.id) return;invalidateQuizForSourceEdit(owner, summarySession.id);commitRef.current({...value,sources:{...value.sources,[summarySession.id]:[recoveredMaterialSource(value.notes[summarySession.id] ?? "",value.materials?.[summarySession.id] ?? [])]},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});}}>Khôi phục / nhập bản chép tài liệu cũ</button></div>}
-                      {(saved.sources?.[summarySession.id] ?? []).map((source) => <details className="material-source" key={source.id} open={!source.reviewed}>
-                        <summary>Nguồn câu hỏi · {source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra"}</summary>
-                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} textareaLabel="Bản chép tài liệu" onChange={(text) => {
-                          const value = current.current;
-                          if(value.summarySessionId !== summarySession.id) return;
-                          invalidateQuizForSourceEdit(owner, summarySession.id);
-                          commitRef.current({...value,sources:{...value.sources,[summarySession.id]:(value.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? editMaterialSourceText(item, text) : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
-                        }} />
-                        <MaterialSourceReviewButton disabled={source.text.trim().length < 10} onClick={() => {try {
-                          const value = current.current;
-                          if(value.summarySessionId !== summarySession.id) return;
-                          const reviewed = reviewMaterialSource(source, source.text);
-                          invalidateQuizForSourceEdit(owner, summarySession.id);
-                          commitRef.current({...value,sources:{...value.sources,[summarySession.id]:(value.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? reviewed : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
-                          setError("");
-                        } catch(e) {setError(e instanceof Error ? e.message : "Không xác nhận được nguồn.");}}} />
-                      </details>)}
+                      {(saved.sources?.[summarySession.id] ?? []).map((source) => {
+                        const fingerprintKey = JSON.stringify([summarySession.id, source.id]);
+                        const fingerprintState = materialSummaryFingerprints[fingerprintKey];
+                        const sourceFingerprint = fingerprintState?.text === source.text ? fingerprintState.fingerprint : "";
+                        const ui = materialSummaryUi?.ownerId === owner &&
+                          materialSummaryUi.sessionId === summarySession.id && materialSummaryUi.sourceId === source.id
+                          ? materialSummaryUi
+                          : null;
+                        const cachedSummary = sourceFingerprint
+                          ? cachedMaterialSummary(saved, summarySession.id, source, sourceFingerprint)
+                          : undefined;
+                        const summaryText = source.reviewed
+                          ? cachedSummary ?? (ui?.status === "ready" && ui.sourceFingerprint === sourceFingerprint ? ui.summary : undefined)
+                          : undefined;
+                        const summaryError = ui?.status === "failed" && ui.sourceFingerprint === sourceFingerprint
+                          ? ui.error
+                          : "";
+                        const canGenerateSummary = !!user && !needsLogin && owner !== "guest" && online &&
+                          !authOffline && loaded && exclusive && workspaceLive.current;
+                        const summaryUnavailableReason = !user || needsLogin || owner === "guest"
+                          ? "Đăng nhập để tạo tóm tắt tài liệu."
+                          : !online || authOffline
+                            ? "Kết nối mạng để tạo tóm tắt tài liệu."
+                            : !loaded || !exclusive || !workspaceLive.current
+                              ? "Mở hành trình trên thiết bị này để tạo tóm tắt."
+                              : "";
+                        return <details className="material-source" key={source.id} open={!source.reviewed}>
+                          <summary>Nguồn câu hỏi · {source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra"}</summary>
+                          <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} textareaLabel="Bản chép tài liệu" onChange={(text) => {
+                            const value = current.current;
+                            if(value.summarySessionId !== summarySession.id) return;
+                            cancelMaterialSummaryRequest(summarySession.id, source.id);
+                            invalidateQuizForSourceEdit(owner, summarySession.id);
+                            const withoutSummary = removeMaterialSummaryCacheEntry(value, summarySession.id, source.id);
+                            commitRef.current({...withoutSummary,sources:{...withoutSummary.sources,[summarySession.id]:(withoutSummary.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? editMaterialSourceText(item, text) : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
+                          }} />
+                          <MaterialSourceReviewButton disabled={source.text.trim().length < 10} onClick={() => {try {
+                            const value = current.current;
+                            if(value.summarySessionId !== summarySession.id) return;
+                            cancelMaterialSummaryRequest(summarySession.id, source.id);
+                            const reviewed = reviewMaterialSource(source, source.text);
+                            invalidateQuizForSourceEdit(owner, summarySession.id);
+                            const withoutSummary = removeMaterialSummaryCacheEntry(value, summarySession.id, source.id);
+                            commitRef.current({...withoutSummary,sources:{...withoutSummary.sources,[summarySession.id]:(withoutSummary.sources?.[summarySession.id] ?? []).map(item => item.id === source.id ? reviewed : item)},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});
+                            setError("");
+                          } catch(e) {setError(e instanceof Error ? e.message : "Không xác nhận được nguồn.");}}} />
+                          <MaterialSummaryControl
+                            source={source}
+                            summary={summaryText}
+                            pending={ui?.status === "pending"}
+                            error={summaryError}
+                            canGenerate={canGenerateSummary}
+                            disabledReason={summaryUnavailableReason}
+                            onGenerate={() => void generateMaterialSummary(summarySession.id, source.id)}
+                          />
+                        </details>;
+                      })}
                       <QuizPanel
                         key={`${owner}:${summarySession.id}:${summaryCorrectionVersion}`}
                         ownerId={owner}

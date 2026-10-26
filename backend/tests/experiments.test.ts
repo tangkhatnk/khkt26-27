@@ -110,6 +110,25 @@ describe("automatic trip history projections", () => {
     expect(csv).toContain("break_seconds");
   });
 
+  it("exposes planned break count only from a valid saved plan", () => {
+    const planned = experimentRecord({ ...session, target: 180,
+      breakPlan: { count: 2, seconds: 60 } }, "server-secret");
+    const noBreaks = experimentRecord({ ...session, target: 120,
+      breakPlan: { count: 0, seconds: 60 } }, "server-secret");
+    const legacyBreakSegments = experimentRecord({ ...session, target: 120,
+      segments: [{ start: 1000, end: 21000, kind: "focus" },
+        { start: 21000, end: 31000, kind: "break" },
+        { start: 31000, end: 61000, kind: "focus" }] }, "server-secret");
+    const invalidPlan = experimentRecord({ ...session, target: 60,
+      breakPlan: { count: 1, seconds: 60 } }, "server-secret");
+
+    expect(planned.plannedBreakCount).toBe(2);
+    expect(noBreaks.plannedBreakCount).toBe(0);
+    expect(legacyBreakSegments.plannedBreakCount).toBeNull();
+    expect(invalidPlan.plannedBreakCount).toBeNull();
+    expect(experimentCsv([planned])).not.toContain("planned_break_count");
+  });
+
   it("keeps only coarse device categories and treats legacy missing values explicitly", () => {
     const current = experimentRecord({ ...session, deviceCategory: "tablet" }, "server-secret");
     const legacy = experimentRecord(session, "server-secret");

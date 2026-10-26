@@ -45,6 +45,7 @@ const fixture = {
   distractions: 3,
   breakSeconds: 8 * 60,
   plannedBreakSeconds: 10 * 60,
+  plannedBreakCount: 1,
   deviceCategory: "tablet",
   completed: false,
   quizScore: 4,
@@ -57,7 +58,7 @@ test("history uses compact semantic columns while retaining every run detail", (
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
 
   assert.match(markup, /<caption>Lịch sử các phiên học đã lưu/u);
-  for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Thời gian học và chuyến", "Tập trung và nghỉ", "Tóm tắt mục tiêu", "Quiz"]) {
+  for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Thời gian học và chuyến", "Hiệu suất", "Tóm tắt mục tiêu", "Quiz"]) {
     assert.match(markup, new RegExp(`<th[^>]*>${heading}</th>`, "u"));
   }
   assert.match(markup, /class="experiment-trip-code"[^>]*>V-1234567890AB/u);
@@ -65,13 +66,15 @@ test("history uses compact semantic columns while retaining every run detail", (
   assert.match(markup, /1 giờ 30 phút mục tiêu/u);
   assert.match(markup, /1 giờ 40 phút tổng chuyến/u);
   assert.match(markup, /1 giờ 22 phút tập trung/u);
+  assert.match(markup, /Hiệu suất: 105%/u);
+  assert.match(markup, /Mục tiêu: 1 giờ 30 phút · 1 lượt nghỉ/u);
   assert.match(markup, /8 phút giải lao thực tế/u);
-  assert.match(markup, /10 phút giải lao dự kiến/u);
+  assert.match(markup, /<dt>Giải lao dự kiến<\/dt><dd>10 phút<\/dd>/u);
   assert.match(markup, /4\/5 điểm/u);
-  for (const detail of ["TESTER-PRIVATE-42", "iPad/Tablet", "3 lần", "Chưa đạt mục tiêu", "Ôn tập cấu trúc tế bào và chức năng của các bào quan"]) {
+  for (const detail of ["TESTER-PRIVATE-42", "iPad/Tablet", "3 lần", "Ôn tập cấu trúc tế bào và chức năng của các bào quan"]) {
     assert.match(markup, new RegExp(detail, "u"));
   }
-  assert.doesNotMatch(markup, /RAW PRIVATE GOAL MUST NOT RENDER|80%|Đăng công khai/u);
+  assert.doesNotMatch(markup, /RAW PRIVATE GOAL MUST NOT RENDER|80%|Đăng công khai|Đạt mục tiêu|Chưa đạt mục tiêu/u);
   assert.match(markup, /<details class="experiment-details">/u);
   assert.match(markup, /<dt>Bắt đầu \(giờ địa phương của bạn\)<\/dt><dd><time dateTime="2026-10-21T03:05:00\.000Z">[^<]*:\d{2}:\d{2}[^<]*<\/time>/u);
   assert.match(markup, /<dt>Kết thúc \(giờ địa phương của bạn\)<\/dt><dd><time dateTime="2026-10-21T04:45:00\.000Z">[^<]*:\d{2}:\d{2}[^<]*<\/time>/u);
@@ -107,7 +110,7 @@ test("history handles a missing quiz and missing optional timing values accessib
   assert.match(markup, /1 giờ 30 phút mục tiêu/u);
 });
 
-test("public history shows zero seconds of breaks and keeps corrected elapsed time provenance clear", () => {
+test("public history keeps corrected timing provenance without inferring goal achievement", () => {
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
     runs: [{
       ...fixture,
@@ -120,9 +123,28 @@ test("public history shows zero seconds of breaks and keeps corrected elapsed ti
   }));
 
   assert.match(markup, /0 giây giải lao thực tế/u);
-  assert.match(markup, /Đạt mục tiêu theo số liệu đang áp dụng|Chưa đạt mục tiêu theo số liệu đang áp dụng/u);
+  assert.doesNotMatch(markup, /<dt>Trạng thái mục tiêu|Đạt mục tiêu|Chưa đạt mục tiêu/u);
   assert.match(markup, /Mốc bắt đầu và kết thúc.*dữ kiện đo ban đầu.*thời lượng chuyến đã được hiệu chỉnh/u);
   assert.doesNotMatch(markup, /theo đồng hồ/u);
+});
+
+test("history reports no efficiency when study denominator is absent or non-positive", () => {
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
+    runs: [
+      { ...fixture, studyElapsedSeconds: 0 },
+      { ...fixture, studyElapsedSeconds: undefined },
+    ],
+  }));
+  assert.equal((markup.match(/Chưa có dữ liệu hiệu suất/gu) ?? []).length, 4);
+  assert.doesNotMatch(markup, /Hiệu suất: 105%/u);
+});
+
+test("history does not guess a planned break count from elapsed or break seconds", () => {
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
+    runs: [{ ...fixture, plannedBreakCount: null, plannedBreakSeconds: 0, breakSeconds: 8 * 60 }],
+  }));
+  assert.match(markup, /Không ghi nhận lịch nghỉ/u);
+  assert.doesNotMatch(markup, /0 lượt nghỉ/u);
 });
 
 test("public history shows a concise correction flag without exposing private fields", () => {
