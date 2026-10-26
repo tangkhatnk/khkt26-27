@@ -16,6 +16,8 @@ import { config } from "../src/config.js";
 import { tripIdentity } from "../src/experiments.js";
 import { registerWebAssets } from "../src/webAssets.js";
 import type { World } from "../src/adventure/domain.js";
+import { acceptTokens as acceptFrontendTokens, clearTokens as clearFrontendTokens, request as frontendRequest } from "../../src/services/api";
+import { publishPublicMaterialSummary, readPublicMaterialSummary, withdrawPublicMaterialSummary } from "../../src/services/publicMaterialSummary";
 vi.mock("../src/storage.js", () => ({
   uploadFile: vi.fn().mockResolvedValue({}),
   deleteFile: vi.fn().mockResolvedValue({}),
@@ -1905,6 +1907,72 @@ it("publishes only the exact confirmed copy in public GET and never in CSV", asy
   expect(csv.body).not.toContain("document_summary");
   const status = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers });
   expect(status.json()).toMatchObject({ summary, version: 1 });
+
+  const withdrawn = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share/withdraw", headers,
+    payload: { sessionId: id, expectedVersion: 1 } });
+  expect(withdrawn.statusCode).toBe(200);
+  const historyAfterWithdrawal = await app.inject({ url: "/api/v1/experiments" });
+  const withdrawnRun = historyAfterWithdrawal.json().runs.find((row: { id: string }) => row.id === tripIdentity(userId, id, config.JWT_SECRET).id);
+  expect(withdrawnRun.documentSummary).toBeUndefined();
+});
+
+it("runs the frontend summary client through the actual Fastify routes from share to withdrawal", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const saved = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers,
+    payload: { id, groupId: null, goal: "Synthetic source review", topic: "biology", target: 60,
+      started: ended - 60000, ended, segments: [{ start: ended - 60000, end: ended, kind: "focus" }] } });
+  expect(saved.statusCode).toBe(200);
+
+  const originalWindow = globalThis.window;
+  const originalStorage = globalThis.sessionStorage;
+  const originalFetch = globalThis.fetch;
+  const storageValues = new Map<string, string>();
+  globalThis.window = {} as Window & typeof globalThis;
+  globalThis.sessionStorage = {
+    getItem: (key: string) => storageValues.get(key) ?? null,
+    setItem: (key: string, value: string) => { storageValues.set(key, value); },
+    removeItem: (key: string) => { storageValues.delete(key); },
+    clear: () => storageValues.clear(),
+    key: (index: number) => [...storageValues.keys()][index] ?? null,
+    get length() { return storageValues.size; },
+  } as Storage;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const response = await app.inject({
+      method: init?.method ?? "GET",
+      url: `${url.pathname}${url.search}`,
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
+      payload: typeof init?.body === "string" ? init.body : undefined,
+    });
+    return new Response(response.body, {
+      status: response.statusCode,
+      headers: { "Content-Type": String(response.headers["content-type"] ?? "application/json") },
+    });
+  };
+  try {
+    const owner = await db.user.findUniqueOrThrow({ where: { id: userId } });
+    await acceptFrontendTokens(await issueTokens(db, owner));
+    expect(await readPublicMaterialSummary(id)).toEqual({ summary: null, version: 0, approvedAt: null });
+
+    const exactSyntheticSummary = "Synthetic reviewed-source summary for the public goal cell.";
+    const published = await publishPublicMaterialSummary(id, exactSyntheticSummary, 0);
+    expect(published).toMatchObject({ summary: exactSyntheticSummary, version: 1 });
+    const history = await frontendRequest<{ runs: Array<{ id: string; documentSummary?: string }> }>("/experiments", {}, false);
+    const run = history.runs.find((row) => row.id === tripIdentity(userId, id, config.JWT_SECRET).id);
+    expect(run?.documentSummary).toBe(exactSyntheticSummary);
+
+    const withdrawn = await withdrawPublicMaterialSummary(id, 1);
+    expect(withdrawn).toMatchObject({ summary: null, version: 2, approvedAt: null });
+    const historyAfterWithdrawal = await frontendRequest<{ runs: Array<{ id: string; documentSummary?: string }> }>("/experiments", {}, false);
+    const withdrawnRun = historyAfterWithdrawal.runs.find((row) => row.id === tripIdentity(userId, id, config.JWT_SECRET).id);
+    expect(withdrawnRun?.documentSummary).toBeUndefined();
+  } finally {
+    await clearFrontendTokens();
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+    globalThis.sessionStorage = originalStorage;
+  }
 });
 
 it("versions replacement and withdrawal, rejects stale writes, and keeps the version after republish", async () => {

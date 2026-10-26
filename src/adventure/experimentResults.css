@@ -106,6 +106,15 @@
   overflow-wrap: anywhere;
 }
 
+.experiment-results .experiment-document-summary {
+  margin: 0;
+  color: #5d6c60;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .experiment-results .experiment-time-summary,
 .experiment-results .experiment-efficiency-summary {
   display: grid;

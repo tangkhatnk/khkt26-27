@@ -99,7 +99,9 @@ test("history explains that saved sessions appear automatically and summarizes g
   assert.match(markup, /phiên đã lưu tự động xuất hiện/u);
   assert.match(markup, /tối đa 200 ký tự/u);
   assert.match(markup, /Tránh ghi thông tin riêng tư vào mục tiêu/u);
-  assert.match(markup, /không được gửi thành các trường riêng/u);
+  assert.match(markup, /Nếu bạn xác nhận chia sẻ tóm tắt tài liệu, bản đó sẽ hiện dưới mục tiêu/u);
+  assert.match(markup, /CSV không chứa tóm tắt/u);
+  assert.match(markup, /email, mã tài khoản, tên tệp, nội dung nguồn và câu trả lời chi tiết không được gửi thành các trường riêng/u);
   assert.match(markup, /Khoảng học đã diễn ra không tính giờ nghỉ; thời gian thực học không tính xao nhãng/u);
   assert.doesNotMatch(markup, /chọn công khai|Phiên riêng tư|Mức hoàn thành là tự đánh giá/u);
 });
@@ -113,6 +115,19 @@ test("history provides a labeled mobile card layout for the same trip", () => {
   assert.match(markup, /<span class="experiment-run-card__metric-label">Thời gian học<\/span>/u);
   assert.match(markup, /class="experiment-quiz-badge experiment-quiz-badge--scored"/u);
   assert.match(markup, /<div class="experiment-goal-summary"><span>Ôn tập cấu trúc tế bào và chức năng của các bào quan<\/span><\/div>/u);
+});
+
+test("history shows only an explicitly shared document summary beneath its goal in table, detail, and card", () => {
+  const shared = "Learner-approved public document summary";
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
+    runs: [{ ...fixture, documentSummary: shared }],
+  }));
+  assert.equal((markup.match(new RegExp(shared, "gu")) ?? []).length, 4);
+  assert.match(markup, /<div class="experiment-goal-summary"><span>Ôn tập cấu trúc tế bào và chức năng của các bào quan<\/span><p class="experiment-document-summary">Learner-approved public document summary<\/p><\/div>/u);
+
+  const withoutShare = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
+  assert.doesNotMatch(withoutShare, /experiment-document-summary|Learner-approved public document summary/u);
+  assert.doesNotMatch(withoutShare, /Tóm tắt tài liệu/u);
 });
 
 test("history handles a missing quiz and missing optional timing values accessibly", () => {

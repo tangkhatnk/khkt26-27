@@ -9,6 +9,7 @@ export type ExperimentRun = {
   tripCode: string;
   testerCode: string;
   goalSummary: string;
+  documentSummary?: string | null;
   topic: string;
   targetSeconds: number;
   elapsedSeconds: number;
@@ -96,6 +97,7 @@ function CorrectionBadge({ run }: { run: ExperimentRun }) {
 function GoalSummary({ run }: { run: ExperimentRun }) {
   return <div className="experiment-goal-summary">
     <span>{run.goalSummary || "Không ghi mục tiêu"}</span>
+    {run.documentSummary ? <p className="experiment-document-summary">{run.documentSummary}</p> : null}
   </div>;
 }
 
@@ -111,7 +113,7 @@ function RunDetails({ run }: { run: ExperimentRun }) {
     <dl>
       <div><dt>ID chuyến ẩn danh</dt><dd><code>{run.id}</code></dd></div>
       <div><dt>Mã người thử</dt><dd><code>{run.testerCode}</code></dd></div>
-      <div><dt>Tóm tắt mục tiêu</dt><dd>{run.goalSummary || "Không ghi mục tiêu"}</dd></div>
+      <div><dt>Tóm tắt mục tiêu</dt><dd><GoalSummary run={run} /></dd></div>
       <div><dt>Thiết bị</dt><dd>{deviceLabel(run.deviceCategory)}</dd></div>
       <div><dt>Bắt đầu (giờ địa phương của bạn)</dt><dd><time dateTime={run.startedAt}>{startedDate}</time></dd></div>
       <div><dt>Kết thúc (giờ địa phương của bạn)</dt><dd><time dateTime={run.endedAt}>{endedDate}</time></dd></div>
@@ -226,7 +228,7 @@ export function ExperimentResults() {
   return <section className="experiment-results">
     <div className="page-heading"><span className="eyebrow">LỊCH SỬ HỌC TẬP</span>
       <h1>Lịch sử chuyến đi</h1>
-      <p>Các phiên đã lưu tự động xuất hiện trong lịch sử chung. Mỗi phiên có tóm tắt mục tiêu dài tối đa 200 ký tự, chủ đề, thời gian, thiết bị và điểm quiz. Tránh ghi thông tin riêng tư vào mục tiêu; email, mã tài khoản, tài liệu và câu trả lời chi tiết không được gửi thành các trường riêng.</p>
+      <p>Các phiên đã lưu tự động xuất hiện trong lịch sử chung. Mục tiêu được rút gọn tối đa 200 ký tự. Nếu bạn xác nhận chia sẻ tóm tắt tài liệu, bản đó sẽ hiện dưới mục tiêu; CSV không chứa tóm tắt. Tránh ghi thông tin riêng tư vào mục tiêu; email, mã tài khoản, tên tệp, nội dung nguồn và câu trả lời chi tiết không được gửi thành các trường riêng.</p>
     </div>
     <div className="choice-row"><button disabled={loading} onClick={refresh}>{loading ? "Đang tải…" : "Cập nhật lịch sử"}</button>
       <a className="experiment-export" href={`${API_URL}/experiments/export.csv`} download="viendu-trip-history.csv">Tải lịch sử CSV</a></div>
