@@ -58,17 +58,17 @@ test("history uses compact semantic columns while retaining every run detail", (
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
 
   assert.match(markup, /<caption>Lịch sử các phiên học đã lưu/u);
-  for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Tập trung và mục tiêu", "Hiệu suất", "Tóm tắt mục tiêu", "Quiz"]) {
+  for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Thời gian học", "Hiệu suất", "Tóm tắt mục tiêu", "Quiz"]) {
     assert.match(markup, new RegExp(`<th[^>]*>${heading}</th>`, "u"));
   }
   assert.match(markup, /class="experiment-trip-code"[^>]*>V-1234567890AB/u);
   const focusCells = [...markup.matchAll(/<div class="experiment-time-summary">([\s\S]*?)<\/div>/gu)].map(([, body]) => body);
   assert.equal(focusCells.length, 2);
   for (const cell of focusCells) {
-    assert.match(cell, /<strong>1 giờ 22 phút tập trung<\/strong>/u);
+    assert.match(cell, /<strong>1 giờ 22 phút thực học<\/strong>/u);
     assert.match(cell, /<span class="experiment-run-card__meta">Mục tiêu: 1 giờ 30 phút · 1 lượt nghỉ<\/span>/u);
     assert.equal((cell.match(/<span\b/gu) ?? []).length, 1);
-    assert.doesNotMatch(cell, /học|tổng chuyến|dự kiến|giải lao/u);
+    assert.doesNotMatch(cell, /tổng chuyến|dự kiến|giải lao/u);
   }
   const efficiencyCells = [...markup.matchAll(/<div class="experiment-efficiency-summary">([\s\S]*?)<\/div>/gu)].map(([, body]) => body);
   assert.equal(efficiencyCells.length, 2);
@@ -76,9 +76,9 @@ test("history uses compact semantic columns while retaining every run detail", (
     assert.match(cell, /<strong>105%<\/strong>/u);
     assert.doesNotMatch(cell, /<span\b|1 giờ 22 phút/u);
   }
-  assert.match(markup, /<dt>Thời gian học thực tế<\/dt><dd>1 giờ 18 phút<\/dd>/u);
+  assert.match(markup, /<dt>Khoảng học đã diễn ra \(không tính nghỉ\)<\/dt><dd>1 giờ 18 phút<\/dd>/u);
   assert.match(markup, /<dt>Thời lượng chuyến<\/dt><dd>1 giờ 40 phút<\/dd>/u);
-  assert.match(markup, /<dt>Thời gian tập trung<\/dt><dd>1 giờ 22 phút<\/dd>/u);
+  assert.match(markup, /<dt>Thời gian thực học<\/dt><dd>1 giờ 22 phút<\/dd>/u);
   assert.match(markup, /<dt>Mục tiêu thời gian<\/dt><dd>1 giờ 30 phút<\/dd>/u);
   assert.match(markup, /<dt>Giải lao thực tế<\/dt><dd>8 phút<\/dd>/u);
   assert.match(markup, /<dt>Giải lao dự kiến<\/dt><dd>10 phút<\/dd>/u);
@@ -100,6 +100,7 @@ test("history explains that saved sessions appear automatically and summarizes g
   assert.match(markup, /tối đa 200 ký tự/u);
   assert.match(markup, /Tránh ghi thông tin riêng tư vào mục tiêu/u);
   assert.match(markup, /không được gửi thành các trường riêng/u);
+  assert.match(markup, /Khoảng học đã diễn ra không tính giờ nghỉ; thời gian thực học không tính xao nhãng/u);
   assert.doesNotMatch(markup, /chọn công khai|Phiên riêng tư|Mức hoàn thành là tự đánh giá/u);
 });
 
@@ -109,6 +110,7 @@ test("history provides a labeled mobile card layout for the same trip", () => {
   assert.match(markup, /class="experiment-run-card"/u);
   assert.match(markup, /class="experiment-run-card__metrics"/u);
   assert.match(markup, /<h3[^>]*>Sinh học/u);
+  assert.match(markup, /<span class="experiment-run-card__metric-label">Thời gian học<\/span>/u);
   assert.match(markup, /class="experiment-quiz-badge experiment-quiz-badge--scored"/u);
   assert.match(markup, /<div class="experiment-goal-summary"><span>Ôn tập cấu trúc tế bào và chức năng của các bào quan<\/span><\/div>/u);
 });
@@ -119,7 +121,7 @@ test("history handles a missing quiz and missing optional timing values accessib
   }));
   assert.match(markup, /class="experiment-quiz-badge experiment-quiz-badge--pending"[^>]*>Chưa làm/u);
   assert.match(markup, /Chưa có thời gian giải lao/u);
-  assert.match(markup, /Chưa ghi nhận thời gian học thực tế/u);
+  assert.match(markup, /Chưa ghi nhận khoảng học đã diễn ra/u);
   assert.match(markup, /Mục tiêu: 1 giờ 30 phút · 1 lượt nghỉ/u);
 });
 
@@ -156,7 +158,7 @@ test("history displays focused seconds and rounded efficiency as the only primar
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
     runs: [{ ...fixture, focusedSeconds: 46, studyElapsedSeconds: 60, targetSeconds: 120 }],
   }));
-  assert.equal((markup.match(/<strong>46 giây tập trung<\/strong>/gu) ?? []).length, 2);
+  assert.equal((markup.match(/<strong>46 giây thực học<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<strong>77%<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<span class="experiment-run-card__meta">Mục tiêu: 2 phút · 1 lượt nghỉ<\/span>/gu) ?? []).length, 2);
 });
