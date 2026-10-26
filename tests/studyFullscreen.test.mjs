@@ -310,3 +310,123 @@ test("a late success after disposal exits the request's captured target", async 
   assert.equal(doc.exitedElements[0], originalTarget);
   assert.equal(doc.fullscreenElement, null);
 });
+
+test("restored focus offers fullscreen without requesting until the user clicks", () => {
+  const doc = fakeDocument();
+  const target = { calls: 0, requestFullscreen() { this.calls += 1; } };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.setActiveFocus(true);
+
+  assert.equal(target.calls, 0);
+  assert.equal(controller.restorePrompt, true);
+  controller.dispose();
+});
+
+test("a direct Start or resume request does not create a restoration prompt", () => {
+  const doc = fakeDocument();
+  const target = { calls: 0, requestFullscreen() { this.calls += 1; } };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.request();
+  controller.setActiveFocus(true);
+
+  assert.equal(target.calls, 1);
+  assert.equal(controller.restorePrompt, false);
+  controller.dispose();
+});
+
+test("restoration retry stays visible after rejection and clears after success without returning on Escape", async () => {
+  const doc = fakeDocument();
+  let rejectFirst;
+  let calls = 0;
+  const target = {
+    requestFullscreen() {
+      calls += 1;
+      if (calls === 1) return new Promise((_resolve, reject) => { rejectFirst = reject; });
+      doc.fullscreenElement = target;
+      doc.dispatch("fullscreenchange");
+      return Promise.resolve();
+    },
+  };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.setActiveFocus(true);
+  controller.request();
+  rejectFirst(new Error("denied"));
+  await nextTurn();
+
+  assert.equal(controller.restorePrompt, true);
+  assert.equal(controller.status, "failed");
+
+  controller.request();
+  await nextTurn();
+  assert.equal(controller.restorePrompt, false);
+  assert.equal(controller.isFullscreen, true);
+
+  doc.fullscreenElement = null;
+  doc.dispatch("fullscreenchange");
+  assert.equal(controller.restorePrompt, false);
+  assert.equal(calls, 2);
+  controller.dispose();
+});
+
+test("dismissing restoration applies to the current focus entry only", () => {
+  const doc = fakeDocument();
+  const target = { requestFullscreen() {} };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.setActiveFocus(true);
+  controller.dismissRestorePrompt();
+  assert.equal(controller.restorePrompt, false);
+
+  controller.leave();
+  controller.setActiveFocus(true);
+  assert.equal(controller.restorePrompt, true);
+  controller.dispose();
+});
+
+test("unsupported fullscreen leaves restoration action available and retryable", () => {
+  const doc = fakeDocument();
+  doc.fullscreenEnabled = false;
+  const target = { calls: 0, requestFullscreen() { this.calls += 1; } };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.setActiveFocus(true);
+  controller.request();
+
+  assert.equal(target.calls, 0);
+  assert.equal(controller.restorePrompt, true);
+  assert.equal(controller.status, "unsupported");
+  assert.match(controller.message, /vẫn có thể học/u);
+  controller.dispose();
+});
+
+test("dismissing while fullscreen is pending cancels a later owned grant", async () => {
+  const doc = fakeDocument();
+  let resolveRequest;
+  const target = {
+    requestFullscreen() {
+      return new Promise((resolve) => { resolveRequest = resolve; });
+    },
+  };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.setActiveFocus(true);
+  controller.request();
+  controller.dismissRestorePrompt();
+
+  assert.equal(controller.restorePrompt, false);
+  assert.equal(controller.status, "idle");
+  doc.fullscreenElement = target;
+  doc.dispatch("fullscreenchange");
+  assert.equal(doc.exitCalls, 1);
+  assert.equal(doc.exitedElements[0], target);
+  assert.equal(doc.fullscreenElement, null);
+
+  resolveRequest();
+  await nextTurn();
+  assert.equal(doc.exitCalls, 1);
+  assert.equal(controller.isFullscreen, false);
+  controller.dispose();
+});

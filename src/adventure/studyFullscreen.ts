@@ -9,6 +9,7 @@ export type StudyFullscreenSnapshot = {
   status: StudyFullscreenStatus;
   isFullscreen: boolean;
   message: string;
+  restorePrompt: boolean;
 };
 
 type FullscreenTarget = Element & {
@@ -35,8 +36,10 @@ export type StudyFullscreenController = {
   request: () => void;
   leave: () => void;
   toggle: () => void;
+  dismissRestorePrompt: () => void;
   setActiveFocus: (active: boolean) => void;
   dispose: () => void;
+  readonly restorePrompt: boolean;
 };
 
 const messages: Record<StudyFullscreenStatus, string> = {
@@ -61,6 +64,7 @@ export function createStudyFullscreenController(
   let statusValue: StudyFullscreenStatus = "idle";
   let activeFocus = false;
   let allowFullscreen = false;
+  let restorePrompt = false;
   let disposed = false;
   let nextRequestId = 0;
   let currentRequestId: number | null = null;
@@ -79,6 +83,7 @@ export function createStudyFullscreenController(
       status: statusValue,
       isFullscreen: fullscreen,
       message: fullscreen ? "" : messages[statusValue],
+      restorePrompt,
     };
   };
 
@@ -140,7 +145,10 @@ export function createStudyFullscreenController(
       return;
     }
 
-    if (isFullscreen()) setStatus("active");
+    if (isFullscreen()) {
+      restorePrompt = false;
+      setStatus("active");
+    }
     else setStatus(confirmed ? "idle" : "failed");
   };
 
@@ -161,7 +169,10 @@ export function createStudyFullscreenController(
       return;
     }
 
-    if (isFullscreen()) setStatus("active");
+    if (isFullscreen()) {
+      restorePrompt = false;
+      setStatus("active");
+    }
     else setStatus(confirmed ? "idle" : "failed");
   };
 
@@ -181,6 +192,7 @@ export function createStudyFullscreenController(
       if ((!activeFocus || !allowFullscreen) && ownedTargets.has(current)) {
         exitExactOwnedTarget(current);
       } else if (ownedTargets.has(current) && !hasCurrentPendingRequest()) {
+        restorePrompt = false;
         statusValue = "active";
       } else if (!ownedTargets.has(current) && statusValue === "active") {
         statusValue = "idle";
@@ -240,6 +252,7 @@ export function createStudyFullscreenController(
     if (disposed) return;
     activeFocus = false;
     allowFullscreen = false;
+    restorePrompt = false;
     invalidateCurrentRequest();
 
     // Requests keep their captured targets until settlement, so a ref change
@@ -261,6 +274,7 @@ export function createStudyFullscreenController(
     if (current && ownedTargets.has(current)) {
       allowFullscreen = false;
       invalidateCurrentRequest();
+      restorePrompt = false;
       exitExactOwnedTarget(current);
       setStatus("idle");
       return;
@@ -275,7 +289,30 @@ export function createStudyFullscreenController(
       leave();
       return;
     }
+    if (!activeFocus) {
+      restorePrompt = true;
+      emit();
+    }
     activeFocus = true;
+  };
+
+  const dismissRestorePrompt = () => {
+    if (disposed || !restorePrompt) return;
+    restorePrompt = false;
+    const currentRequest = currentRequestId === null
+      ? undefined
+      : pendingRequests.get(currentRequestId);
+    if (currentRequest) {
+      allowFullscreen = false;
+      invalidateCurrentRequest();
+      setStatus("idle");
+      if (document.fullscreenElement === currentRequest.target) {
+        ownedTargets.add(currentRequest.target);
+        exitExactOwnedTarget(currentRequest.target);
+      }
+      return;
+    }
+    emit();
   };
 
   const dispose = () => {
@@ -308,9 +345,13 @@ export function createStudyFullscreenController(
       const current = snapshot();
       return current.message;
     },
+    get restorePrompt() {
+      return restorePrompt;
+    },
     request,
     leave,
     toggle,
+    dismissRestorePrompt,
     setActiveFocus,
     dispose,
   };

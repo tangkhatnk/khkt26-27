@@ -20,6 +20,7 @@ import { ThemeToggle } from "./theme";
 import { studyGuideDownload, studyGuideSource, type StudyGuideDraft } from "./studyGuide";
 import { createStudyGuideReviewState, hasPendingStudyGuide as hasPendingGuideReview, reduceStudyGuideReview } from "./studyGuideReview";
 import { useStudyFullscreen } from "./useStudyFullscreen";
+import { FocusFullscreenRecovery } from "./FocusFullscreenRecovery";
 import { JourneyView } from "./JourneyView";
 import { TopDownScene } from "./TopDownScene";
 import { detectDeviceCategory } from "./device";
@@ -2019,6 +2020,14 @@ function AdventureWorkspace() {
               {view === "focus" &&
                 (active ? (
                   <>
+                    {studyFullscreen.restorePrompt && (
+                      <FocusFullscreenRecovery
+                        status={studyFullscreen.status}
+                        message={studyFullscreen.message}
+                        onRequest={studyFullscreen.request}
+                        onDismiss={studyFullscreen.dismissRestorePrompt}
+                      />
+                    )}
                     <div className="focus-heading">
                       <span className="pill">
                         {active.groupId
@@ -2092,7 +2101,7 @@ function AdventureWorkspace() {
                           <button type="button" onClick={studyFullscreen.toggle} aria-pressed={studyFullscreen.isFullscreen} disabled={studyFullscreen.status === "pending" && !studyFullscreen.isFullscreen}>
                             {studyFullscreen.isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
                           </button>
-                          {studyFullscreen.message && <span className="study-fullscreen-status" role="status">{studyFullscreen.message}</span>}
+                          {studyFullscreen.message && !studyFullscreen.restorePrompt && <span className="study-fullscreen-status" role="status">{studyFullscreen.message}</span>}
                         </div>
                         {deviceClockBehind && <div className="info-box">
                           <p>Đồng hồ thiết bị đang chạy lùi. Hãy đặt lại giờ đúng để tiếp tục; dữ liệu phiên vẫn được giữ.</p>

@@ -597,6 +597,20 @@ html[data-theme="dark"] .adventure :is(
   background: #385644 !important;
 }
 
+html[data-theme="dark"] .adventure .focus-fullscreen-recovery {
+  border-color: #526f59;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .focus-fullscreen-recovery p {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .adventure .focus-fullscreen-recovery .focus-fullscreen-recovery__status {
+  color: #f0bb9b;
+}
+
 html[data-theme="dark"] .adventure:fullscreen {
   background: var(--page-bg);
 }

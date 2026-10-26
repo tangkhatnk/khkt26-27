@@ -76,3 +76,65 @@
   font-size: 12px;
   text-align: center;
 }
+
+.adventure .focus-fullscreen-recovery {
+  max-width: 850px;
+  margin: 0 auto 22px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border: 1px solid #a9c3a8;
+  border-radius: 14px;
+  background: #e8efe4;
+  color: #263d30;
+}
+
+.adventure .focus-fullscreen-recovery h2 {
+  margin: 0 0 5px;
+  font-size: 17px;
+}
+
+.adventure .focus-fullscreen-recovery p {
+  margin: 0;
+  color: #52685a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.adventure .focus-fullscreen-recovery .focus-fullscreen-recovery__status {
+  margin-top: 5px;
+  color: #7a432c;
+}
+
+.adventure .focus-fullscreen-recovery__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.adventure .focus-fullscreen-recovery__actions .primary {
+  min-height: 48px;
+}
+
+@media (max-width: 620px) {
+  .adventure .focus-fullscreen-recovery {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding: 16px;
+  }
+
+  .adventure .focus-fullscreen-recovery__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .adventure .focus-fullscreen-recovery__actions button {
+    width: 100%;
+  }
+}
