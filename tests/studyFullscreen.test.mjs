@@ -430,3 +430,47 @@ test("dismissing while fullscreen is pending cancels a later owned grant", async
   assert.equal(controller.isFullscreen, false);
   controller.dispose();
 });
+
+test("dismissing after a retry rejects still cancels an older request that grants late", async () => {
+  const doc = fakeDocument();
+  let resolveFirst;
+  let rejectSecond;
+  let calls = 0;
+  const target = {
+    requestFullscreen() {
+      calls += 1;
+      if (calls === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+      return new Promise((_resolve, reject) => { rejectSecond = reject; });
+    },
+  };
+  const unrelatedTarget = { requestFullscreen() {} };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.setActiveFocus(true);
+  controller.request();
+  controller.leave();
+  controller.setActiveFocus(true);
+  controller.request();
+  rejectSecond(new Error("denied"));
+  await nextTurn();
+
+  assert.equal(controller.status, "failed");
+  controller.dismissRestorePrompt();
+  assert.equal(controller.restorePrompt, false);
+
+  doc.fullscreenElement = unrelatedTarget;
+  doc.dispatch("fullscreenchange");
+  assert.equal(doc.exitCalls, 0);
+
+  doc.fullscreenElement = target;
+  doc.dispatch("fullscreenchange");
+  assert.equal(doc.exitCalls, 1);
+  assert.equal(doc.exitedElements[0], target);
+  assert.equal(doc.fullscreenElement, null);
+
+  resolveFirst();
+  await nextTurn();
+  assert.equal(doc.exitCalls, 1);
+  assert.equal(controller.isFullscreen, false);
+  controller.dispose();
+});

@@ -299,20 +299,18 @@ export function createStudyFullscreenController(
   const dismissRestorePrompt = () => {
     if (disposed || !restorePrompt) return;
     restorePrompt = false;
-    const currentRequest = currentRequestId === null
-      ? undefined
-      : pendingRequests.get(currentRequestId);
-    if (currentRequest) {
-      allowFullscreen = false;
-      invalidateCurrentRequest();
-      setStatus("idle");
-      if (document.fullscreenElement === currentRequest.target) {
-        ownedTargets.add(currentRequest.target);
-        exitExactOwnedTarget(currentRequest.target);
-      }
-      return;
+    allowFullscreen = false;
+    invalidateCurrentRequest();
+    setStatus("idle");
+
+    const current = document.fullscreenElement as FullscreenTarget | null;
+    if (
+      current &&
+      (ownedTargets.has(current) || [...pendingRequests.values()].some((request) => request.target === current))
+    ) {
+      ownedTargets.add(current);
+      exitExactOwnedTarget(current);
     }
-    emit();
   };
 
   const dispose = () => {
