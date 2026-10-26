@@ -38,8 +38,8 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.10",
-    "@electric-sql/pglite-socket": "^0.2.13",
+    "@electric-sql/pglite": "^0.5.11",
+    "@electric-sql/pglite-socket": "^0.2.14",
     "@types/node": "^24.19.2",
     "@types/ws": "^8.18.1",
     "ioredis-mock": "^8.13.1",
