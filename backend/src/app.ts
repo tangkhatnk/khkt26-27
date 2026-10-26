@@ -241,7 +241,7 @@ export async function buildApp(deps?: {
   };
   adminRoutes(app, db, authenticate);
   adventureRoutes(app, db, authenticate);
-  experimentRoutes(app, db, authenticate);
+  experimentRoutes(app, db);
   const authLimits = { rateLimit: { max: 10, timeWindow: "1 minute" } };
   if (config.STORAGE_DRIVER === "local")
     app.get("/files/:id", async (req, reply) => {

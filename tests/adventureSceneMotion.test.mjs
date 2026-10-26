@@ -6,6 +6,8 @@ import {
   sceneMotionForStudyElapsed,
   sceneMotionInterpolationOffsets,
   sceneMotionInterpolationDurationMs,
+  sceneMotionInterpolatedOffset,
+  sceneMotionRebaseOffset,
   sceneWorldLayerOffsetPercent,
   sceneStationScreenX,
   sceneStationWorldX,
@@ -114,6 +116,34 @@ test("world interpolation is suppressed on mount and after motion resumes", () =
   assert.equal(sceneMotionCanInterpolate(true, false, 1, 0), false);
   assert.equal(sceneMotionCanInterpolate(false, true, 1, 0), false);
   assert.equal(sceneMotionCanInterpolate(true, true, 1, 0), true);
+});
+
+test("interrupted world animation restarts from its rendered position for delayed ticks", () => {
+  const startedAt = 5000;
+  const firstTick = { active: true, fromOffset: 0, toOffset: -100 / 3, durationMs: 2000, startedAt };
+
+  for (const elapsedMs of [250, 1000, 1750]) {
+    const renderedOffset = sceneMotionInterpolatedOffset(firstTick, startedAt + elapsedMs);
+    assert.ok(Math.abs(renderedOffset - (-100 / 3 * elapsedMs / 2000)) < 0.0001);
+  }
+  assert.equal(sceneMotionInterpolatedOffset(firstTick, startedAt - 100), 0);
+  assert.equal(sceneMotionInterpolatedOffset(firstTick, startedAt), 0);
+  assert.equal(sceneMotionInterpolatedOffset(firstTick, startedAt + 2500), -100 / 3);
+  assert.equal(sceneMotionInterpolatedOffset({ ...firstTick, active: false }, startedAt + 1000), -100 / 3);
+});
+
+test("interrupted world animation keeps its rendered station position across a tile rebase", () => {
+  const startedAt = 4000;
+  const prior = { active: true, fromOffset: 33.3333333333, toOffset: 0, durationMs: 2000, startedAt };
+  const renderedOffset = sceneMotionInterpolatedOffset(prior, startedAt + 1000);
+  const rebasedOffset = sceneMotionRebaseOffset(renderedOffset, 0, 900);
+
+  assert.ok(Math.abs(renderedOffset - 16.66666666665) < 0.0001);
+  assert.ok(Math.abs(rebasedOffset - 916.66666666665) < 0.0001);
+  const stationWorldX = 1200;
+  const oldFrameScreenX = stationWorldX + renderedOffset;
+  const newFrameScreenX = stationWorldX - 900 + rebasedOffset;
+  assert.ok(Math.abs(newFrameScreenX - oldFrameScreenX) < 0.0001);
 });
 
 test("world interpolation snaps across clock jumps and backward samples", () => {
