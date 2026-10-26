@@ -30,6 +30,17 @@ describe("automatic trip history projections", () => {
     expect(otherTrip.testerCode).toBe(record.testerCode);
   });
 
+  it("projects only an explicitly supplied public document summary and keeps it out of CSV", () => {
+    const approved = "Learner-approved synthetic summary";
+    const publicRecord = experimentRecord(session, "server-secret", undefined, approved);
+    const privateRecord = experimentRecord(session, "server-secret");
+
+    expect(publicRecord.documentSummary).toBe(approved);
+    expect(privateRecord).not.toHaveProperty("documentSummary");
+    expect(experimentCsv([publicRecord])).not.toContain(approved);
+    expect(experimentCsv([publicRecord])).not.toContain("document_summary");
+  });
+
   it("uses the corrected effective projection and sanitizes the current goal summary", () => {
     const goal = `${"A".repeat(199)}\u0000🙂`;
     const correction: SessionOverride = {

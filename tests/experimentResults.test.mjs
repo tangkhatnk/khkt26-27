@@ -65,7 +65,7 @@ test("history uses compact semantic columns while retaining every run detail", (
   const focusCells = [...markup.matchAll(/<div class="experiment-time-summary">([\s\S]*?)<\/div>/gu)].map(([, body]) => body);
   assert.equal(focusCells.length, 2);
   for (const cell of focusCells) {
-    assert.match(cell, /<strong>1 giờ 22 phút thực học<\/strong>/u);
+    assert.match(cell, /<strong>1 giờ 22 phút<\/strong>/u);
     assert.match(cell, /<span class="experiment-run-card__meta">Mục tiêu: 1 giờ 30 phút · 1 lượt nghỉ<\/span>/u);
     assert.equal((cell.match(/<span\b/gu) ?? []).length, 1);
     assert.doesNotMatch(cell, /tổng chuyến|dự kiến|giải lao/u);
@@ -99,7 +99,9 @@ test("history explains that saved sessions appear automatically and summarizes g
   assert.match(markup, /phiên đã lưu tự động xuất hiện/u);
   assert.match(markup, /tối đa 200 ký tự/u);
   assert.match(markup, /Tránh ghi thông tin riêng tư vào mục tiêu/u);
-  assert.match(markup, /không được gửi thành các trường riêng/u);
+  assert.match(markup, /Nếu bạn xác nhận chia sẻ tóm tắt tài liệu, bản đó sẽ hiện dưới mục tiêu/u);
+  assert.match(markup, /CSV không chứa tóm tắt/u);
+  assert.match(markup, /email, mã tài khoản, tên tệp, nội dung nguồn và câu trả lời chi tiết không được gửi thành các trường riêng/u);
   assert.match(markup, /Khoảng học đã diễn ra không tính giờ nghỉ; thời gian thực học không tính xao nhãng/u);
   assert.doesNotMatch(markup, /chọn công khai|Phiên riêng tư|Mức hoàn thành là tự đánh giá/u);
 });
@@ -113,6 +115,19 @@ test("history provides a labeled mobile card layout for the same trip", () => {
   assert.match(markup, /<span class="experiment-run-card__metric-label">Thời gian học<\/span>/u);
   assert.match(markup, /class="experiment-quiz-badge experiment-quiz-badge--scored"/u);
   assert.match(markup, /<div class="experiment-goal-summary"><span>Ôn tập cấu trúc tế bào và chức năng của các bào quan<\/span><\/div>/u);
+});
+
+test("history shows only an explicitly shared document summary beneath its goal in table, detail, and card", () => {
+  const shared = "Learner-approved public document summary";
+  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
+    runs: [{ ...fixture, documentSummary: shared }],
+  }));
+  assert.equal((markup.match(new RegExp(shared, "gu")) ?? []).length, 4);
+  assert.match(markup, /<div class="experiment-goal-summary"><span>Ôn tập cấu trúc tế bào và chức năng của các bào quan<\/span><p class="experiment-document-summary">Learner-approved public document summary<\/p><\/div>/u);
+
+  const withoutShare = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
+  assert.doesNotMatch(withoutShare, /experiment-document-summary|Learner-approved public document summary/u);
+  assert.doesNotMatch(withoutShare, /Tóm tắt tài liệu/u);
 });
 
 test("history handles a missing quiz and missing optional timing values accessibly", () => {
@@ -158,7 +173,7 @@ test("history displays focused seconds and rounded efficiency as the only primar
   const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
     runs: [{ ...fixture, focusedSeconds: 46, studyElapsedSeconds: 60, targetSeconds: 120 }],
   }));
-  assert.equal((markup.match(/<strong>46 giây thực học<\/strong>/gu) ?? []).length, 2);
+  assert.equal((markup.match(/<strong>46 giây<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<strong>77%<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<span class="experiment-run-card__meta">Mục tiêu: 2 phút · 1 lượt nghỉ<\/span>/gu) ?? []).length, 2);
 });

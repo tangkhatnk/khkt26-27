@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { config } from "./config.js";
 import { isValidBreakPlan, projectSessionMetrics, type Session, type SessionOverride } from "./adventure/domain.js";
@@ -16,7 +16,7 @@ export function tripIdentity(userId: string, sessionId: string, secret: string) 
   return { id, tripCode: `V-${id.slice(0, 12).toUpperCase()}` };
 }
 
-export function experimentRecord(session: Session, secret: string, override?: SessionOverride) {
+export function experimentRecord(session: Session, secret: string, override?: SessionOverride, documentSummary?: string) {
   const projected = projectSessionMetrics(session, override);
   const metrics = projected.effectiveMetrics;
   const identity = tripIdentity(session.userId, session.id, secret);
@@ -57,6 +57,7 @@ export function experimentRecord(session: Session, secret: string, override?: Se
     startedAt: new Date(session.started).toISOString(),
     endedAt: new Date(session.ended).toISOString(),
     recordedAt: new Date(session.ended).toISOString(),
+    ...(documentSummary === undefined ? {} : { documentSummary }),
   };
 }
 
@@ -90,18 +91,40 @@ export function experimentRoutes(app: FastifyInstance, db: PrismaClient) {
       THEN (entry.value->>'ended')::bigint ELSE 0 END DESC, entry.key DESC
     LIMIT ${limit} OFFSET ${offset}`;
 
-  app.get("/api/v1/experiments", async req => {
+  app.get("/api/v1/experiments", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
     const { limit, offset } = z.object({
       limit: z.coerce.number().int().min(1).max(100).default(50),
       offset: z.coerce.number().int().min(0).max(100000).default(0),
     }).parse(req.query);
     const rows = await readRows(limit, offset);
+    const pairs = rows.flatMap(({ session }) =>
+      typeof session?.id === "string" && typeof session?.userId === "string"
+        ? [Prisma.sql`(share.user_id::text = ${session.userId} AND share.session_id = ${session.id})`]
+        : [],
+    );
+    const shares = pairs.length
+      ? await db.$queryRaw<{ user_id: string; session_id: string; summary: string }[]>`
+        SELECT share.user_id::text AS user_id, share.session_id, share.summary
+        FROM public_material_summary_shares share
+        JOIN users owner ON owner.id = share.user_id
+        WHERE owner.deleted_at IS NULL AND share.summary IS NOT NULL
+          AND (${Prisma.join(pairs, " OR ")})`
+      : [];
+    const summaryByOwnerSession = new Map(shares.map((share) =>
+      [JSON.stringify([share.user_id, share.session_id]), share.summary] as const,
+    ));
     const count = await db.$queryRaw<{ total: number }[]>`
       SELECT COUNT(*)::int AS total FROM adventure_state a
       CROSS JOIN LATERAL jsonb_each(a.state->'sessions') entry
       WHERE a.id = 1 AND NOT COALESCE((a.state->'sessionOverrides'->entry.key) ? 'removedAt', false)`;
     return {
-      runs: rows.map(({ session, override }) => experimentRecord(session, config.JWT_SECRET, override ?? undefined)),
+      runs: rows.map(({ session, override }) => experimentRecord(
+        session,
+        config.JWT_SECRET,
+        override ?? undefined,
+        summaryByOwnerSession.get(JSON.stringify([session.userId, session.id])),
+      )),
       total: count[0]?.total ?? 0,
       limit,
       offset,

@@ -14,11 +14,13 @@ import { StudyNotesInput } from "./StudyNotesInput";
 import { StudyGuideComposer } from "./StudyGuideComposer";
 import { MaterialSourceReader, MaterialSourceReviewButton } from "./MaterialSourceReader";
 import { MaterialSummaryControl } from "./MaterialSummaryControl";
+import { PublicMaterialSummaryControl, type PublicMaterialSummaryScope } from "./PublicMaterialSummaryControl";
 import { FlipClock } from "./FlipClock";
 import { ThemeToggle } from "./theme";
 import { studyGuideDownload, studyGuideSource, type StudyGuideDraft } from "./studyGuide";
 import { createStudyGuideReviewState, hasPendingStudyGuide as hasPendingGuideReview, reduceStudyGuideReview } from "./studyGuideReview";
 import { useStudyFullscreen } from "./useStudyFullscreen";
+import { FocusFullscreenRecovery } from "./FocusFullscreenRecovery";
 import { JourneyView } from "./JourneyView";
 import { TopDownScene } from "./TopDownScene";
 import { detectDeviceCategory } from "./device";
@@ -26,6 +28,10 @@ import { explorationProgress } from "./exploration";
 import type { MaterialExtractionProgress } from "./materialExtraction";
 import { createMaterialSource, editMaterialSourceText, reviewMaterialSource, recoveredMaterialSource, type MaterialSource } from "./materialSources";
 import { cachedMaterialSummary, fingerprintMaterialSourceText, isCurrentMaterialSummaryScope, type MaterialSummaryScope } from "./materialSummary";
+import {
+  eligiblePublicMaterialSummaryCandidates,
+  type PublicMaterialSummaryCandidate,
+} from "@/services/publicMaterialSummary";
 import { DurationPicker } from "./DurationPicker";
 import { ExperimentResults } from "./ExperimentResults";
 import { QuizPanel } from "./QuizPanel";
@@ -176,10 +182,13 @@ function AdventureWorkspace() {
     ownerRef = useRef(owner);
   const workspaceLive = useRef(false);
   const materialSummaryWorkspaceGeneration = useRef(0);
+  const [materialSummaryWorkspaceVersion, setMaterialSummaryWorkspaceVersion] = useState(0);
   const materialSummaryRequestGeneration = useRef(0);
   const materialSummaryRequest = useRef<ActiveMaterialSummaryRequest | null>(null);
   const [materialSummaryUi, setMaterialSummaryUi] = useState<MaterialSummaryUiState | null>(null);
   const [materialSummaryFingerprints, setMaterialSummaryFingerprints] = useState<Record<string, { text: string; fingerprint: string }>>({});
+  const materialSummaryFingerprintsRef = useRef(materialSummaryFingerprints);
+  materialSummaryFingerprintsRef.current = materialSummaryFingerprints;
   const cancelMaterialSummaryRequest = useCallback((sessionId?: string, sourceId?: string, clearUi = true) => {
     const active = materialSummaryRequest.current;
     if (!active || (sessionId !== undefined && active.sessionId !== sessionId) ||
@@ -306,6 +315,7 @@ function AdventureWorkspace() {
   useEffect(() => {
     ownerRef.current = owner;
     materialSummaryWorkspaceGeneration.current++;
+    setMaterialSummaryWorkspaceVersion(materialSummaryWorkspaceGeneration.current);
     let release: (() => void) | undefined,
       disposed = false;
     if (!navigator.locks) {
@@ -612,6 +622,64 @@ function AdventureWorkspace() {
   const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
     ? saved.sources?.[summaryMaterialSessionId] ?? []
     : [], [view, saved.sources, summaryMaterialSessionId]);
+  const renderAuthGeneration = getAuthGeneration();
+  const publicSummaryScope = useMemo<PublicMaterialSummaryScope>(() => ({
+    ownerId: owner,
+    sessionId: summaryMaterialSessionId ?? "",
+    authGeneration: renderAuthGeneration,
+    workspaceGeneration: materialSummaryWorkspaceVersion,
+    view: "summary",
+  }), [owner, summaryMaterialSessionId, renderAuthGeneration, materialSummaryWorkspaceVersion]);
+  const publicSummaryCandidates = useMemo(() => {
+    if (!summaryMaterialSessionId) return [];
+    const candidates: PublicMaterialSummaryCandidate[] = summaryMaterialSources.map((source) => {
+      const fingerprintState = materialSummaryFingerprints[JSON.stringify([summaryMaterialSessionId, source.id])];
+      const currentSourceFingerprint = fingerprintState?.text === source.text ? fingerprintState.fingerprint : "";
+      const cached = saved.materialSummaries?.[summaryMaterialSessionId]?.[source.id];
+      return {
+        sourceId: source.id,
+        sourceName: source.name,
+        summary: cached?.summary ?? "",
+        reviewed: source.reviewed,
+        sourceFingerprint: cached?.sourceFingerprint ?? "",
+        currentSourceFingerprint,
+      };
+    });
+    return eligiblePublicMaterialSummaryCandidates(candidates);
+  }, [summaryMaterialSessionId, summaryMaterialSources, materialSummaryFingerprints, saved.materialSummaries]);
+  const canManagePublicSummary = !!user && !needsLogin && owner !== "guest" && online && !authOffline &&
+    loaded && exclusive && workspaceLive.current;
+  const publicSummaryDisabledReason = !user || needsLogin || owner === "guest"
+    ? "Đăng nhập để quản lý bản tóm tắt chia sẻ."
+    : !online || authOffline
+      ? "Kết nối mạng để quản lý bản tóm tắt chia sẻ."
+      : !loaded || !exclusive || !workspaceLive.current
+        ? "Mở hành trình trên thiết bị này để quản lý bản tóm tắt."
+        : "";
+  const isPublicSummaryScopeCurrent = useCallback((scope: PublicMaterialSummaryScope) => {
+    const auth = useAuthStore.getState();
+    const value = current.current;
+    const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
+    const session = historySessions(value, scope.ownerId).find((item) => item.id === scope.sessionId);
+    return scope.view === "summary" && scope.ownerId !== "guest" &&
+      ownerRef.current === scope.ownerId && getAuthGeneration() === scope.authGeneration &&
+      materialSummaryWorkspaceGeneration.current === scope.workspaceGeneration && workspaceLive.current &&
+      viewRef.current === "summary" && value.summarySessionId === scope.sessionId &&
+      auth.user?.id === scope.ownerId && !auth.needsLogin && !removed.has(scope.sessionId) &&
+      session?.userId === scope.ownerId;
+  }, []);
+  const isPublicSummaryCandidateCurrent = useCallback((candidate: PublicMaterialSummaryCandidate) => {
+    const value = current.current;
+    const sessionId = value.summarySessionId;
+    if (!sessionId || ownerRef.current === "guest") return false;
+    const source = value.sources?.[sessionId]?.find((item) => item.id === candidate.sourceId);
+    const fingerprint = materialSummaryFingerprintsRef.current[JSON.stringify([sessionId, candidate.sourceId])];
+    const cached = value.materialSummaries?.[sessionId]?.[candidate.sourceId];
+    return source?.reviewed === true && fingerprint?.text === source.text &&
+      fingerprint.fingerprint === candidate.currentSourceFingerprint &&
+      cached?.sourceFingerprint === fingerprint.fingerprint &&
+      cached.sourceFingerprint === candidate.sourceFingerprint && cached.summary === candidate.summary;
+  }, []);
   useEffect(() => {
     let cancelled = false;
     if (view !== "summary" || !summarySessionId || summaryMaterialSources.length === 0) {
@@ -1952,6 +2020,14 @@ function AdventureWorkspace() {
               {view === "focus" &&
                 (active ? (
                   <>
+                    {studyFullscreen.restorePrompt && (
+                      <FocusFullscreenRecovery
+                        status={studyFullscreen.status}
+                        message={studyFullscreen.message}
+                        onRequest={studyFullscreen.request}
+                        onDismiss={studyFullscreen.dismissRestorePrompt}
+                      />
+                    )}
                     <div className="focus-heading">
                       <span className="pill">
                         {active.groupId
@@ -2025,7 +2101,7 @@ function AdventureWorkspace() {
                           <button type="button" onClick={studyFullscreen.toggle} aria-pressed={studyFullscreen.isFullscreen} disabled={studyFullscreen.status === "pending" && !studyFullscreen.isFullscreen}>
                             {studyFullscreen.isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
                           </button>
-                          {studyFullscreen.message && <span className="study-fullscreen-status" role="status">{studyFullscreen.message}</span>}
+                          {studyFullscreen.message && !studyFullscreen.restorePrompt && <span className="study-fullscreen-status" role="status">{studyFullscreen.message}</span>}
                         </div>
                         {deviceClockBehind && <div className="info-box">
                           <p>Đồng hồ thiết bị đang chạy lùi. Hãy đặt lại giờ đúng để tiếp tục; dữ liệu phiên vẫn được giữ.</p>
@@ -2722,6 +2798,15 @@ function AdventureWorkspace() {
                           />
                         </details>;
                       })}
+                      {owner !== "guest" && <PublicMaterialSummaryControl
+                        key={`${owner}:${summarySession.id}:${publicSummaryScope.authGeneration}:${publicSummaryScope.workspaceGeneration}`}
+                        scope={publicSummaryScope}
+                        candidates={publicSummaryCandidates}
+                        canManage={canManagePublicSummary}
+                        disabledReason={publicSummaryDisabledReason}
+                        isScopeCurrent={isPublicSummaryScopeCurrent}
+                        isCandidateCurrent={isPublicSummaryCandidateCurrent}
+                      />}
                       <QuizPanel
                         key={`${owner}:${summarySession.id}:${summaryCorrectionVersion}`}
                         ownerId={owner}

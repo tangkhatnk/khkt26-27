@@ -763,6 +763,11 @@ async function performAdminMutation(
     if ((mutation.action === "suspension" && mutation.value) ||
       (mutation.action === "deletion" && mutation.deleted))
       await tx.refreshToken.deleteMany({ where: { user_id: target.id } });
+    if (mutation.action === "deletion" && mutation.deleted)
+      await tx.publicMaterialSummaryShare.updateMany({
+        where: { user_id: target.id, summary: { not: null } },
+        data: { summary: null, approved_at: null, version: { increment: 1 } },
+      });
 
     const after = accountAdminState(updated, admins);
     const action: AdminAction = mutation.action;
@@ -939,6 +944,14 @@ async function mutateAdminSession(
     world.sessionOverrides[sessionId] = nextOverride;
     world.revision = (world.revision ?? 0) + 1;
     await tx.$executeRaw`UPDATE adventure_state SET state = ${JSON.stringify(world)}::jsonb WHERE id = 1`;
+    if (action === "removal") {
+      const owner = z.uuid().safeParse(session.userId);
+      if (owner.success)
+        await tx.publicMaterialSummaryShare.updateMany({
+          where: { user_id: owner.data, session_id: sessionId, summary: { not: null } },
+          data: { summary: null, approved_at: null, version: { increment: 1 } },
+        });
+    }
     await tx.adminSessionActionAudit.create({
       data: {
         actor_user_id: actor.id,
