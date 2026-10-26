@@ -14,6 +14,27 @@ function isFenceCloseAt(value: string, index: number, fence: { marker: "`" | "~"
   return /^[\t ]*(?=$|\r?\n|\\n)/u.test(value.slice(index + match.length));
 }
 
+type MathCloseDelimiter = "$" | "$$" | "\\)" | "\\]";
+
+function hasMathCloseBeforeFence(value: string, start: number, delimiter: MathCloseDelimiter) {
+  for (let index = start; index < value.length; index += 1) {
+    if ((index === 0 || value[index - 1] === "\n") && fenceAtLineStart(value, index)) return false;
+
+    if (delimiter === "$") {
+      if (value.startsWith("$$", index)) {
+        index += 1;
+        continue;
+      }
+      if (value[index] === "$" && value[index - 1] !== "\\") return true;
+    } else if (delimiter === "$$") {
+      if (value.startsWith("$$", index) && value[index - 1] !== "\\") return true;
+    } else if (value.startsWith(delimiter, index) && value[index - 1] !== "\\") {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Decodes Markdown line-break markers emitted as literal backslash-n by an AI
  * provider. The caller must opt in based on provenance; this is not suitable
@@ -22,7 +43,7 @@ function isFenceCloseAt(value: string, index: number, fence: { marker: "`" | "~"
  * Other escaped separators are ambiguous with code string escapes, so stay
  * literal.
  */
-export function normalizeStudyGuideAiText(value: string) {
+function normalizeStudyGuideText(value: string, repairProviderMathTabEscape: boolean) {
   const output: string[] = [];
   let index = 0;
   let lineStart = true;
@@ -30,6 +51,7 @@ export function normalizeStudyGuideAiText(value: string) {
   let fenceOpeningLine = false;
   let inlineCode = false;
   let mathDelimiter: "$" | "$$" | "\\)" | "\\]" | undefined;
+  let mathRecoveryAllowed = false;
 
   const append = (text: string) => {
     output.push(text);
@@ -47,6 +69,7 @@ export function normalizeStudyGuideAiText(value: string) {
         if (!fence) {
           fence = { marker: fenceMarker[0] as "`" | "~", length: fenceMarker.length };
           fenceOpeningLine = true;
+          if (mathDelimiter !== undefined) mathRecoveryAllowed = false;
         } else if (isFenceCloseAt(value, index, fence)) {
           fence = undefined;
           fenceOpeningLine = false;
@@ -64,28 +87,41 @@ export function normalizeStudyGuideAiText(value: string) {
     if (!inlineCode && !fence) {
       if (value.startsWith("\\(", index)) {
         mathDelimiter = "\\)";
+        mathRecoveryAllowed = repairProviderMathTabEscape && hasMathCloseBeforeFence(value, index + 2, mathDelimiter);
         append("\\(");
         index += 2;
         continue;
       }
       if (value.startsWith("\\[", index)) {
         mathDelimiter = "\\]";
+        mathRecoveryAllowed = repairProviderMathTabEscape && hasMathCloseBeforeFence(value, index + 2, mathDelimiter);
         append("\\[");
         index += 2;
         continue;
       }
       if (mathDelimiter === "\\)" && value.startsWith("\\)", index)) {
         mathDelimiter = undefined;
+        mathRecoveryAllowed = false;
         append("\\)");
         index += 2;
         continue;
       }
       if (mathDelimiter === "\\]" && value.startsWith("\\]", index)) {
         mathDelimiter = undefined;
+        mathRecoveryAllowed = false;
         append("\\]");
         index += 2;
         continue;
       }
+    }
+
+    const commandEnd = index + 1 + "riangle".length;
+    const hasTeXCommandBoundary = !/[A-Za-z]/u.test(value[commandEnd] ?? "");
+    if (repairProviderMathTabEscape && !inlineCode && !fence && mathDelimiter !== undefined && mathRecoveryAllowed &&
+        value[index] === "\t" && value.startsWith("riangle", index + 1) && hasTeXCommandBoundary) {
+      append("\\triangle");
+      index += 1 + "riangle".length;
+      continue;
     }
 
     if (value[index] === "\\") {
@@ -121,12 +157,17 @@ export function normalizeStudyGuideAiText(value: string) {
     if (!inlineCode && !fence) {
       if (value.startsWith("$$", index)) {
         mathDelimiter = mathDelimiter === "$$" ? undefined : "$$";
+        mathRecoveryAllowed = mathDelimiter !== undefined && repairProviderMathTabEscape &&
+          hasMathCloseBeforeFence(value, index + 2, mathDelimiter);
         append("$$");
         index += 2;
         continue;
       }
-      if (value[index] === "$" && value[index - 1] !== "\\" && mathDelimiter !== "$$")
+      if (value[index] === "$" && value[index - 1] !== "\\" && mathDelimiter !== "$$") {
         mathDelimiter = mathDelimiter === "$" ? undefined : "$";
+        mathRecoveryAllowed = mathDelimiter !== undefined && repairProviderMathTabEscape &&
+          hasMathCloseBeforeFence(value, index + 1, mathDelimiter);
+      }
     }
 
     append(value[index]);
@@ -134,4 +175,14 @@ export function normalizeStudyGuideAiText(value: string) {
   }
 
   return output.join("");
+}
+
+/** Legacy/display normalization; intentionally does not repair formula text. */
+export function normalizeStudyGuideAiText(value: string) {
+  return normalizeStudyGuideText(value, false);
+}
+
+/** Provider-only recovery for a valid JSON `\t` escape in a TeX math expression. */
+export function normalizeNewStudyGuideProviderText(value: string) {
+  return normalizeStudyGuideText(value, true);
 }

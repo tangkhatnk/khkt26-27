@@ -8,6 +8,7 @@ import {
   studyGuideRequestSchema,
   studyGuideResponseSchema,
 } from "../src/studyGuideSchemas.js";
+import { normalizeStudyGuideAiText } from "../src/studyGuideText.js";
 
 const providerResponse = {
   title: "Biology review",
@@ -126,6 +127,49 @@ describe("study guide response contracts", () => {
       ...providerResponse,
       illustrations: JSON.parse(STUDY_GUIDE_COORDINATE_PLOT_ILLUSTRATION_WIRE_EXAMPLE),
     }).illustrations?.[0]?.kind).toBe("coordinate-plot");
+  });
+
+  it.each([
+    { name: "inline dollar", open: "$", close: "$" },
+    { name: "display dollar", open: "$$", close: "$$" },
+    { name: "inline parenthesis", open: "\\(", close: "\\)" },
+    { name: "display bracket", open: "\\[", close: "\\]" },
+  ])("repairs the under-escaped triangle only inside $name math", ({ open, close }) => {
+    const tab = "\t";
+    const parsed = parseStudyGuideProviderResponse({
+      ...providerResponse,
+      theory: `${providerResponse.theory}\n\n${open}${tab}riangle U${close}`,
+    });
+
+    expect(parsed.theory).toContain(`${open}\\triangle U${close}`);
+    expect(parsed.theory).not.toContain(`${open}${tab}riangle U${close}`);
+  });
+
+  it("does not repair an unclosed math marker, including tabs in following code", () => {
+    const tab = "\t";
+    const unclosed = [
+      `${providerResponse.theory}\n\nUnclosed formula: $unfinished ${tab}riangle.`,
+      `Inline code: \`${tab}riangle\`.`,
+      `\`\`\`text\n${tab}riangle $\n\`\`\``,
+    ].join("\n");
+    const parsed = parseStudyGuideProviderResponse({ ...providerResponse, theory: unclosed });
+
+    expect(parsed.theory).toContain(`Unclosed formula: $unfinished ${tab}riangle.`);
+    expect(parsed.theory).toContain(`Inline code: \`${tab}riangle\`.`);
+    expect(parsed.theory).toContain(`\`\`\`text\n${tab}riangle $\n\`\`\``);
+    expect(parsed.theory).not.toContain("\\triangle");
+  });
+
+  it("preserves triangle-like TeX command prefixes without a command boundary", () => {
+    const tab = "\t";
+    const suffix = `$${tab}riangleSuffix$`;
+    const parsed = parseStudyGuideProviderResponse({
+      ...providerResponse,
+      theory: `${providerResponse.theory}\n\n${suffix}`,
+    });
+
+    expect(parsed.theory).toContain(suffix);
+    expect(parsed.theory).not.toContain("\\triangleSuffix");
   });
 
   it.each([
@@ -299,5 +343,13 @@ describe("study guide response contracts", () => {
       text: "x".repeat(20_001),
     }).success).toBe(false);
     expect(studyGuideResponseSchema.parse({ title: "Biology review", text: literalEscapes }).text).toBe(literalEscapes);
+  });
+
+  it("preserves legacy and user-authored tab text in the API schema and display normalizer", () => {
+    const tab = "\t";
+    const text = (`Ghi chú cũ: $${tab}riangle U$; mã: \`${tab}riangle\`; ngoài công thức: ${tab}riangle. `).repeat(4).trimEnd();
+
+    expect(studyGuideResponseSchema.parse({ title: "Biology review", text }).text).toBe(text);
+    expect(normalizeStudyGuideAiText(text)).toBe(text);
   });
 });
