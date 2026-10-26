@@ -18,7 +18,8 @@ export const materialSummaryRequestSchema = z.object({
 export type MaterialSummaryInput = z.infer<typeof materialSummaryRequestSchema>;
 
 export const materialSummaryResponseSchema = z.object({
-  summary: z.string().trim().min(1).max(MAX_MATERIAL_SUMMARY_CODE_UNITS),
+  summary: z.string().trim().min(1).max(MAX_MATERIAL_SUMMARY_CODE_UNITS)
+    .refine(value => value.length <= MAX_MATERIAL_SUMMARY_CODE_UNITS, "Summary must not exceed 4,000 UTF-16 code units."),
 }).strict();
 
 const materialMimeType = z.enum([

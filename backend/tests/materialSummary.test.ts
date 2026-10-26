@@ -53,6 +53,9 @@ describe("material summary schemas", () => {
 
     expect(responseSchema.parse({ summary: "  Tóm tắt nội dung chính.  " }).summary)
       .toBe("Tóm tắt nội dung chính.");
+    expect(responseSchema.parse({ summary: ` ${"😀".repeat(2_000)} ` }).summary.length).toBe(4_000);
+    expect(responseSchema.safeParse({ summary: ` ${"😀".repeat(2_001)} ` }).success).toBe(false);
+    expect(responseSchema.parse({ summary: "x".repeat(4_000) }).summary).toHaveLength(4_000);
     expect(responseSchema.safeParse({ summary: "   " }).success).toBe(false);
     expect(responseSchema.safeParse({ summary: "x".repeat(4_001) }).success).toBe(false);
     expect(responseSchema.safeParse({ summary: "Nội dung.", extra: true }).success).toBe(false);
