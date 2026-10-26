@@ -45,6 +45,34 @@ describe("admin account management migration", () => {
     }
   });
 
+  it("creates the separate owner/session public summary store without source metadata", async () => {
+    const db = new PGlite();
+    try {
+      await migrate(db);
+      const columns = await db.query<{ column_name: string; data_type: string }>(`
+        SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_name = 'public_material_summary_shares' ORDER BY column_name`);
+      expect(columns.rows).toEqual([
+        { column_name: "approved_at", data_type: "timestamp without time zone" },
+        { column_name: "session_id", data_type: "text" },
+        { column_name: "summary", data_type: "character varying" },
+        { column_name: "updated_at", data_type: "timestamp without time zone" },
+        { column_name: "user_id", data_type: "uuid" },
+        { column_name: "version", data_type: "integer" },
+      ]);
+      const keys = await db.query<{ column_name: string }>(`
+        SELECT a.attname AS column_name FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = 'public_material_summary_shares'::regclass AND i.indisprimary
+        ORDER BY array_position(i.indkey, a.attnum)`);
+      expect(keys.rows.map((row) => row.column_name)).toEqual(["user_id", "session_id"]);
+      expect(columns.rows.map((row) => row.column_name)).not.toContain("source_id");
+      expect(columns.rows.map((row) => row.column_name)).not.toContain("source_text");
+    } finally {
+      await db.close();
+    }
+  });
+
   it("stores only narrow append-only action history", async () => {
     const db = new PGlite();
     try {

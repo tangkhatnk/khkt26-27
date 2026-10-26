@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
 import { adminRoutes } from "../src/admin.js";
 import { experimentRoutes, tripIdentity } from "../src/experiments.js";
+import { publicMaterialSummaryRoutes } from "../src/publicMaterialSummaries.js";
 import { hashToken, issueTokens, rotateToken, verifyActiveAccess } from "../src/auth.js";
 import { config } from "../src/config.js";
 import { ApiError } from "../src/errors.js";
@@ -61,6 +62,7 @@ function makeApp(client: PrismaClient, bootstrapIds: readonly string[]) {
   };
   adminRoutes(app, client, authenticate, bootstrapIds);
   experimentRoutes(app, client);
+  publicMaterialSummaryRoutes(app, client, authenticate);
   return app;
 }
 
@@ -179,6 +181,29 @@ afterAll(async () => {
 });
 
 describe("native PostgreSQL admin mutation and token locks", () => {
+  it("serializes competing public summary replacements by owner and trip version", async () => {
+    const owner = await createUser();
+    const sessionId = await seedSession(owner.id);
+    const ownerHeaders = { authorization: `Bearer ${owner.id}` };
+    const firstPublish = await firstApp.inject({
+      method: "POST", url: "/api/v1/material-summaries/share", headers: ownerHeaders,
+      payload: { sessionId, summary: "Initial approved synthetic copy", expectedVersion: 0, confirmShare: true },
+    });
+    expect(firstPublish.statusCode, firstPublish.body).toBe(200);
+
+    const competing = await Promise.all([
+      firstApp.inject({ method: "PUT", url: "/api/v1/material-summaries/share", headers: ownerHeaders,
+        payload: { sessionId, summary: "Replacement A", expectedVersion: 1, confirmReplacement: true } }),
+      secondApp.inject({ method: "PUT", url: "/api/v1/material-summaries/share", headers: ownerHeaders,
+        payload: { sessionId, summary: "Replacement B", expectedVersion: 1, confirmReplacement: true } }),
+    ]);
+    expect(competing.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    const status = await firstApp.inject({ url: `/api/v1/material-summaries/mine?sessionId=${sessionId}`, headers: ownerHeaders });
+    expect(status.statusCode, status.body).toBe(200);
+    expect(status.json().version).toBe(2);
+    expect(["Replacement A", "Replacement B"]).toContain(status.json().summary);
+  });
+
   it("allows one session correction for a shared expectedVersion and writes only the winner's audit", async () => {
     const target = await createUser();
     const sessionId = await seedSession(target.id);

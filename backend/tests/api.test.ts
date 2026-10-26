@@ -98,6 +98,7 @@ beforeAll(async () => {
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261024120000_admin_account_management/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261024130000_admin_account_recovery/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261025120000_admin_session_corrections/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261026100000_public_material_summary_shares/migration.sql", import.meta.url), "utf8"));
   await server.start();
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();
@@ -140,6 +141,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await redis.flushall();
+  await db.$executeRaw`DELETE FROM public_material_summary_shares`;
   await db.$executeRaw`DELETE FROM tester_runs`;
   await db.$executeRaw`UPDATE adventure_state SET state = '{"people":{},"groups":{},"sessions":{},"invites":{}}'::jsonb WHERE id = 1`;
 });
@@ -1842,6 +1844,148 @@ it("continues to read saved score-only assessments without detailed feedback", a
   expect(result.statusCode).toBe(200);
   expect(result.json().sessions[0].quiz).toEqual({ score: 2, total: 3 });
 });
+it("requires an authenticated owner to inspect a public summary share", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const saved = await app.inject({
+    method: "POST",
+    url: "/api/v1/adventure/sessions",
+    headers,
+    payload: { id, groupId: null, goal: "Review a synthetic lesson", topic: "biology", target: 60,
+      started: ended - 60000, ended,
+      segments: [{ start: ended - 60000, end: ended, kind: "focus" }] },
+  });
+  expect(saved.statusCode).toBe(200);
+
+  const status = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}` });
+  expect(status.statusCode).toBe(401);
+  const foreignStatus = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers: stranger });
+  expect(foreignStatus.statusCode).toBe(404);
+  const ownerStatus = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers });
+  expect(ownerStatus.statusCode).toBe(200);
+  expect(ownerStatus.json()).toEqual({ summary: null, version: 0, approvedAt: null });
+});
+
+it("publishes only the exact confirmed copy in public GET and never in CSV", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  const saved = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers,
+    payload: { id, groupId: null, goal: "Review a synthetic lesson", topic: "biology", target: 60,
+      started: ended - 60000, ended, segments: [{ start: ended - 60000, end: ended, kind: "focus" }] } });
+  expect(saved.statusCode).toBe(200);
+
+  const missingConsent = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "Exact approved copy", expectedVersion: 0 } });
+  expect(missingConsent.statusCode).toBe(400);
+  const overLimit = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "x".repeat(501), expectedVersion: 0, confirmShare: true } });
+  expect(overLimit.statusCode).toBe(400);
+  const foreignPublish = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers: stranger,
+    payload: { sessionId: id, summary: "Should not be visible", expectedVersion: 0, confirmShare: true } });
+  expect(foreignPublish.statusCode).toBe(404);
+  const extraPrivateField = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "Exact approved copy", expectedVersion: 0, confirmShare: true,
+      sourceIds: ["private-source-id"] } });
+  expect(extraPrivateField.statusCode).toBe(400);
+  const summary = "  Exact reviewed copy.\nLine two.  ";
+  const published = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary, expectedVersion: 0, confirmShare: true } });
+  expect(published.statusCode).toBe(200);
+  expect(published.json()).toMatchObject({ summary, version: 1, approvedAt: expect.any(String) });
+
+  const history = await app.inject({ url: "/api/v1/experiments" });
+  const run = history.json().runs.find((row: { id: string }) => row.id === tripIdentity(userId, id, config.JWT_SECRET).id);
+  expect(run.documentSummary).toBe(summary);
+  for (const privateField of ["sourceId", "sourceText", "sourceName", "ownerId", "sessionId"])
+    expect(run).not.toHaveProperty(privateField);
+  const csv = await app.inject({ url: "/api/v1/experiments/export.csv" });
+  expect(csv.body).not.toContain(summary.trim());
+  expect(csv.body).not.toContain("document_summary");
+  const status = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers });
+  expect(status.json()).toMatchObject({ summary, version: 1 });
+});
+
+it("versions replacement and withdrawal, rejects stale writes, and keeps the version after republish", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers,
+    payload: { id, groupId: null, goal: "Versioned synthetic lesson", topic: "biology", target: 60,
+      started: ended - 60000, ended, segments: [{ start: ended - 60000, end: ended, kind: "focus" }] } })).statusCode).toBe(200);
+  const publish = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "Initial copy", expectedVersion: 0, confirmShare: true } });
+  expect(publish.statusCode).toBe(200);
+
+  const replacements = await Promise.all(["Replacement A", "Replacement B"].map((summary) => app.inject({
+    method: "PUT", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary, expectedVersion: 1, confirmReplacement: true },
+  })));
+  expect(replacements.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+  const winner = replacements.find((response) => response.statusCode === 200)!.json();
+  expect(winner.version).toBe(2);
+  const staleWithdrawal = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share/withdraw", headers,
+    payload: { sessionId: id, expectedVersion: 1 } });
+  expect(staleWithdrawal.statusCode).toBe(409);
+  expect((await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers })).json())
+    .toMatchObject({ summary: winner.summary, version: 2 });
+  expect((await app.inject({ method: "POST", url: "/api/v1/material-summaries/share/withdraw", headers,
+    payload: { sessionId: id } })).statusCode).toBe(400);
+
+  const withdrawn = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share/withdraw", headers,
+    payload: { sessionId: id, expectedVersion: 2 } });
+  expect(withdrawn.statusCode).toBe(200);
+  expect(withdrawn.json()).toMatchObject({ summary: null, version: 3, approvedAt: null });
+  const repeated = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share/withdraw", headers,
+    payload: { sessionId: id, expectedVersion: 2 } });
+  expect(repeated.statusCode).toBe(200);
+  expect(repeated.json()).toMatchObject({ summary: null, version: 3 });
+  const republished = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "Republished copy", expectedVersion: 3, confirmShare: true } });
+  expect(republished.statusCode).toBe(200);
+  expect(republished.json()).toMatchObject({ summary: "Republished copy", version: 4 });
+});
+
+it("counts astral characters as UTF-16 units and clears shares on tombstone and account deletion", async () => {
+  const id = randomUUID();
+  const ended = Date.now() - 1000;
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers,
+    payload: { id, groupId: null, goal: "Bounded synthetic lesson", topic: "biology", target: 60,
+      started: ended - 60000, ended, segments: [{ start: ended - 60000, end: ended, kind: "focus" }] } })).statusCode).toBe(200);
+  expect((await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "😀".repeat(251), expectedVersion: 0, confirmShare: true } })).statusCode).toBe(400);
+  expect((await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "Invalid\u0000summary", expectedVersion: 0, confirmShare: true } })).statusCode).toBe(400);
+  const publish = await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers,
+    payload: { sessionId: id, summary: "😀".repeat(250), expectedVersion: 0, confirmShare: true } });
+  expect(publish.statusCode).toBe(200);
+  expect(publish.json().summary).toBe("😀".repeat(250));
+
+  const removed = await app.inject({ method: "DELETE", url: `/api/v1/admin/sessions/${id}`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Remove synthetic public-summary trip" } });
+  expect(removed.statusCode).toBe(200);
+  const afterTombstone = await app.inject({ url: `/api/v1/material-summaries/mine?sessionId=${id}`, headers });
+  expect(afterTombstone.json()).toMatchObject({ summary: null, version: 2, approvedAt: null });
+  expect((await app.inject({ url: "/api/v1/experiments" })).json().total).toBe(0);
+
+  const owner = await db.user.create({ data: { email: `share-delete-${randomUUID()}@example.com`, name: "Summary owner" } });
+  const ownerHeaders = { authorization: `Bearer ${(await issueTokens(db, owner)).access_token}` };
+  const accountSessionId = randomUUID();
+  const accountEnded = Date.now() - 1000;
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers: ownerHeaders,
+    payload: { id: accountSessionId, groupId: null, goal: "Account deletion fixture", topic: "biology", target: 60,
+      started: accountEnded - 60000, ended: accountEnded,
+      segments: [{ start: accountEnded - 60000, end: accountEnded, kind: "focus" }] } })).statusCode).toBe(200);
+  expect((await app.inject({ method: "POST", url: "/api/v1/material-summaries/share", headers: ownerHeaders,
+    payload: { sessionId: accountSessionId, summary: "Account deletion summary", expectedVersion: 0, confirmShare: true } })).statusCode).toBe(200);
+  const deleted = await app.inject({ method: "PUT", url: `/api/v1/admin/accounts/${owner.id}/deletion`, headers: adminHeaders,
+    payload: { expectedVersion: 0, reason: "Remove synthetic summary owner", deleted: true } });
+  expect(deleted.statusCode).toBe(200);
+  const rows = await db.$queryRaw<{ summary: string | null; version: number }[]>`
+    SELECT summary, version FROM public_material_summary_shares WHERE user_id = ${owner.id}::uuid AND session_id = ${accountSessionId}`;
+  expect(rows).toEqual([{ summary: null, version: 2 }]);
+  const publicHistory = await app.inject({ url: "/api/v1/experiments" });
+  expect(JSON.stringify(publicHistory.json())).not.toContain("Account deletion summary");
+});
+
 it("rolls back the entire Gemini quiz if a database insert fails", async () => {
   const before = await db.quizQuestion.count({ where: { owner_id: userId } });
   const valid = { id: "first", question: "Valid", options: ["A", "B", "C", "D"], correctAnswerIndex: 1, explanation: "Valid" };
