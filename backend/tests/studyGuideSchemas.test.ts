@@ -352,4 +352,51 @@ describe("study guide response contracts", () => {
     expect(studyGuideResponseSchema.parse({ title: "Biology review", text }).text).toBe(text);
     expect(normalizeStudyGuideAiText(text)).toBe(text);
   });
+
+  it("restores a JSON-decoded right-arrow only in closed provider math", () => {
+    const backslash = String.fromCharCode(92);
+    const carriageReturn = String.fromCharCode(13);
+    const theory = `${providerResponse.theory} $A${backslash}rightarrow B$`;
+    const rawJson = JSON.stringify({ ...providerResponse, theory })
+      .replace(`${backslash}${backslash}rightarrow`, `${backslash}rightarrow`);
+    const decoded = JSON.parse(rawJson) as typeof providerResponse;
+
+    expect(decoded.theory).toContain(`$A${carriageReturn}ightarrow B$`);
+    expect(studyGuideProviderResponseSchema.parse(decoded).theory).toContain(`$A${backslash}rightarrow B$`);
+
+    const literalLineFeed = `${providerResponse.theory} $A\nightarrow B$`;
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, theory: literalLineFeed }).theory)
+      .toContain("$A\nightarrow B$");
+
+    const nonBoundaryTheory = `${providerResponse.theory} $A${backslash}rightarrowx B$`;
+    const nonBoundaryJson = JSON.stringify({ ...providerResponse, theory: nonBoundaryTheory })
+      .replace(`${backslash}${backslash}rightarrowx`, `${backslash}rightarrowx`);
+    expect(studyGuideProviderResponseSchema.parse(JSON.parse(nonBoundaryJson)).theory)
+      .toContain("$A\nightarrowx B$");
+
+    const outsideMathTheory = `${providerResponse.theory} ${backslash}rightarrow B`;
+    const outsideMathJson = JSON.stringify({ ...providerResponse, theory: outsideMathTheory })
+      .replace(`${backslash}${backslash}rightarrow`, `${backslash}rightarrow`);
+    expect(studyGuideProviderResponseSchema.parse(JSON.parse(outsideMathJson)).theory)
+      .toContain(`${String.fromCharCode(10)}ightarrow B`);
+
+    const unclosedMath = `${providerResponse.theory} $A${carriageReturn}ightarrow B`;
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, theory: unclosedMath }).theory)
+      .toContain("$A\nightarrow B");
+
+    const fencedCode = `${providerResponse.theory}\n\`\`\`tex\n$A${carriageReturn}ightarrow B$\n\`\`\``;
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, theory: fencedCode }).theory)
+      .toContain("$A\nightarrow B$");
+
+    const fencedOnlyCloser = `${providerResponse.theory} $A${backslash}rightarrow B\n\`\`\`tex\n$\n\`\`\``;
+    const fencedOnlyCloserJson = JSON.stringify({ ...providerResponse, theory: fencedOnlyCloser })
+      .replace(`${backslash}${backslash}rightarrow`, `${backslash}rightarrow`);
+    expect(studyGuideProviderResponseSchema.parse(JSON.parse(fencedOnlyCloserJson)).theory)
+      .toContain("$A\nightarrow B");
+
+    const userText = `${providerResponse.theory} $A${carriageReturn}ightarrow B$`;
+    expect(studyGuideResponseSchema.parse({ title: "Legacy", text: userText }).text).toBe(userText);
+    expect(normalizeStudyGuideAiText(userText)).toContain("$A\nightarrow B$");
+    expect(normalizeStudyGuideAiText(userText)).not.toContain(`${backslash}rightarrow`);
+  });
 });

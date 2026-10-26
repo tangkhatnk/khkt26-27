@@ -77,6 +77,15 @@ function normalizeStudyGuideText(value: string, repairProviderMathTabEscape: boo
       }
     }
 
+    const arrowCommandEnd = index + 1 + "ightarrow".length;
+    if (repairProviderMathTabEscape && !inlineCode && !fence && mathDelimiter !== undefined && mathRecoveryAllowed &&
+        value[index] === "\r" && value.startsWith("ightarrow", index + 1) &&
+        !/[A-Za-z]/u.test(value[arrowCommandEnd] ?? "")) {
+      append("\\rightarrow");
+      index = arrowCommandEnd;
+      continue;
+    }
+
     if (value[index] === "\r" || value[index] === "\n") {
       if (value[index] === "\r" && value[index + 1] === "\n") index += 1;
       append("\n");
