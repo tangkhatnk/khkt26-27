@@ -11,6 +11,10 @@ import {
   STUDY_GUIDE_SEQUENCE_ILLUSTRATION_WIRE_EXAMPLE,
   studyGuideProviderResponseJsonSchema,
 } from "../src/studyGuideSchemas.js";
+import { buildQuizGenerationPayload } from "../../src/adventure/quizGeneration.ts";
+import { reviewMaterialSource } from "../../src/adventure/materialSources.ts";
+import { studyGuideSource } from "../../src/adventure/studyGuide.ts";
+import { parseStudyGuideMarkdown } from "../../src/adventure/studyGuideMarkdown.ts";
 
 const input = {
   topic: "biology",
@@ -97,6 +101,7 @@ describe("prompt-generated study guide", () => {
     expect(request.config.systemInstruction).toMatch(/trục.*[-−]1\.000\.000.*1\.000\.000.*min < max.*points.*trong khoảng của cả hai trục/iu);
     expect(request.config.systemInstruction).toMatch(/Tạo 3–5 cặp practice[\s\S]{0,240}trong cùng một đối tượng/iu);
     expect(request.config.systemInstruction).toMatch(/\$H_2O\$/u);
+    expect(request.config.systemInstruction).toContain("\\,dx");
     expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(request.contents)).toEqual({ studyGuideRequest: input });
     expect(JSON.stringify(request)).not.toContain("test-only-private-key");
@@ -153,6 +158,48 @@ describe("prompt-generated study guide", () => {
     expect(result.text).toContain("| Chất | Vai trò |\n| --- | --- |\n| Oxy | Sản phẩm |");
     expect(result.text).not.toContain(`${backslash}n|`);
     expect(result.text.length).toBeLessThanOrEqual(20_000);
+  });
+
+  it("repairs an under-escaped triangle through preview, reviewed source, and quiz payload", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    const tab = "\t";
+    const theory = [
+      providerDraft.theory,
+      `\n\n### Ký hiệu\nDạng tổng quát: $${tab}riangle U = A + Q$.`,
+      `Mã nội tuyến: \`${tab}riangle\`.`,
+      `Ngoài công thức: ${tab}riangle.`,
+      `\n\n\`\`\`text\n${tab}riangle\n\`\`\``,
+    ].join("\n");
+    // The raw JSON contains U+005C U+0074; generateStudyGuide parses that escape to U+0009.
+    generateContent.mockResolvedValue({ text: JSON.stringify({ ...providerDraft, theory }) });
+
+    const draft = await generateStudyGuide(input);
+
+    expect(draft.text).toContain("$\\triangle U = A + Q$");
+    expect(draft.text).toContain(`Mã nội tuyến: \`${tab}riangle\`.`);
+    expect(draft.text).toContain(`Ngoài công thức: ${tab}riangle.`);
+    expect(draft.text).toContain(`\`\`\`text\n${tab}riangle\n\`\`\``);
+    expect(draft.text).not.toContain(`$${tab}riangle U = A + Q$`);
+    const previewMath = parseStudyGuideMarkdown(draft.text).flatMap(block =>
+      block.type === "paragraph"
+        ? block.children.flatMap(node => node.type === "math" ? [node.source] : [])
+        : [],
+    );
+    expect(previewMath).toContain("\\triangle U = A + Q");
+
+    const source = studyGuideSource("guide-1", draft);
+    expect(source.reviewed).toBe(false);
+    expect(source.text).toBe(draft.text);
+    const reviewed = reviewMaterialSource(source, source.text);
+    expect(reviewed.text).toBe(draft.text);
+    const payload = buildQuizGenerationPayload({
+      topic: "biology",
+      goal: "Review photosynthesis",
+      notes: "",
+      sources: [reviewed],
+      materials: [{ name: source.name, sourceId: source.id }],
+    }, 3);
+    expect(payload.documentText).toBe(`--- ${source.name} ---\n${draft.text}`);
   });
 
   it("preserves line-separated provider blocks and returns typed illustrations outside the Markdown text", async () => {
