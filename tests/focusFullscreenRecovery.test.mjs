@@ -53,3 +53,32 @@ test("a rejected recovery keeps a visible, retryable fullscreen action", () => {
   assert.match(markup, /role="status">Không bật được toàn màn hình\. Bạn vẫn có thể học và thử lại\.<\/p>/u);
   assert.match(markup, /<button type="button">Tiếp tục ở cửa sổ<\/button>/u);
 });
+
+test("initial fullscreen failure uses a native modal with retry and windowed continuation", () => {
+  const markup = renderToStaticMarkup(React.createElement(FocusFullscreenRecovery, {
+    variant: "initial",
+    status: "failed",
+    message: "Không bật được toàn màn hình. Bạn vẫn có thể học và thử lại.",
+    onRequest() {},
+    onDismiss() {},
+  }));
+
+  assert.match(markup, /<dialog[^>]*aria-labelledby="focus-fullscreen-initial-title"/u);
+  assert.match(markup, /<h2 id="focus-fullscreen-initial-title">Bật toàn màn hình\?<\/h2>/u);
+  assert.match(markup, /<button class="primary" type="button">Bật toàn màn hình<\/button>/u);
+  assert.match(markup, /<button type="button">Tiếp tục trong cửa sổ<\/button>/u);
+  assert.match(markup, /role="status">Không bật được toàn màn hình/u);
+});
+
+test("unsupported initial fullscreen keeps the windowed choice available", () => {
+  const markup = renderToStaticMarkup(React.createElement(FocusFullscreenRecovery, {
+    variant: "initial",
+    status: "unsupported",
+    message: "Toàn màn hình không khả dụng trên trình duyệt này.",
+    onRequest() {},
+    onDismiss() {},
+  }));
+
+  assert.match(markup, /<button class="primary" type="button" disabled="">Toàn màn hình không khả dụng<\/button>/u);
+  assert.match(markup, /<button type="button">Tiếp tục trong cửa sổ<\/button>/u);
+});

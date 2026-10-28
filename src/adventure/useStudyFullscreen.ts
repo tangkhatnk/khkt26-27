@@ -12,10 +12,12 @@ export type StudyFullscreenControls = {
   leave: () => void;
   toggle: () => void;
   dismissRestorePrompt: () => void;
+  dismissInitialPrompt: () => void;
   status: StudyFullscreenSnapshot["status"];
   isFullscreen: boolean;
   message: string;
   restorePrompt: boolean;
+  initialPrompt: boolean;
 };
 
 /**
@@ -30,6 +32,7 @@ export function useStudyFullscreen(activeFocus: boolean): StudyFullscreenControl
     isFullscreen: false,
     message: "",
     restorePrompt: false,
+    initialPrompt: false,
   });
 
   useEffect(() => {
@@ -53,6 +56,7 @@ export function useStudyFullscreen(activeFocus: boolean): StudyFullscreenControl
   const leave = useCallback(() => controller.current?.leave(), []);
   const toggle = useCallback(() => controller.current?.toggle(), []);
   const dismissRestorePrompt = useCallback(() => controller.current?.dismissRestorePrompt(), []);
+  const dismissInitialPrompt = useCallback(() => controller.current?.dismissInitialPrompt(), []);
 
   return {
     ref,
@@ -63,6 +67,8 @@ export function useStudyFullscreen(activeFocus: boolean): StudyFullscreenControl
     isFullscreen: snapshot.isFullscreen,
     message: snapshot.message,
     restorePrompt: snapshot.restorePrompt,
+    initialPrompt: snapshot.initialPrompt,
     dismissRestorePrompt,
+    dismissInitialPrompt,
   };
 }

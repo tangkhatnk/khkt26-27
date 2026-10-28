@@ -10,6 +10,7 @@ export type StudyFullscreenSnapshot = {
   isFullscreen: boolean;
   message: string;
   restorePrompt: boolean;
+  initialPrompt: boolean;
 };
 
 type FullscreenTarget = Element & {
@@ -37,9 +38,11 @@ export type StudyFullscreenController = {
   leave: () => void;
   toggle: () => void;
   dismissRestorePrompt: () => void;
+  dismissInitialPrompt: () => void;
   setActiveFocus: (active: boolean) => void;
   dispose: () => void;
   readonly restorePrompt: boolean;
+  readonly initialPrompt: boolean;
 };
 
 const messages: Record<StudyFullscreenStatus, string> = {
@@ -65,6 +68,8 @@ export function createStudyFullscreenController(
   let activeFocus = false;
   let allowFullscreen = false;
   let restorePrompt = false;
+  let initialPrompt = false;
+  let initialPromptEligible = true;
   let disposed = false;
   let nextRequestId = 0;
   let currentRequestId: number | null = null;
@@ -84,6 +89,7 @@ export function createStudyFullscreenController(
       isFullscreen: fullscreen,
       message: fullscreen ? "" : messages[statusValue],
       restorePrompt,
+      initialPrompt,
     };
   };
 
@@ -147,9 +153,13 @@ export function createStudyFullscreenController(
 
     if (isFullscreen()) {
       restorePrompt = false;
+      initialPrompt = false;
+      initialPromptEligible = false;
       setStatus("active");
+    } else {
+      if (!confirmed && initialPromptEligible && !restorePrompt) initialPrompt = true;
+      setStatus(confirmed ? "idle" : "failed");
     }
-    else setStatus(confirmed ? "idle" : "failed");
   };
 
   const failRequest = (requestId: number, target: FullscreenTarget) => {
@@ -171,9 +181,13 @@ export function createStudyFullscreenController(
 
     if (isFullscreen()) {
       restorePrompt = false;
+      initialPrompt = false;
+      initialPromptEligible = false;
       setStatus("active");
+    } else {
+      if (!confirmed && initialPromptEligible && !restorePrompt) initialPrompt = true;
+      setStatus(confirmed ? "idle" : "failed");
     }
-    else setStatus(confirmed ? "idle" : "failed");
   };
 
   const handleFullscreenChange = () => {
@@ -193,6 +207,8 @@ export function createStudyFullscreenController(
         exitExactOwnedTarget(current);
       } else if (ownedTargets.has(current) && !hasCurrentPendingRequest()) {
         restorePrompt = false;
+        initialPrompt = false;
+        initialPromptEligible = false;
         statusValue = "active";
       } else if (!ownedTargets.has(current) && statusValue === "active") {
         statusValue = "idle";
@@ -215,6 +231,7 @@ export function createStudyFullscreenController(
       document.fullscreenEnabled === false ||
       typeof target.requestFullscreen !== "function"
     ) {
+      if (initialPromptEligible && !restorePrompt) initialPrompt = true;
       setStatus("unsupported");
       return;
     }
@@ -253,6 +270,8 @@ export function createStudyFullscreenController(
     activeFocus = false;
     allowFullscreen = false;
     restorePrompt = false;
+    initialPrompt = false;
+    initialPromptEligible = true;
     invalidateCurrentRequest();
 
     // Requests keep their captured targets until settlement, so a ref change
@@ -299,6 +318,7 @@ export function createStudyFullscreenController(
   const dismissRestorePrompt = () => {
     if (disposed || !restorePrompt) return;
     restorePrompt = false;
+    initialPromptEligible = false;
     allowFullscreen = false;
     invalidateCurrentRequest();
     setStatus("idle");
@@ -311,6 +331,24 @@ export function createStudyFullscreenController(
       ownedTargets.add(current);
       exitExactOwnedTarget(current);
     }
+  };
+
+  const dismissInitialPrompt = () => {
+    if (disposed || !initialPrompt) return;
+    initialPrompt = false;
+    initialPromptEligible = false;
+    allowFullscreen = false;
+    invalidateCurrentRequest();
+
+    const current = document.fullscreenElement as FullscreenTarget | null;
+    if (
+      current &&
+      (ownedTargets.has(current) || [...pendingRequests.values()].some((request) => request.target === current))
+    ) {
+      ownedTargets.add(current);
+      exitExactOwnedTarget(current);
+    }
+    setStatus("idle");
   };
 
   const dispose = () => {
@@ -346,10 +384,14 @@ export function createStudyFullscreenController(
     get restorePrompt() {
       return restorePrompt;
     },
+    get initialPrompt() {
+      return initialPrompt;
+    },
     request,
     leave,
     toggle,
     dismissRestorePrompt,
+    dismissInitialPrompt,
     setActiveFocus,
     dispose,
   };
