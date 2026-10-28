@@ -177,23 +177,32 @@ describe("study exercise routes on PGlite", () => {
     expect(strangerHydration.statusCode).toBe(404);
     expect(JSON.stringify(questionHydration.json())).not.toMatch(/source_text|evidence|solution|explanation/u);
 
-    const bound = await request("POST", `/api/v1/study-exercises/session/${providedSessionId}/bind`);
+    const bound = await request("POST", `/api/v1/study-exercises/session/${providedSessionId}/bind`, ownerToken, {});
     expect(bound.statusCode).toBe(200);
     const boundRow = await db.studyExerciseSet.findUnique({ where: { id: providedRequestId } });
     expect(boundRow?.bound_at).toBeInstanceOf(Date);
     expect(boundRow?.expires_at).toBeNull();
 
-    const earlySolution = await request("POST", `/api/v1/study-exercises/${providedRequestId}/solution`);
+    const earlySolution = await request("POST", `/api/v1/study-exercises/${providedRequestId}/solution`, ownerToken, {});
     expect(earlySolution.statusCode).toBe(409);
     expect(generateSolutions).not.toHaveBeenCalled();
 
     const firstStarted = Date.now() - 4 * 60_000;
     expect((await saveSession(providedSessionId, firstStarted)).statusCode).toBe(200);
-    const solution = await request("POST", `/api/v1/study-exercises/${providedRequestId}/solution`);
-    const cachedSolution = await request("POST", `/api/v1/study-exercises/${providedRequestId}/solution`);
+    const solution = await request("POST", `/api/v1/study-exercises/${providedRequestId}/solution`, ownerToken, {});
+    const cachedSolution = await request("POST", `/api/v1/study-exercises/${providedRequestId}/solution`, ownerToken, {});
     expect(solution.statusCode).toBe(200);
     expect(cachedSolution.json()).toEqual(solution.json());
     expect(generateSolutions).toHaveBeenCalledTimes(1);
+
+    const invalidated = await request(
+      "DELETE",
+      `/api/v1/study-exercises/session/${providedSessionId}/requests/${providedRequestId}`,
+      ownerToken,
+      {},
+    );
+    expect(invalidated.statusCode).toBe(200);
+    expect(await db.studyExerciseSet.findUnique({ where: { id: providedRequestId } })).toBeNull();
 
     const generatedSessionId = randomUUID();
     const generatedRequestId = randomUUID();
@@ -215,7 +224,7 @@ describe("study exercise routes on PGlite", () => {
     expect(generatedHydration.statusCode).toBe(200);
     const secondStarted = firstStarted - 120_000;
     expect((await saveSession(generatedSessionId, secondStarted)).statusCode).toBe(200);
-    const generatedSolutions = await request("POST", `/api/v1/study-exercises/${generatedRequestId}/solution`);
+    const generatedSolutions = await request("POST", `/api/v1/study-exercises/${generatedRequestId}/solution`, ownerToken, {});
     expect(generatedSolutions.statusCode).toBe(200);
     expect(generateSolutions).toHaveBeenCalledTimes(2);
 

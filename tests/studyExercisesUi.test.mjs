@@ -242,7 +242,13 @@ test("API client uses owner-scoped preparation, session lookup, bind, invalidati
   globalThis.sessionStorage = storage;
   globalThis.fetch = async (url, init) => {
     const path = String(url);
-    calls.push({ path, method: init.method ?? "GET", body: init.body, signal: init.signal });
+    calls.push({
+      path,
+      method: init.method ?? "GET",
+      body: init.body,
+      contentType: new Headers(init.headers).get("content-type"),
+      signal: init.signal,
+    });
     const body = path.endsWith("/solution") ? solutions
       : path.includes("/requests/") || path.endsWith("/bind") ? { ok: true }
         : preparation;
@@ -265,6 +271,10 @@ test("API client uses owner-scoped preparation, session lookup, bind, invalidati
     assert.deepEqual(JSON.parse(calls[0].body), {
       requestId: "request-a", plannedSessionId: "session-a", mode: "provided", text: "Exact problem",
     });
+    for (const call of calls.slice(2)) {
+      assert.equal(call.body, "{}");
+      assert.equal(call.contentType, "application/json");
+    }
     assert.ok(calls.every(call => call.signal instanceof AbortSignal));
   } finally {
     await api.clearTokens();

@@ -52,20 +52,20 @@ export function getStudyExercise(id: string, signal?: AbortSignal) {
 export function bindStudyExercises(plannedSessionId: string, signal?: AbortSignal) {
   return request<{ ok: true }>(
     `/study-exercises/session/${encodeURIComponent(plannedSessionId)}/bind`,
-    { method: "POST", signal },
+    { method: "POST", body: JSON.stringify({}), signal },
   );
 }
 
 export function invalidateStudyExercises(plannedSessionId: string, requestId: string, signal?: AbortSignal) {
   return request<{ ok: true }>(
     `/study-exercises/session/${encodeURIComponent(plannedSessionId)}/requests/${encodeURIComponent(requestId)}`,
-    { method: "DELETE", signal },
+    { method: "DELETE", body: JSON.stringify({}), signal },
   );
 }
 
 export function requestStudyExerciseSolutions(id: string, signal?: AbortSignal) {
   return request<StudyExerciseSolutionResponse>(
     `/study-exercises/${encodeURIComponent(id)}/solution`,
-    { method: "POST", signal },
+    { method: "POST", body: JSON.stringify({}), signal },
   );
 }
