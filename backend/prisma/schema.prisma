@@ -24,6 +24,8 @@ model User {
   publicMaterialSummaryShares PublicMaterialSummaryShare[]
   documents       Document[]
   questions       QuizQuestion[]
+  studyExerciseSets StudyExerciseSet[]
+  studyExerciseInvalidations StudyExerciseInvalidation[]
   testerRuns      TesterRun[]
   @@unique([auth_provider, auth_provider_id])
   @@map("users")
@@ -186,6 +188,50 @@ model PublicMaterialSummaryShare {
   @@id([user_id, session_id])
   @@index([session_id])
   @@map("public_material_summary_shares")
+}
+
+// Private source snapshots and session-gated open-ended exercises. Never expose
+// this model through AdventureState or a public history/report DTO.
+model StudyExerciseSet {
+  id                           String   @id @default(uuid()) @db.Uuid
+  user_id                      String   @db.Uuid
+  planned_session_id           String   @db.Uuid
+  mode                         String   @db.VarChar(20)
+  requested_count              Int?
+  status                       String   @default("preparing") @db.VarChar(20)
+  source_text                  String   @db.Text
+  source_fingerprint           String   @db.Char(64)
+  exercises                    Json     @default("[]")
+  evidence                     Json     @default("[]")
+  solution                     Json?
+  generation_token             String?  @db.Uuid
+  generation_lease_expires_at  DateTime?
+  solution_generation_token    String?  @db.Uuid
+  solution_lease_expires_at    DateTime?
+  bound_at                     DateTime?
+  expires_at                   DateTime?
+  created_at                   DateTime @default(now())
+  updated_at                   DateTime @updatedAt
+  user                         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, planned_session_id, created_at(sort: Desc)], map: "study_exercise_sets_owner_planned_created_idx")
+  @@index([expires_at, bound_at], map: "study_exercise_sets_expiry_binding_idx")
+  @@map("study_exercise_sets")
+}
+
+// Contains no source content; it prevents a delayed/retried request from
+// recreating a user-cancelled preparation during the bounded request window.
+model StudyExerciseInvalidation {
+  user_id             String   @db.Uuid
+  planned_session_id  String   @db.Uuid
+  request_id          String   @db.Uuid
+  expires_at          DateTime
+  created_at          DateTime @default(now())
+  user                User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, planned_session_id, request_id])
+  @@index([expires_at], map: "study_exercise_invalidations_expiry_idx")
+  @@map("study_exercise_invalidations")
 }
 
 // Explicitly shared experiment metrics; private goals and documents stay in AdventureState.

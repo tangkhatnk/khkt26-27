@@ -78,11 +78,17 @@ export class ApiError extends Error {
     super(message);
   }
 }
+export function apiRequestTimeoutMs(path: string): number {
+  if (path === "/materials/read") return 115000;
+  if (["/quizzes/generate", "/quiz/generate", "/materials/generate", "/study-exercises"].includes(path) ||
+      /^\/study-exercises\/[^/]+\/solution$/u.test(path)) return 100000;
+  return 30000;
+}
 async function fetchWithTimeout(path: string, init: RequestInit) {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    path === "/materials/read" ? 115000 : ["/quizzes/generate", "/quiz/generate", "/materials/generate"].includes(path) ? 100000 : 30000,
+    apiRequestTimeoutMs(path),
   );
   const abort = () => controller.abort(init.signal?.reason);
   if (init.signal?.aborted) abort();
