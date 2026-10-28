@@ -166,6 +166,17 @@
   padding: 10px 16px;
 }
 
+.adventure .focus-fullscreen-dialog__actions .primary {
+  background: #9f4d26;
+  border-color: #87411f;
+  color: #fffdf4;
+}
+
+.adventure .focus-fullscreen-dialog__actions .primary:hover:not(:disabled) {
+  background: #87411f;
+  border-color: #754126;
+}
+
 html[data-theme="dark"] .adventure .focus-fullscreen-dialog {
   border-color: #5d7563;
   background: #202922;
@@ -178,6 +189,17 @@ html[data-theme="dark"] .adventure .focus-fullscreen-dialog p {
 
 html[data-theme="dark"] .adventure .focus-fullscreen-dialog .focus-fullscreen-dialog__status {
   color: #efb697;
+}
+
+html[data-theme="dark"] .adventure .focus-fullscreen-dialog__actions .primary {
+  background: #9f4d26;
+  border-color: #e4ad89;
+  color: #fff7ed;
+}
+
+html[data-theme="dark"] .adventure .focus-fullscreen-dialog__actions .primary:hover:not(:disabled) {
+  background: #87411f;
+  border-color: #f4c7a4;
 }
 
 @media (max-width: 620px) {
