@@ -240,7 +240,6 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
 
   const activeSessionId = options.activeSession?.id;
   const activeSessionOwner = options.activeSession?.owner;
-  const activeSessionSources = options.activeSession?.sources;
   useEffect(() => {
     const current = optionsRef.current;
     if (current.view !== "focus" || !current.activeSession || current.ownerId === "guest" ||
@@ -272,7 +271,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
       if (loadController.current === controller) loadController.current = null;
     };
   }, [options.view, options.ownerId, options.authenticated, options.needsLogin, options.online, options.loaded,
-    options.exclusive, activeSessionId, activeSessionOwner, activeSessionSources, hydrate]);
+    options.exclusive, activeSessionId, activeSessionOwner, hydrate]);
 
   const summarySessionId = options.summarySession?.id;
   useEffect(() => {
@@ -483,7 +482,6 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
 
   const onFocusStarted = useCallback((sessionId: string) => {
     boundSessions.current.add(sessionId);
-    if (optionsRef.current.ownerId !== "guest") void bindStudyExercises(sessionId).catch(() => {});
   }, []);
 
   const invalidatePreparationForSession = useCallback((sessionId: string) => {
