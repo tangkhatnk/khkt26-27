@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
@@ -44,7 +44,7 @@ export function adventureRoutes(
   db: PrismaClient,
   authenticate: (r: FastifyRequest) => Promise<void>,
 ) {
-  const atomic = <T>(run: (w: World) => T | Promise<T>) =>
+  const atomic = <T>(run: (w: World, tx: Prisma.TransactionClient) => T | Promise<T>) =>
     db.$transaction(
       async (tx) => {
         const rows = await tx.$queryRaw<
@@ -58,7 +58,7 @@ export function adventureRoutes(
           );
         const world = rows[0].state;
         world.revision = (world.revision ?? 0) + 1;
-        const output = await run(world);
+        const output = await run(world, tx);
         await tx.$executeRaw`UPDATE adventure_state SET state = ${JSON.stringify(world)}::jsonb WHERE id = 1`;
         return output;
       },
@@ -261,7 +261,7 @@ export function adventureRoutes(
   });
   app.post("/api/v1/adventure/sessions", opts, async (req) => {
     const input = sessionSchema.parse(req.body);
-    return atomic((w) => {
+    return atomic(async (w, tx) => {
       const prior = w.sessions[input.id];
       if (prior && prior.userId !== req.userId)
         throw new ApiError(409, "conflict", "Mã phiên đã được sử dụng.");
@@ -276,6 +276,16 @@ export function adventureRoutes(
           error instanceof Error ? error.message : "Không lưu được phiên.",
         );
       }
+      await tx.studyExerciseSet.updateMany({
+        where: {
+          user_id: req.userId,
+          planned_session_id: input.id,
+          status: "ready",
+          bound_at: null,
+          expires_at: { gt: new Date(input.started) },
+        },
+        data: { bound_at: new Date(), expires_at: null },
+      });
       return snapshot(w, req.userId, Date.now());
     });
   });

@@ -84,6 +84,49 @@ describe("adventure progress", () => {
     settle(w, input("b", now - 30000, now), now);
     expect(person(w, "u").journey.seconds).toBe(60);
   });
+  it("shows a purged removal ID only to its owner without retaining trip data or changing progress", () => {
+    const world = emptyWorld();
+    const owner = person(world, "owner");
+    const other = person(world, "other");
+    owner.seconds = 120;
+    owner.journey.seconds = 120;
+    owner.groupId = "group";
+    owner.joinedAt = now - 1000;
+    other.seconds = 60;
+    other.journey.seconds = 60;
+    other.groupId = "group";
+    other.joinedAt = now - 1000;
+    world.groups.group = {
+      id: "group",
+      name: "Shared group",
+      owner: "owner",
+      members: ["owner", "other"],
+      timezone: "UTC",
+      archived: false,
+      journey: journey(2),
+      daily: {},
+    };
+    world.groups.group.journey.seconds = 90;
+    world.sessionOverrides = {
+      purged: { version: 2, removedAt: now, removedOwnerId: "owner" },
+    };
+    const progressBefore = {
+      people: structuredClone(world.people),
+      groups: structuredClone(world.groups),
+    };
+
+    const ownerSnapshot = snapshot(world, "owner", now);
+    const otherSnapshot = snapshot(world, "other", now);
+
+    expect(ownerSnapshot.sessions).toEqual([]);
+    expect(ownerSnapshot.removedSessionIds).toEqual(["purged"]);
+    expect(otherSnapshot.removedSessionIds).toEqual([]);
+    expect(world.sessions.purged).toBeUndefined();
+    expect(world.sessionOverrides?.purged).toEqual({ version: 2, removedAt: now, removedOwnerId: "owner" });
+    expect(world.people).toEqual(progressBefore.people);
+    expect(world.groups).toEqual(progressBefore.groups);
+    expect(JSON.stringify(ownerSnapshot)).not.toMatch(/goal|metrics|targetSeconds|actualStudySeconds/u);
+  });
   it("excludes breaks and distraction, rejects overlapping segments and future clocks", () => {
     const w = emptyWorld(),
       s = input();

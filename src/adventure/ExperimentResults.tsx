@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { API_URL, request } from "../services/api";
 import type { DeviceCategory, SessionCorrectionFlags } from "../../backend/src/adventure/domain";
 import { studyTopics } from "./topics";
@@ -101,15 +101,15 @@ function GoalSummary({ run }: { run: ExperimentRun }) {
   </div>;
 }
 
-function RunDetails({ run }: { run: ExperimentRun }) {
+function RunDetailsContent({ run, id }: { run: ExperimentRun; id: string }) {
   const fullTimestampOptions: Intl.DateTimeFormatOptions = {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
   };
   const startedDate = compactDateTime(run.startedAt, fullTimestampOptions);
   const endedDate = compactDateTime(run.endedAt, fullTimestampOptions);
-  return <details className="experiment-details">
-    <summary>Chi tiết</summary>
+  return <div id={id} className="experiment-details experiment-details-content">
+    <h3>Chi tiết chuyến</h3>
     <dl>
       <div><dt>ID chuyến ẩn danh</dt><dd><code>{run.id}</code></dd></div>
       <div><dt>Mã người thử</dt><dd><code>{run.testerCode}</code></dd></div>
@@ -128,7 +128,28 @@ function RunDetails({ run }: { run: ExperimentRun }) {
       <div><dt>Giải lao thực tế</dt><dd>{run.breakSeconds == null ? "Chưa có thời gian giải lao" : formatExperimentDuration(run.breakSeconds)}</dd></div>
       <div><dt>Giải lao dự kiến</dt><dd>{run.plannedBreakSeconds == null ? "Không ghi nhận lịch nghỉ" : formatExperimentDuration(run.plannedBreakSeconds)}</dd></div>
     </dl>
-  </details>;
+  </div>;
+}
+
+function RunDetailsToggle({
+  run,
+  expanded,
+  detailsId,
+  onToggle,
+}: {
+  run: ExperimentRun;
+  expanded: boolean;
+  detailsId: string;
+  onToggle: (runId: string) => void;
+}) {
+  return <button
+    className="experiment-details-toggle"
+    type="button"
+    aria-expanded={expanded}
+    aria-controls={expanded ? detailsId : undefined}
+    aria-label={`${expanded ? "Ẩn" : "Xem"} chi tiết chuyến ${run.tripCode}`}
+    onClick={() => onToggle(run.id)}
+  >{expanded ? "Ẩn chi tiết" : "Chi tiết"}</button>;
 }
 
 function JourneyTime({ run }: { run: ExperimentRun }) {
@@ -147,7 +168,15 @@ function EfficiencySummary({ run }: { run: ExperimentRun }) {
   </div>;
 }
 
-export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) {
+export function ExperimentRunListView({
+  runs,
+  openRunId,
+  onToggle,
+}: {
+  runs: readonly ExperimentRun[];
+  openRunId: string | null;
+  onToggle: (runId: string) => void;
+}) {
   return <>
     <div className="experiment-table-wrap" tabIndex={0} aria-label="Bảng lịch sử chuyến đi; cuộn ngang để xem thêm">
       <table className="experiment-table">
@@ -161,11 +190,15 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           <th scope="col">Tóm tắt mục tiêu</th>
           <th scope="col">Quiz</th>
         </tr></thead>
-        <tbody>{runs.map((run) => <tr key={run.id}>
-          <td className="experiment-code-cell">
-            <code className="experiment-trip-code">{run.tripCode}</code>
-            <RunDetails run={run} />
-          </td>
+        <tbody>{runs.map((run) => {
+          const expanded = openRunId === run.id;
+          const detailsId = `experiment-details-table-${run.id}`;
+          return <Fragment key={run.id}>
+            <tr>
+              <td className="experiment-code-cell">
+                <code className="experiment-trip-code">{run.tripCode}</code>
+                <RunDetailsToggle run={run} expanded={expanded} detailsId={detailsId} onToggle={onToggle} />
+              </td>
           <td className="experiment-started-cell">
             <time dateTime={run.startedAt}>
               <span>{compactDateTime(run.startedAt, { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
@@ -177,11 +210,19 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           <td><EfficiencySummary run={run} /></td>
           <td><GoalSummary run={run} /></td>
           <td><QuizBadge run={run} /></td>
-        </tr>)}</tbody>
+            </tr>
+            {expanded && <tr className="experiment-details-row">
+              <td colSpan={7}><RunDetailsContent run={run} id={detailsId} /></td>
+            </tr>}
+          </Fragment>;
+        })}</tbody>
       </table>
     </div>
     <div className="experiment-run-cards" aria-label="Lịch sử chuyến đã lưu">
-      {runs.map((run) => <article className="experiment-run-card" key={run.id}>
+      {runs.map((run) => {
+        const expanded = openRunId === run.id;
+        const detailsId = `experiment-details-card-${run.id}`;
+        return <article className="experiment-run-card" key={run.id}>
         <header className="experiment-run-card__header">
           <div><span className="experiment-run-card__meta">Mã chuyến</span><code className="experiment-trip-code">{run.tripCode}</code></div>
           <time dateTime={run.startedAt}>
@@ -197,10 +238,18 @@ export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) 
           <div><span className="experiment-run-card__metric-label">Tóm tắt mục tiêu</span><GoalSummary run={run} /></div>
           <div><span className="experiment-run-card__metric-label">Quiz</span><QuizBadge run={run} /></div>
         </div>
-        <RunDetails run={run} />
-      </article>)}
+        <RunDetailsToggle run={run} expanded={expanded} detailsId={detailsId} onToggle={onToggle} />
+        {expanded && <RunDetailsContent run={run} id={detailsId} />}
+      </article>;
+      })}
     </div>
   </>;
+}
+
+export function ExperimentRunList({ runs }: { runs: readonly ExperimentRun[] }) {
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+  const toggleRun = (runId: string) => setOpenRunId((current) => current === runId ? null : runId);
+  return <ExperimentRunListView runs={runs} openRunId={openRunId} onToggle={toggleRun} />;
 }
 
 export function ExperimentResults() {

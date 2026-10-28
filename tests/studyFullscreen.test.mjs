@@ -90,6 +90,47 @@ test("unsupported fullscreen is reported without calling the element", () => {
   controller.dispose();
 });
 
+test("initial fullscreen rejection opens a one-time prompt; the restore prompt stays separate", async () => {
+  const doc = fakeDocument();
+  let rejectRequest;
+  const target = {
+    requestFullscreen() {
+      return new Promise((_resolve, reject) => { rejectRequest = reject; });
+    },
+  };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.request();
+  assert.equal(controller.initialPrompt, false);
+  rejectRequest(new Error("denied"));
+  await nextTurn();
+
+  assert.equal(controller.initialPrompt, true);
+  assert.equal(controller.restorePrompt, false);
+  controller.dismissInitialPrompt();
+  assert.equal(controller.initialPrompt, false);
+  assert.equal(controller.status, "idle");
+  controller.dispose();
+});
+
+test("unsupported initial fullscreen opens a dismissible prompt without requesting", () => {
+  const doc = fakeDocument();
+  doc.fullscreenEnabled = false;
+  const target = { calls: 0, requestFullscreen() { this.calls += 1; } };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.request();
+
+  assert.equal(controller.initialPrompt, true);
+  assert.equal(controller.status, "unsupported");
+  assert.equal(target.calls, 0);
+  controller.dismissInitialPrompt();
+  controller.request();
+  assert.equal(controller.initialPrompt, false);
+  assert.equal(controller.status, "unsupported");
+  controller.dispose();
+});
+
 test("leaving focus cancels a pending request and exits if it completes late", async () => {
   const doc = fakeDocument();
   let resolveRequest;
@@ -428,6 +469,49 @@ test("dismissing while fullscreen is pending cancels a later owned grant", async
   await nextTurn();
   assert.equal(doc.exitCalls, 1);
   assert.equal(controller.isFullscreen, false);
+  controller.dispose();
+});
+
+test("declining during a fullscreen retry exits only its own late target", async () => {
+  const doc = fakeDocument();
+  let rejectFirst;
+  let resolveRetry;
+  let calls = 0;
+  const target = {
+    requestFullscreen() {
+      calls += 1;
+      if (calls === 1) return new Promise((_resolve, reject) => { rejectFirst = reject; });
+      return new Promise((resolve) => { resolveRetry = resolve; });
+    },
+  };
+  const unrelatedTarget = { requestFullscreen() {} };
+  const controller = createStudyFullscreenController(doc, () => target);
+
+  controller.request();
+  rejectFirst(new Error("first request denied"));
+  await nextTurn();
+  assert.equal(controller.initialPrompt, true);
+
+  controller.request();
+  assert.equal(controller.status, "pending");
+  controller.dismissInitialPrompt();
+  assert.equal(controller.initialPrompt, false);
+  assert.equal(controller.status, "idle");
+
+  doc.fullscreenElement = unrelatedTarget;
+  doc.dispatch("fullscreenchange");
+  assert.equal(doc.exitCalls, 0);
+  doc.fullscreenElement = target;
+  doc.dispatch("fullscreenchange");
+  assert.equal(doc.exitCalls, 1);
+  assert.equal(doc.exitedElements[0], target);
+  assert.equal(doc.fullscreenElement, null);
+
+  resolveRetry();
+  await nextTurn();
+  assert.equal(controller.initialPrompt, false);
+  assert.equal(controller.status, "idle");
+  assert.equal(calls, 2);
   controller.dispose();
 });
 

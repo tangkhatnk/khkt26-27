@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 let vite;
 let ExperimentRunList;
+let ExperimentRunListView;
 let ExperimentResults;
 let formatExperimentDuration;
 let experimentStudySeconds;
@@ -23,7 +24,7 @@ before(async () => {
     logLevel: "silent",
     server: { middlewareMode: true },
   });
-  ({ ExperimentRunList, ExperimentResults, formatExperimentDuration, experimentStudySeconds, experimentRunHasCorrections } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
+  ({ ExperimentRunList, ExperimentRunListView, ExperimentResults, formatExperimentDuration, experimentStudySeconds, experimentRunHasCorrections } = await vite.ssrLoadModule("/src/adventure/ExperimentResults.tsx"));
 });
 
 after(async () => {
@@ -54,8 +55,12 @@ const fixture = {
   endedAt: "2026-10-21T04:45:00.000Z",
 };
 
+const renderRunList = (runs = [fixture], openRunId = runs[0]?.id ?? null) => renderToStaticMarkup(
+  React.createElement(ExperimentRunListView, { runs, openRunId, onToggle() {} }),
+);
+
 test("history uses compact semantic columns while retaining every run detail", () => {
-  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
+  const markup = renderRunList();
 
   assert.match(markup, /<caption>Lịch sử các phiên học đã lưu/u);
   for (const heading of ["Mã chuyến", "Khởi hành", "Chủ đề", "Thời gian học", "Hiệu suất", "Tóm tắt mục tiêu", "Quiz"]) {
@@ -87,7 +92,8 @@ test("history uses compact semantic columns while retaining every run detail", (
     assert.match(markup, new RegExp(detail, "u"));
   }
   assert.doesNotMatch(markup, /RAW PRIVATE GOAL MUST NOT RENDER|80%|Đăng công khai|Đạt mục tiêu|Chưa đạt mục tiêu/u);
-  assert.match(markup, /<details class="experiment-details">/u);
+  assert.match(markup, /class="experiment-details-toggle"[^>]*aria-expanded="true"/u);
+  assert.doesNotMatch(markup, /<details\b/u);
   assert.match(markup, /<dt>Bắt đầu \(giờ địa phương của bạn\)<\/dt><dd><time dateTime="2026-10-21T03:05:00\.000Z">[^<]*:\d{2}:\d{2}[^<]*<\/time>/u);
   assert.match(markup, /<dt>Kết thúc \(giờ địa phương của bạn\)<\/dt><dd><time dateTime="2026-10-21T04:45:00\.000Z">[^<]*:\d{2}:\d{2}[^<]*<\/time>/u);
 });
@@ -101,7 +107,7 @@ test("history details retain the full anonymous ID and the complete duration tex
     elapsedSeconds: 15 * 60,
     studyElapsedSeconds: 15 * 60,
   };
-  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [run] }));
+  const markup = renderRunList([run]);
 
   assert.match(markup, new RegExp(`<dt>ID chuyến ẩn danh</dt><dd><code>${fullAnonymousId}</code></dd>`, "u"));
   assert.match(markup, /<dt>Khoảng học đã diễn ra \(không tính nghỉ\)<\/dt><dd>15 phút<\/dd>/u);
@@ -134,21 +140,20 @@ test("history provides a labeled mobile card layout for the same trip", () => {
 
 test("history shows only an explicitly shared document summary beneath its goal in table, detail, and card", () => {
   const shared = "Learner-approved public document summary";
-  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
-    runs: [{ ...fixture, documentSummary: shared }],
-  }));
+  const markup = renderRunList([{ ...fixture, documentSummary: shared }]);
   assert.equal((markup.match(new RegExp(shared, "gu")) ?? []).length, 4);
   assert.match(markup, /<div class="experiment-goal-summary"><span>Ôn tập cấu trúc tế bào và chức năng của các bào quan<\/span><p class="experiment-document-summary">Learner-approved public document summary<\/p><\/div>/u);
 
-  const withoutShare = renderToStaticMarkup(React.createElement(ExperimentRunList, { runs: [fixture] }));
+  const withoutShare = renderRunList();
   assert.doesNotMatch(withoutShare, /experiment-document-summary|Learner-approved public document summary/u);
   assert.doesNotMatch(withoutShare, /Tóm tắt tài liệu/u);
 });
 
 test("history handles a missing quiz and missing optional timing values accessibly", () => {
-  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
-    runs: [{ ...fixture, quizScore: null, quizTotal: null, breakSeconds: undefined, plannedBreakSeconds: undefined, studyElapsedSeconds: undefined }],
-  }));
+  const markup = renderRunList([{
+    ...fixture, quizScore: null, quizTotal: null, breakSeconds: undefined,
+    plannedBreakSeconds: undefined, studyElapsedSeconds: undefined,
+  }]);
   assert.match(markup, /class="experiment-quiz-badge experiment-quiz-badge--pending"[^>]*>Chưa làm/u);
   assert.match(markup, /Chưa có thời gian giải lao/u);
   assert.match(markup, /Chưa ghi nhận khoảng học đã diễn ra/u);
@@ -156,16 +161,14 @@ test("history handles a missing quiz and missing optional timing values accessib
 });
 
 test("public history keeps corrected timing provenance without inferring goal achievement", () => {
-  const markup = renderToStaticMarkup(React.createElement(ExperimentRunList, {
-    runs: [{
+  const markup = renderRunList([{
       ...fixture,
       breakSeconds: 0,
       correctionFlags: {
         topic: false, targetSeconds: true, elapsedSeconds: true, actualStudySeconds: true,
         focusedSeconds: false, actualBreakSeconds: false, distractions: false, quizResult: false,
       },
-    }],
-  }));
+    }]);
 
   assert.match(markup, /<dt>Giải lao thực tế<\/dt><dd>0 giây<\/dd>/u);
   assert.doesNotMatch(markup, /<dt>Trạng thái mục tiêu|Đạt mục tiêu|Chưa đạt mục tiêu/u);
@@ -191,6 +194,26 @@ test("history displays focused seconds and rounded efficiency as the only primar
   assert.equal((markup.match(/<strong>46 giây<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<strong>77%<\/strong>/gu) ?? []).length, 2);
   assert.equal((markup.match(/<span class="experiment-run-card__meta">Mục tiêu: 2 phút · 1 lượt nghỉ<\/span>/gu) ?? []).length, 2);
+});
+
+test("one shared disclosure state expands a full-width sibling row and its matching mobile card", () => {
+  const second = { ...fixture, id: "run-2", tripCode: "V-SECOND" };
+  const markup = renderRunList([fixture, second], fixture.id);
+
+  assert.match(markup, /<tr><td class="experiment-code-cell">[\s\S]*?<button class="experiment-details-toggle"[^>]*aria-expanded="true"[^>]*>Ẩn chi tiết<\/button>[\s\S]*?<\/tr><tr class="experiment-details-row"><td colSpan="7"><div id="experiment-details-table-run-1"/u);
+  assert.match(markup, /<article class="experiment-run-card"[\s\S]*?<button class="experiment-details-toggle"[^>]*aria-expanded="true"[^>]*>Ẩn chi tiết<\/button>/u);
+  assert.match(markup, /<div id="experiment-details-card-run-1" class="experiment-details experiment-details-content">/u);
+  assert.equal((markup.match(/class="experiment-details-toggle"[^>]*aria-expanded="true"/gu) ?? []).length, 2);
+  assert.equal((markup.match(/class="experiment-details-toggle"[^>]*aria-expanded="false"/gu) ?? []).length, 2);
+  assert.equal((markup.match(/class="experiment-details-row"/gu) ?? []).length, 1);
+  assert.equal((markup.match(/<dt>ID chuyến ẩn danh<\/dt>/gu) ?? []).length, 2);
+  assert.doesNotMatch(markup, /<details\b/u);
+});
+
+test("collapsed trip details stay out of both table and mobile card content", () => {
+  const markup = renderRunList([fixture], null);
+  assert.equal((markup.match(/class="experiment-details-toggle"[^>]*aria-expanded="false"/gu) ?? []).length, 2);
+  assert.doesNotMatch(markup, /class="experiment-details-row"|experiment-details-content/u);
 });
 
 test("history does not guess a planned break count from elapsed or break seconds", () => {

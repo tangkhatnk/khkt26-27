@@ -8,6 +8,10 @@ export const API_URL = resolveApiUrl(
 );
 export const REGISTRATION_PASSWORD_HINT =
   "Mật khẩu cần từ 8 đến 72 ký tự, có chữ hoa, số và ký tự đặc biệt (ví dụ: @, !, #).";
+const LOGIN_CREDENTIAL_HINT =
+  "Email hoặc mật khẩu chưa đúng. Kiểm tra Caps Lock, bố cục bàn phím hoặc dùng nút Hiện để kiểm tra.";
+const LOGIN_RATE_LIMIT_HINT =
+  "Bạn đã thử đăng nhập quá nhiều lần. Hãy chờ một lát rồi thử lại.";
 let accessToken: string | null = null;
 let expiresAt = 0;
 let refreshing: { generation: number; promise: Promise<void> } | null = null;
@@ -74,11 +78,17 @@ export class ApiError extends Error {
     super(message);
   }
 }
+export function apiRequestTimeoutMs(path: string): number {
+  if (path === "/materials/read") return 115000;
+  if (["/quizzes/generate", "/quiz/generate", "/materials/generate", "/study-exercises"].includes(path) ||
+      /^\/study-exercises\/[^/]+\/solution$/u.test(path)) return 100000;
+  return 30000;
+}
 async function fetchWithTimeout(path: string, init: RequestInit) {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    path === "/materials/read" ? 115000 : ["/quizzes/generate", "/quiz/generate", "/materials/generate"].includes(path) ? 100000 : 30000,
+    apiRequestTimeoutMs(path),
   );
   const abort = () => controller.abort(init.signal?.reason);
   if (init.signal?.aborted) abort();
@@ -114,6 +124,17 @@ async function fetchWithTimeout(path: string, init: RequestInit) {
 }
 async function decode<T>(response: Response, path?: string): Promise<T> {
   if (response.status === 204) return undefined as T;
+  if (path === "/auth/login" && !response.ok) {
+    if (response.status === 401)
+      throw new ApiError(401, LOGIN_CREDENTIAL_HINT);
+    if (response.status === 429)
+      throw new ApiError(429, LOGIN_RATE_LIMIT_HINT);
+    if (response.status >= 500)
+      throw new ApiError(
+        response.status,
+        `Máy chủ API tạm thời không khả dụng (HTTP ${response.status}). Hãy thử lại sau.`,
+      );
+  }
   let body: unknown;
   try {
     body = await response.json();

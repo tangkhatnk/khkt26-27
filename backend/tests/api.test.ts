@@ -56,10 +56,10 @@ const pg = new PGlite();
 const server = new PGLiteSocketServer({
   db: pg,
   host: "127.0.0.1",
-  port: 15432,
+  port: 0,
   maxConnections: 1,
 });
-const db = new PrismaClient();
+let db: PrismaClient;
 const redis = new RedisMock();
 let app: Awaited<ReturnType<typeof buildApp>>;
 let headers: Record<string, string>;
@@ -101,7 +101,15 @@ beforeAll(async () => {
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261024130000_admin_account_recovery/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261025120000_admin_session_corrections/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261026100000_public_material_summary_shares/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261028120000_study_exercise_sets/migration.sql", import.meta.url), "utf8"));
   await server.start();
+  db = new PrismaClient({
+    datasources: {
+      db: {
+        url: `postgresql://postgres:postgres@${server.getServerConn()}/postgres?connection_limit=1&sslmode=disable`,
+      },
+    },
+  });
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();
   await db.topic.create({
@@ -146,6 +154,23 @@ beforeEach(async () => {
   await db.$executeRaw`DELETE FROM public_material_summary_shares`;
   await db.$executeRaw`DELETE FROM tester_runs`;
   await db.$executeRaw`UPDATE adventure_state SET state = '{"people":{},"groups":{},"sessions":{},"invites":{}}'::jsonb WHERE id = 1`;
+});
+
+it("registers the owner-scoped study exercise session lookup in the composed API", async () => {
+  const plannedSessionId = randomUUID();
+  const unauthenticated = await app.inject({
+    method: "GET",
+    url: `/api/v1/study-exercises/session/${plannedSessionId}`,
+  });
+  expect(unauthenticated.statusCode).toBe(401);
+
+  const ownerWithoutPreparation = await app.inject({
+    method: "GET",
+    url: `/api/v1/study-exercises/session/${plannedSessionId}`,
+    headers,
+  });
+  expect(ownerWithoutPreparation.statusCode).toBe(404);
+  expect(ownerWithoutPreparation.json().detail).not.toContain("Route not found");
 });
 
 it("previews the exact public trip code without saving or exposing another account's identity", async () => {
@@ -558,6 +583,48 @@ it("rejects incoherent partial corrections, audits atomically, and tombstones su
   expect(guestReplay.statusCode).toBe(410);
   expect(guestReplay.body).toContain("session-removed");
   expect(await db.adminSessionActionAudit.count({ where: { session_id: guestId } })).toBe(2);
+
+  const beforePhysicalPurgeRows = await db.$queryRaw<{ state: {
+    sessions: Record<string, unknown>;
+    people: Record<string, unknown>;
+    groups: Record<string, unknown>;
+    sessionOverrides: Record<string, Record<string, unknown>>;
+  } }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+  const beforePhysicalPurge = structuredClone(beforePhysicalPurgeRows[0].state);
+  expect(beforePhysicalPurge.sessions[id]).toBeDefined();
+  const removal = beforePhysicalPurge.sessionOverrides[id];
+  expect(removal).toMatchObject({ removedOwnerId: userId, removedAt: expect.any(Number) });
+  const removedAt = removal.removedAt;
+  expect(typeof removedAt).toBe("number");
+
+  // Model the private one-off purge output: only a content-free owner-tagged
+  // tombstone remains after the raw session and its metric overrides are gone.
+  const purgedWorld = structuredClone(beforePhysicalPurge);
+  delete purgedWorld.sessions[id];
+  purgedWorld.sessionOverrides[id] = { version: 2, removedAt: removedAt as number, removedOwnerId: userId };
+  await db.$executeRaw`UPDATE adventure_state SET state = ${JSON.stringify(purgedWorld)}::jsonb WHERE id = 1`;
+
+  const afterPhysicalPurgeRows = await db.$queryRaw<{ state: typeof beforePhysicalPurge }[]>`
+    SELECT state FROM adventure_state WHERE id = 1`;
+  const afterPhysicalPurge = afterPhysicalPurgeRows[0].state;
+  expect(afterPhysicalPurge.sessions[id]).toBeUndefined();
+  expect(afterPhysicalPurge.sessionOverrides[id]).toEqual({
+    version: 2,
+    removedAt,
+    removedOwnerId: userId,
+  });
+  expect(afterPhysicalPurge.people).toEqual(beforePhysicalPurge.people);
+  expect(afterPhysicalPurge.groups).toEqual(beforePhysicalPurge.groups);
+
+  const ownerAfterPurge = await app.inject({ url: "/api/v1/adventure", headers });
+  expect(ownerAfterPurge.statusCode).toBe(200);
+  expect(ownerAfterPurge.json()).toMatchObject({ sessions: [], removedSessionIds: [id] });
+  const otherAfterPurge = await app.inject({ url: "/api/v1/adventure", headers: stranger });
+  expect(otherAfterPurge.statusCode).toBe(200);
+  expect(otherAfterPurge.json().removedSessionIds).not.toContain(id);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload })).statusCode).toBe(410);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers: stranger, payload })).statusCode).toBe(410);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/guest-sessions", payload })).statusCode).toBe(410);
 });
 
 it("allows metric corrections for an unregistered legacy topic and rejects a new unknown topic without an audit", async () => {

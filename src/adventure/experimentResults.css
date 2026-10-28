@@ -67,10 +67,10 @@
   font-size: 12px;
   font-weight: 700;
   line-height: 1.5;
-  overflow-wrap: normal;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
   vertical-align: bottom;
-  scrollbar-width: thin;
 }
 
 .experiment-results .experiment-started-cell time {
@@ -175,45 +175,82 @@
 .experiment-results .experiment-details {
   margin-top: 8px;
   color: #455a4b;
+  font-size: 13px;
+}
+
+.experiment-results .experiment-details-toggle {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface, #fff);
+  color: var(--green);
   font-size: 11px;
-}
-
-.experiment-results .experiment-details summary {
-  width: fit-content;
-  color: #426b52;
-  cursor: pointer;
   font-weight: 650;
+  cursor: pointer;
 }
 
-.experiment-results .experiment-details summary:focus-visible {
+.experiment-results .experiment-details-toggle:hover {
+  border-color: var(--green);
+}
+
+.experiment-results .experiment-details-toggle:focus-visible {
   outline: 2px solid #d88a54;
   outline-offset: 3px;
   border-radius: 2px;
+}
+
+.experiment-results .experiment-details-row > td {
+  padding: 16px 18px;
+  background: var(--surface-raised, #f4f7f1);
+}
+
+.experiment-results .experiment-details-content {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--ink);
+}
+
+.experiment-results .experiment-details-content h3 {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 15px;
 }
 
 .experiment-results .experiment-details dl {
   display: grid;
   gap: 5px;
   margin: 8px 0 0;
-  min-width: 190px;
+  min-width: 0;
 }
 
 .experiment-results .experiment-details dl > div {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(8ch, 1fr);
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
   gap: 9px;
-  align-items: baseline;
+  align-items: start;
 }
 
 .experiment-results .experiment-details dt {
-  color: #5d6c60;
+  color: var(--muted);
 }
 
 .experiment-results .experiment-details dd {
   min-width: 0;
+  max-width: 100%;
   margin: 0;
-  color: #344b3e;
+  color: var(--ink);
   overflow-wrap: anywhere;
+}
+
+.experiment-results .experiment-details .experiment-goal-summary {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .experiment-results .experiment-details dd code {
@@ -316,7 +353,7 @@
   border-top: 1px solid #e1e7df;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 820px) {
   .experiment-results .experiment-table-wrap {
     display: none;
   }
@@ -325,6 +362,11 @@
     display: grid;
     gap: 12px;
     margin: 18px 0;
+  }
+
+  .experiment-results .experiment-details dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
   }
 }
 
