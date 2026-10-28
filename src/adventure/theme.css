@@ -562,8 +562,14 @@ html[data-theme="dark"] .adventure .experiment-run-card__header time small {
   color: var(--text-muted);
 }
 
-html[data-theme="dark"] .adventure .experiment-details summary {
+html[data-theme="dark"] .adventure .experiment-details-toggle {
+  border-color: var(--line);
+  background: var(--surface);
   color: #b9d6bd;
+}
+
+html[data-theme="dark"] .adventure .experiment-details-row > td {
+  background: var(--surface-raised);
 }
 
 html[data-theme="dark"] .adventure .experiment-details,

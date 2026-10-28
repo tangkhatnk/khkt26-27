@@ -84,3 +84,19 @@ test("single-span public goal summaries have readable light and dark colors", ()
   assert.match(css, /html\[data-theme="dark"\] \.adventure \.experiment-goal-summary\s*\{[^}]*color:\s*var\(--text\)/u);
   assert.doesNotMatch(css, /experiment-goal-summary span:/u);
 });
+
+test("expanded trip details fit the table row and use readable light and dark controls", () => {
+  assert.match(experimentCss, /\.experiment-details-row\s*>\s*td\s*\{[^}]*background:\s*var\(--surface-raised/u);
+  assert.match(experimentCss, /\.experiment-trip-code\s*\{[^}]*overflow-wrap:\s*anywhere/u);
+  assert.match(experimentCss, /\.experiment-trip-code\s*\{[^}]*white-space:\s*normal/u);
+  assert.match(experimentCss, /\.experiment-details-toggle:focus-visible\s*\{[^}]*outline:/u);
+  assert.match(rule('html[data-theme="dark"] .adventure .experiment-details-toggle'), /background:\s*var\(--surface\)/u);
+  assert.match(rule('html[data-theme="dark"] .adventure .experiment-details-row > td'), /background:\s*var\(--surface-raised\)/u);
+  assert.match(experimentCss, /@media \(max-width:\s*820px\)[\s\S]*?\.experiment-results \.experiment-table-wrap\s*\{[^}]*display:\s*none/u);
+  assert.match(experimentCss, /@media \(max-width:\s*820px\)[\s\S]*?\.experiment-results \.experiment-run-cards\s*\{[^}]*display:\s*grid/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-details\s*\{[^}]*font-size:\s*13px/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-details dl\s*\{[^}]*min-width:\s*0/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-details dl\s*>\s*div\s*\{[^}]*grid-template-columns:\s*minmax\(180px,\s*240px\) minmax\(0,\s*1fr\)/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-details \.experiment-goal-summary\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%/u);
+  assert.match(experimentCss, /@media \(max-width:\s*820px\)[\s\S]*?\.experiment-results \.experiment-details dl\s*>\s*div\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
+});
