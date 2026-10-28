@@ -70,7 +70,7 @@ export function AuthForm({ busy, blocked, disableRegistration, lockedEmail, onAu
       </label>
       <div className="auth-password-field"><label htmlFor="auth-password">Mật khẩu</label>
         <span className="auth-password-input"><input id="auth-password" name="password" type={showPassword ? "text" : "password"} autoComplete={registration ? "new-password" : "current-password"} required
-          minLength={registration ? 8 : undefined} maxLength={registration ? 72 : undefined} value={fields.password} disabled={disabled}
+          minLength={registration ? 8 : undefined} value={fields.password} disabled={disabled}
           onChange={event => change("password", event.target.value)} onBlur={() => blur("password")} aria-invalid={!!fieldError("password")}
           aria-describedby={[registration ? "auth-password-checks" : "", fieldError("password") ? "auth-password-error" : ""].filter(Boolean).join(" ") || undefined} />
           <button type="button" disabled={disabled} aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "Ẩn" : "Hiện"}</button>

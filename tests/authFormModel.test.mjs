@@ -9,10 +9,24 @@ test("registration explains every password requirement including the UTF-8 byte 
   const longUnicode = "A1!" + "ế".repeat(24);
   assert.ok(longUnicode.length < 72);
   assert.ok(registrationPasswordChecks(longUnicode).some(check => !check.met));
-  assert.match(validateAuthFields("register", { ...valid, password: longUnicode, confirmation: longUnicode }).password, /dài|72/);
-  for (const password of ["short", "study2026!", "StudyOnly!", "Study2026"]) {
-    assert.ok(validateAuthFields("register", { ...valid, password, confirmation: password }).password);
+  assert.match(validateAuthFields("register", { ...valid, password: longUnicode, confirmation: longUnicode }).password, /72.*byte|byte.*72/u);
+});
+
+test("registration field feedback names each unmet password rule", () => {
+  const cases = [
+    ["short", /8 đến 72 ký tự/u],
+    ["study2026!", /chữ hoa/u],
+    ["StudyOnly!", /chữ số/u],
+    ["Study2026", /ký tự đặc biệt/u],
+  ];
+  for (const [password, unmetRule] of cases) {
+    const error = validateAuthFields("register", { ...valid, password, confirmation: password }).password;
+    assert.match(error, unmetRule, password);
+    assert.doesNotMatch(error, /chưa đủ các điều kiện bên dưới/u);
   }
+  const tooLong = "A1!" + "x".repeat(70);
+  assert.equal(tooLong.length, 73);
+  assert.match(validateAuthFields("register", { ...valid, password: tooLong, confirmation: tooLong }).password, /8 đến 72 ký tự/u);
 });
 
 test("password confirmation is exact and passwords are not trimmed", () => {
@@ -33,7 +47,12 @@ test("registration accepts Vietnamese names but catches invalid or empty fields"
   }
 });
 
-test("login does not impose new registration requirements on existing passwords", () => {
+test("login checks only empty and over-72-character passwords", () => {
   assert.deepEqual(validateAuthFields("login", { name: "", email: valid.email, password: "abc", confirmation: "" }), {});
   assert.ok(validateAuthFields("login", { ...valid, password: "" }).password);
+  assert.deepEqual(validateAuthFields("login", { ...valid, password: "x".repeat(72) }), {});
+  assert.equal(
+    validateAuthFields("login", { ...valid, password: "x".repeat(73) }).password,
+    "Mật khẩu đang dài hơn giới hạn 72 ký tự. Hãy kiểm tra lại nội dung đã nhập.",
+  );
 });

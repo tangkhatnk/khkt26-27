@@ -109,13 +109,28 @@ describe("API account boundaries", () => {
     expect((error as Error).message).toBe("Máy chủ trả về dữ liệu không hợp lệ.");
   });
 
-  it("preserves JSON problem details when an API request fails", async () => {
-    fetchMock.mockResolvedValueOnce(response({ detail: "Invalid email or password" }, 401));
-    const error = await api.post("/auth/login", {}, false).catch((failure: unknown) => failure);
+  it("uses identical neutral feedback for every login 401 response", async () => {
+    const messages: string[] = [];
+    for (const detail of ["Invalid email or password", "User does not exist"]) {
+      fetchMock.mockResolvedValueOnce(response({ detail }, 401));
+      const error = await api.post("/auth/login", {}, false).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(api.ApiError);
+      expect(error).toMatchObject({ status: 401 });
+      messages.push((error as Error).message);
+    }
+    expect(messages).toEqual([
+      "Email hoặc mật khẩu chưa đúng. Kiểm tra Caps Lock, bố cục bàn phím hoặc dùng nút Hiện để kiểm tra.",
+      "Email hoặc mật khẩu chưa đúng. Kiểm tra Caps Lock, bố cục bàn phím hoặc dùng nút Hiện để kiểm tra.",
+    ]);
+  });
 
-    expect(error).toBeInstanceOf(api.ApiError);
-    expect(error).toMatchObject({ status: 401 });
-    expect((error as Error).message).toBe("Invalid email or password");
+  it("uses known login guidance for rate limits and server failures", async () => {
+    fetchMock.mockResolvedValueOnce(response({ detail: "Rate limit internals" }, 429));
+    await expect(api.post("/auth/login", {}, false)).rejects.toThrow("Bạn đã thử đăng nhập quá nhiều lần. Hãy chờ một lát rồi thử lại.");
+    fetchMock.mockResolvedValueOnce(response({ detail: "Private server exception" }, 503));
+    const error = await api.post("/auth/login", {}, false).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ status: 503 });
+    expect((error as Error).message).toBe("Máy chủ API tạm thời không khả dụng (HTTP 503). Hãy thử lại sau.");
   });
 
   it("falls back safely for a malformed registration error envelope", async () => {
