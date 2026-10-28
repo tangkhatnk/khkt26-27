@@ -104,6 +104,7 @@ const storedSessionSchema = z.object({
 const storedSessionOverrideSchema = z.object({
   version: z.number().int().nonnegative(),
   removedAt: z.number().int().nonnegative().optional(),
+  removedOwnerId: z.string().min(1).max(100).optional(),
   goal: z.string().trim().min(3).max(500).optional(),
   topic: z.string().trim().min(1).max(100).optional(),
   targetSeconds: z.number().int().min(60).max(14_400).optional(),
@@ -936,7 +937,12 @@ async function mutateAdminSession(
       validateEffectiveCorrection(session, nextOverride);
       afterState = sessionAuditState(session, nextOverride);
     } else {
-      nextOverride = { ...(current ?? {}), version: beforeVersion + 1, removedAt: Date.now() };
+      nextOverride = {
+        ...(current ?? {}),
+        version: beforeVersion + 1,
+        removedAt: Date.now(),
+        removedOwnerId: session.userId,
+      };
       afterState = { status: "removed", correctionVersion: nextOverride.version };
     }
 

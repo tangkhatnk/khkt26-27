@@ -218,6 +218,7 @@ export type SessionQuizResult = { score: number; total: number };
 export type SessionOverride = {
   version: number;
   removedAt?: number;
+  removedOwnerId?: string;
   goal?: string;
   topic?: string;
   targetSeconds?: number;
@@ -502,6 +503,18 @@ export function snapshot(world: World, userId: string, now: number) {
   const g = p.groupId ? world.groups[p.groupId] : null;
   if (g) resolveVote(g.journey, now);
   const ownedSessions = Object.values(world.sessions).filter((session) => session.userId === userId);
+  const removedOwnedSessionIds = ownedSessions
+    .filter((session) => isSessionRemoved(world, session.id))
+    .sort((a, b) => b.ended - a.ended)
+    .map((session) => session.id);
+  const removedOrphanSessionIds = Object.entries(world.sessionOverrides ?? {})
+    .filter(([sessionId, override]) =>
+      world.sessions[sessionId] === undefined &&
+      override.removedAt !== undefined &&
+      override.removedOwnerId === userId,
+    )
+    .map(([sessionId]) => sessionId)
+    .sort();
   return {
     revision: world.revision ?? 0,
     person: p,
@@ -524,10 +537,7 @@ export function snapshot(world: World, userId: string, now: number) {
       .filter((session) => !isSessionRemoved(world, session.id))
       .map((session) => projectSessionMetrics(session, world.sessionOverrides?.[session.id]))
       .sort((a, b) => b.ended - a.ended),
-    removedSessionIds: ownedSessions
-      .filter((session) => isSessionRemoved(world, session.id))
-      .sort((a, b) => b.ended - a.ended)
-      .map((session) => session.id),
+    removedSessionIds: [...removedOwnedSessionIds, ...removedOrphanSessionIds],
     rules: RULES,
   };
 }
