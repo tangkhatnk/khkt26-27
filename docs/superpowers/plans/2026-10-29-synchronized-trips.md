@@ -4,7 +4,7 @@ Scope: issue [#71](https://github.com/tangkhatnk/khkt26-27/issues/71), building 
 
 ## 1. Domain lifecycle and shared clock
 
-- Add failing domain tests for plan lock, ready roster of 2–6, departure only when all invitees are ready, no post-departure join, common server start/end and break schedule, and closure at the shared end.
+- Add failing domain tests for plan lock, ready roster of 2–6, departure only when all currently joined roster members are ready (unused invitations do not block departure), no post-departure join, common server start/end and break schedule, and closure at the shared end.
 - Extend the existing trip state narrowly with authoritative start/end scheduling. Keep existing group/history records readable and preserve owner, membership, expiry, and idempotent settlement invariants.
 - Test independent early completion, already-bound late settlement after closure, and reconnect snapshots. Unobserved focus intervals must not be fabricated or credited.
 

@@ -5,7 +5,8 @@ Scope: issues [#67](https://github.com/tangkhatnk/khkt26-27/issues/67)–[#70](h
 ## 1. Structured reviewed-source rendering
 
 - Add a failing regression around representative OCR text containing headings, lists, and unambiguous formulas; verify it renders as structured content while remaining in `needs-review` until confirmed.
-- Update the existing study-guide renderer/reader path to preserve supplied Markdown/LaTeX and use existing KaTeX support. Keep transcript editing, uncertain-content review, and confirmation invalidation intact.
+- Add backend `materialReading.ts` prompt/output-contract coverage and update its transcription instructions/validation so image AI reading preserves supported Markdown/LaTeX structure. Keep uncertainty markers and avoid adding or repairing unsupported source content.
+- Update the existing study-guide renderer/reader path to preserve the returned Markdown/LaTeX and use existing KaTeX support. Keep transcript editing, uncertain-content review, and confirmation invalidation intact.
 - Verify older plain-text transcripts and extraction cancellation still work; do not infer ambiguous subscripts or alter source fingerprints.
 
 ## 2. Optional post-session review

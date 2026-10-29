@@ -29,7 +29,7 @@ Improve the uploaded-material study flow, make post-session review optional, let
 ### One shared trip session
 
 - Each group trip is one session. The owner locks the destination, duration, and break schedule before inviting 2–6 participants. Each person prepares their own goal and material privately and marks ready.
-- The trip can depart with at least two ready members only when every invited participant is ready. The server supplies a common start time and schedule. No participant can join after departure.
+- The trip can depart with at least two ready members only when every participant currently joined to the roster is ready. Unused invitation tokens do not block departure. The server freezes that roster and supplies a common start time and schedule. No participant can join after departure.
 - The trip closes at the shared end time. A participant may finish early without ending anyone else's session. A participant reconnecting to an already-started trip sees the shared remaining time; time before the app can confirm focus is not credited.
 - Preserve existing focus, distraction, scheduled-break, device-clock rollback, ownership, and settlement rules. Already-bound sessions may synchronize and settle idempotently after trip closure.
 - Keep each person's goals, materials, answers, and solutions private. Preserve existing trip and group history. A member of a legacy persistent group must explicitly leave before creating or joining a new shared trip.
