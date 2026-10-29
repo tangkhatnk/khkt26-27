@@ -230,7 +230,9 @@ export function adventureRoutes(
           "forbidden",
           "Chỉ chủ đoàn có thể tạo lời mời.",
         );
-      if (g.trip && (g.trip.status !== "waiting" || g.archived))
+      if (!g.trip)
+        throw new ApiError(409, "conflict", "Chỉ có thể tạo lời mời cho chuyến học đã lập.");
+      if (g.trip.status !== "waiting" || g.archived)
         throw new ApiError(409, "conflict", "Chuyến đã khởi hành hoặc đã đóng.");
       // Rotating the code revokes all prior invitations.
       revokeGroupInvites(w, g.id);
@@ -271,9 +273,11 @@ export function adventureRoutes(
         const g = w.groups[invite.groupId];
         if (!g)
           throw new ApiError(400, "validation-error", "Lời mời hết hạn hoặc đã thu hồi.");
-        if (p.groupId === g.id) return snapshot(w, req.userId, Date.now());
-        if (g.trip && (g.trip.status !== "waiting" || g.archived))
+        if (!g.trip)
+          throw new ApiError(400, "validation-error", "Lời mời không thuộc chuyến học hợp lệ.");
+        if (g.trip.status !== "waiting" || g.archived)
           throw new ApiError(400, "validation-error", "Chuyến đã khởi hành hoặc đã đóng.");
+        if (p.groupId === g.id) return snapshot(w, req.userId, Date.now());
         if (p.groupId || g.archived || g.members.length >= 6)
           throw new ApiError(
             400,

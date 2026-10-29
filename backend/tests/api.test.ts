@@ -221,12 +221,14 @@ it("binds one canonical session to each member of a single shared trip", async (
 
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { sessionId: randomUUID() } })).statusCode).toBe(409);
   const ownerSessionId = randomUUID();
+  const memberSessionId = randomUUID();
   const ownerBind = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { sessionId: ownerSessionId } });
   expect(ownerBind.statusCode).toBe(200);
   const ownerStarted = Date.now();
   expect(ownerBind.json().group.trip.status).toBe("departed");
+  expect(ownerBind.json().group.trip.ownSessionId).toBe(ownerSessionId);
   expect(ownerBind.json().group.members[0]).toMatchObject({ tripStatus: "bound" });
-  expect(JSON.stringify(ownerBind.json().group)).not.toContain("sessionId");
+  expect(JSON.stringify(ownerBind.json().group)).not.toContain(memberSessionId);
   const ownerBindRetry = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { sessionId: ownerSessionId } });
   expect(ownerBindRetry.statusCode).toBe(200);
   expect(ownerBindRetry.json().tripStart).toEqual({ sessionId: ownerSessionId });
@@ -239,11 +241,15 @@ it("binds one canonical session to each member of a single shared trip", async (
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: lateHeaders, payload: { token: invite.json().token } })).statusCode).toBe(400);
 
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { sessionId: ownerSessionId } })).statusCode).toBe(409);
-  const memberSessionId = randomUUID();
   const memberBind = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { sessionId: memberSessionId } });
   expect(memberBind.statusCode).toBe(200);
   const memberStarted = Date.now();
   expect(memberBind.json().group.trip.status).toBe("departed");
+  expect(memberBind.json().group.trip.ownSessionId).toBe(memberSessionId);
+  expect(JSON.stringify(memberBind.json().group)).not.toContain(ownerSessionId);
+  const ownerSnapshot = await app.inject({ method: "GET", url: "/api/v1/adventure", headers });
+  expect(ownerSnapshot.json().group.trip.ownSessionId).toBe(ownerSessionId);
+  expect(JSON.stringify(ownerSnapshot.json().group)).not.toContain(memberSessionId);
   const memberBindRetry = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { sessionId: memberSessionId } });
   expect(memberBindRetry.statusCode).toBe(200);
   expect(memberBindRetry.json().tripStart).toEqual({ sessionId: memberSessionId });
@@ -1896,7 +1902,7 @@ it("rejects invalid Gemini requests before calling the provider", async () => {
   expect((await app.inject({ method: "POST", url: "/api/v1/quiz/generate", payload: { topic: "biology" } })).statusCode).toBe(401);
   expect(generateGeminiQuiz).not.toHaveBeenCalled();
 });
-it("adventure requires auth, prevents duplicate credit, hides private sessions, and keeps invitations revocable", async () => {
+it("legacy groups preserve saved sessions and reject unplanned invitations", async () => {
   expect(
     (await app.inject({ method: "GET", url: "/api/v1/adventure" })).statusCode,
   ).toBe(401);
@@ -1910,18 +1916,23 @@ it("adventure requires auth, prevents duplicate credit, hides private sessions, 
   const groupId = make.json().group.id;
   expect(make.headers.deprecation).toBe("true");
   expect(make.json().group.trip).toBeUndefined();
-  const invite = await app.inject({
+  const legacyInvite = await app.inject({
     method: "POST",
     url: "/api/v1/adventure/invite",
     headers,
   });
-  const joined = await app.inject({
+  expect(legacyInvite.statusCode).toBe(409);
+  const oldToken = randomUUID();
+  await db.$executeRaw`UPDATE adventure_state SET state = jsonb_set(state, '{invites}', ${JSON.stringify({
+    [hashToken(oldToken)]: { groupId, expires: Date.now() + 86400000, revoked: false },
+  })}::jsonb) WHERE id = 1`;
+  const oldInviteJoin = await app.inject({
     method: "POST",
     url: "/api/v1/adventure/join",
     headers: stranger,
-    payload: { token: invite.json().token },
+    payload: { token: oldToken },
   });
-  expect(joined.json().group.members).toHaveLength(2);
+  expect(oldInviteJoin.statusCode).toBe(400);
   const at = Date.now(),
     payload = {
       id: randomUUID(),
@@ -1953,6 +1964,7 @@ it("adventure requires auth, prevents duplicate credit, hides private sessions, 
     headers: stranger,
   });
   expect(other.json().sessions).toHaveLength(0);
+  expect(other.json().group).toBeNull();
   expect(JSON.stringify(other.json())).not.toContain("Private lesson");
   expect(
     (
@@ -1974,13 +1986,12 @@ it("adventure requires auth, prevents duplicate credit, hides private sessions, 
     url: "/api/v1/adventure",
     headers: stranger,
   });
-  expect(state.json().group.id).toBe(groupId);
-  expect(state.json().group.owner).not.toBe(userId);
+  expect(state.json().group).toBeNull();
   const revoked = await app.inject({
     method: "POST",
     url: "/api/v1/adventure/join",
     headers,
-    payload: { token: invite.json().token },
+    payload: { token: oldToken },
   });
   expect(revoked.statusCode).toBe(400);
 });

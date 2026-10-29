@@ -557,6 +557,9 @@ export function snapshot(world: World, userId: string, now: number) {
   resolveVote(p.journey, now);
   const g = p.groupId ? world.groups[p.groupId] : null;
   if (g) resolveVote(g.journey, now);
+  const ownTripSessionId = g?.trip?.participants[userId]?.status === "bound"
+    ? g.trip.participants[userId]?.sessionId
+    : undefined;
   const ownedSessions = Object.values(world.sessions).filter((session) => session.userId === userId);
   const removedOwnedSessionIds = ownedSessions
     .filter((session) => isSessionRemoved(world, session.id))
@@ -587,7 +590,13 @@ export function snapshot(world: World, userId: string, now: number) {
             decor: person(world, id).decor,
             ...(g.trip ? { tripStatus: g.trip.participants[id]?.status ?? "ready" } : {}),
           })),
-          ...(g.trip ? { trip: { status: g.trip.status, goal: g.trip.goal, topic: g.trip.topic, target: g.trip.target } } : {}),
+          ...(g.trip ? { trip: {
+            status: g.trip.status,
+            goal: g.trip.goal,
+            topic: g.trip.topic,
+            target: g.trip.target,
+            ...(ownTripSessionId ? { ownSessionId: ownTripSessionId } : {}),
+          } } : {}),
         }
       : null,
     sessions: ownedSessions
