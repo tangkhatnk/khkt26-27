@@ -24,24 +24,14 @@ export function StudyGuideComposer({ disabled, canGenerate, unavailableReason, r
       <span aria-hidden="true">✦</span>
       <div>
         <h3 id="study-guide-title">Chưa có tài liệu? Tạo bản ôn tập</h3>
-        <p>Nói rõ bạn muốn học gì. Bản ôn tập có đúng 8 mục theo thứ tự dưới đây; phần Lý thuyết được giải thích kỹ nhất.</p>
-        <ol className="study-guide__outline" aria-label="Bố cục bản ôn tập">
-          <li>Ý chính</li>
-          <li>Lý thuyết (chi tiết nhất)</li>
-          <li>Vai trò</li>
-          <li>So sánh</li>
-          <li>Ví dụ minh họa</li>
-          <li>Nhầm lẫn thường gặp</li>
-          <li>Câu hỏi thực tế</li>
-          <li>Gợi ý đáp án theo thứ tự câu hỏi</li>
-        </ol>
+        <p>Mô tả điều bạn muốn học và cách trình bày mong muốn. Bản ôn tập sẽ theo yêu cầu của bạn.</p>
       </div>
     </div>
     <label htmlFor="study-guide-prompt">Bạn muốn ôn tập nội dung nào?</label>
     <textarea id="study-guide-prompt" rows={3} maxLength={4000} value={prompt} disabled={disabled}
       onChange={event => setPrompt(event.target.value)} aria-describedby="study-guide-prompt-help"
-      placeholder="Ví dụ: Soạn bài ôn Sinh học lớp 10 về tế bào, giải thích dễ hiểu, có bảng so sánh tế bào nhân sơ và nhân thực, kèm 5 câu tự luyện." />
-    <p id="study-guide-prompt-help" className="material-hint">Ghi môn/lớp, phần kiến thức và mức độ mong muốn. Bản nháp chỉ trở thành tài liệu học sau khi bạn kiểm tra và xác nhận.</p>
+      placeholder="Ví dụ: Liệt kê từ vựng tiếng Anh về các môn thể thao, kèm nghĩa tiếng Việt." />
+    <p id="study-guide-prompt-help" className="material-hint">Bạn có thể yêu cầu danh sách ngắn, phần giải thích, ví dụ hoặc cách trình bày cụ thể. Bản nháp chỉ trở thành tài liệu học sau khi bạn kiểm tra và xác nhận.</p>
     <button className="study-guide__generate" disabled={disabled || !canGenerate || prompt.trim().length < 10}
       onClick={() => { void onGenerate(prompt.trim()); }}>
       {disabled ? "Đang xử lý…" : draft ? "Soạn lại bản ôn tập" : "Tạo bản ôn tập bằng AI"}

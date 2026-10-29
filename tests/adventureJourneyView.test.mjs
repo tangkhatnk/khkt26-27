@@ -88,6 +88,9 @@ test("pending AI guide review exposes a clearly primary confirmation and explici
   assert.match(markup, /<button class="primary"[^>]*>Xác nhận và dùng làm tài liệu<\/button>/u);
   assert.match(markup, /Bản AI chưa là tài liệu/u);
   assert.match(markup, /Bỏ bản nháp AI/u);
+  assert.match(markup, /Liệt kê từ vựng tiếng Anh về các môn thể thao/u);
+  assert.match(markup, /Bản ôn tập sẽ theo yêu cầu của bạn/u);
+  assert.doesNotMatch(markup, /Bố cục bản ôn tập|đúng 8 mục|Lý thuyết \(chi tiết nhất\)/u);
 });
 
 test("quiz generation exposes a distinct primary action", () => {
