@@ -9,9 +9,13 @@ ALTER TABLE study_exercise_sets
       WHEN jsonb_typeof(requested_counts) <> 'object' THEN false
       WHEN NOT (requested_counts ?& ARRAY['multipleChoice', 'trueFalse', 'shortAnswer', 'essay']) THEN false
       WHEN requested_counts - ARRAY['multipleChoice', 'trueFalse', 'shortAnswer', 'essay'] <> '{}'::jsonb THEN false
+      WHEN jsonb_typeof(requested_counts->'multipleChoice') <> 'number' THEN false
       WHEN (requested_counts->>'multipleChoice') !~ '^(0|[1-5])$' THEN false
+      WHEN jsonb_typeof(requested_counts->'trueFalse') <> 'number' THEN false
       WHEN (requested_counts->>'trueFalse') !~ '^(0|[1-5])$' THEN false
+      WHEN jsonb_typeof(requested_counts->'shortAnswer') <> 'number' THEN false
       WHEN (requested_counts->>'shortAnswer') !~ '^(0|[1-5])$' THEN false
+      WHEN jsonb_typeof(requested_counts->'essay') <> 'number' THEN false
       WHEN (requested_counts->>'essay') !~ '^(0|[1-5])$' THEN false
       ELSE (
         (requested_counts->>'multipleChoice')::integer +

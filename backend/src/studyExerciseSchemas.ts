@@ -26,10 +26,6 @@ export const studyExerciseCountsSchema = z.object({
 
 export type StudyExerciseCounts = z.infer<typeof studyExerciseCountsSchema>;
 
-export function studyExerciseCountsForLegacyCount(count: number): StudyExerciseCounts {
-  return { multipleChoice: 0, trueFalse: 0, shortAnswer: count, essay: 0 };
-}
-
 const problemText = z.string().min(1).max(MAX_STUDY_EXERCISE_TEXT_CHARACTERS)
   .refine((value) => value.trim().length > 0, "Problem text must contain non-whitespace characters.");
 const questionText = z.string().min(1).max(MAX_STUDY_EXERCISE_TEXT_CHARACTERS)

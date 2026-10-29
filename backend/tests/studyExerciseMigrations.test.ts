@@ -34,6 +34,17 @@ describe("typed study exercise count migration", () => {
     await expect(database.query("INSERT INTO study_exercise_sets (requested_counts) VALUES ($1::jsonb)", [JSON.stringify({
       multipleChoice: 1, trueFalse: 0, shortAnswer: 0, essay: 0, other: 0,
     })])).rejects.toThrow();
+    for (const key of ["multipleChoice", "trueFalse", "shortAnswer", "essay"] as const) {
+      for (const invalidValue of [null, "1"] as const) {
+        await expect(database.query("INSERT INTO study_exercise_sets (requested_counts) VALUES ($1::jsonb)", [JSON.stringify({
+          multipleChoice: 1,
+          trueFalse: 0,
+          shortAnswer: 0,
+          essay: 0,
+          [key]: invalidValue,
+        })])).rejects.toThrow();
+      }
+    }
 
     const result = await database.query("SELECT requested_count, requested_counts FROM study_exercise_sets ORDER BY requested_count NULLS LAST");
     expect(result.rows).toHaveLength(3);
