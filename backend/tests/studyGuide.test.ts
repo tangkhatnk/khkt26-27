@@ -182,6 +182,85 @@ describe("prompt-generated study guide", () => {
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { name: "configuration", error: { status: 400, message: "private provider details" }, status: 502, kind: "provider-configuration-error" },
+    { name: "authentication", error: { status: 403, code: "PERMISSION_DENIED", message: "private provider details" }, status: 502, kind: "provider-authentication-failed" },
+    { name: "billing", error: { status: 402, message: "private provider details" }, status: 402, kind: "provider-billing-required" },
+    { name: "quota", error: { status: 429, message: "private provider details" }, status: 429, kind: "provider-quota-exceeded" },
+    { name: "model availability", error: { status: 404, message: "private provider details" }, status: 502, kind: "provider-model-unavailable" },
+    { name: "timeout", error: { status: 408, message: "private provider details" }, status: 504, kind: "upstream-timeout" },
+    { name: "upstream availability", error: { status: 503, code: "UNAVAILABLE", message: "private provider details" }, status: 503, kind: "service-unavailable" },
+  ])("maps $name provider errors to safe API categories", async ({ error, status, kind }) => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "primary-model";
+    config.GEMINI_FALLBACK_MODEL = "";
+    generateContent.mockRejectedValue(error);
+
+    let thrown: unknown;
+    try {
+      await generateStudyGuide(input);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ status, kind });
+    expect((thrown as Error).message).not.toContain("private provider details");
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry configuration errors", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "primary-model";
+    config.GEMINI_FALLBACK_MODEL = "fallback-model";
+    generateContent.mockRejectedValueOnce({ status: 400, message: "private provider details" });
+
+    await expect(generateStudyGuide(input)).rejects.toMatchObject({
+      status: 502,
+      kind: "provider-configuration-error",
+    });
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry provider authentication errors", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "primary-model";
+    config.GEMINI_FALLBACK_MODEL = "fallback-model";
+    generateContent.mockRejectedValueOnce({ status: 403, code: "PERMISSION_DENIED", message: "private provider details" });
+
+    await expect(generateStudyGuide(input)).rejects.toMatchObject({
+      status: 502,
+      kind: "provider-authentication-failed",
+    });
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry when the primary times out and the fallback names the same model", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "same-model";
+    config.GEMINI_FALLBACK_MODEL = "same-model";
+    vi.useFakeTimers();
+    generateContent.mockImplementationOnce(request => new Promise((_resolve, reject) => {
+      const signal = request.config.abortSignal as AbortSignal;
+      signal.addEventListener("abort", () => reject(new Error("primary aborted")), { once: true });
+    }));
+
+    const pending = generateStudyGuide(input);
+    const timedOut = expect(pending).rejects.toMatchObject({ status: 504, kind: "upstream-timeout" });
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await timedOut;
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not contact Gemini when the key is missing or the request was already cancelled", async () => {
+    config.GEMINI_API_KEY = undefined;
+    await expect(generateStudyGuide(input)).rejects.toMatchObject({ status: 503 });
+    config.GEMINI_API_KEY = "test-only-private-key";
+    const controller = new AbortController();
+    controller.abort();
+    await expect(generateStudyGuide(input, controller.signal)).rejects.toMatchObject({ status: 499, kind: "request-cancelled" });
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
   it("aborts a stalled primary and returns the successful fallback response", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
     config.GEMINI_MODEL = "primary-model";
@@ -209,6 +288,34 @@ describe("prompt-generated study guide", () => {
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the fallback within the 90-second deadline and aborts it when the deadline expires", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "primary-model";
+    config.GEMINI_FALLBACK_MODEL = "fallback-model";
+    vi.useFakeTimers();
+    let primarySignal: AbortSignal | undefined;
+    let fallbackSignal: AbortSignal | undefined;
+    generateContent
+      .mockImplementationOnce(request => new Promise((_resolve, reject) => {
+        primarySignal = request.config.abortSignal as AbortSignal;
+        primarySignal.addEventListener("abort", () => reject(new Error("primary aborted")), { once: true });
+      }))
+      .mockImplementationOnce(request => new Promise((_resolve, reject) => {
+        fallbackSignal = request.config.abortSignal as AbortSignal;
+        fallbackSignal.addEventListener("abort", () => reject(new Error("fallback aborted")), { once: true });
+      }));
+
+    const pending = generateStudyGuide(input);
+    const timedOut = expect(pending).rejects.toMatchObject({ status: 504, kind: "upstream-timeout" });
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    await timedOut;
+    expect(primarySignal?.aborted).toBe(true);
+    expect(fallbackSignal?.aborted).toBe(true);
+    expect(generateContent.mock.calls.map(([request]) => request.config.httpOptions.timeout)).toEqual([30_000, 60_000]);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
   it("returns 499 on caller cancellation without starting a fallback", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
     config.GEMINI_MODEL = "primary-model";
@@ -227,5 +334,33 @@ describe("prompt-generated study guide", () => {
     await cancelled;
     expect(primarySignal?.aborted).toBe(true);
     expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the fallback when the caller aborts after the primary timeout", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "primary-model";
+    config.GEMINI_FALLBACK_MODEL = "fallback-model";
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    let fallbackSignal: AbortSignal | undefined;
+    generateContent
+      .mockImplementationOnce(request => new Promise((_resolve, reject) => {
+        const signal = request.config.abortSignal as AbortSignal;
+        signal.addEventListener("abort", () => reject(new Error("primary aborted")), { once: true });
+      }))
+      .mockImplementationOnce(request => new Promise((_resolve, reject) => {
+        fallbackSignal = request.config.abortSignal as AbortSignal;
+        fallbackSignal.addEventListener("abort", () => reject(new Error("fallback aborted")), { once: true });
+      }));
+
+    const pending = generateStudyGuide(input, caller.signal);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    const cancelled = expect(pending).rejects.toMatchObject({ status: 499, kind: "request-cancelled" });
+    caller.abort();
+
+    await cancelled;
+    expect(fallbackSignal?.aborted).toBe(true);
+    expect(generateContent).toHaveBeenCalledTimes(2);
   });
 });

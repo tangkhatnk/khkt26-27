@@ -114,6 +114,45 @@ describe("study guide response contracts", () => {
     expect(() => parseStudyGuideProviderResponse({ ...providerResponse, illustrations: value })).toThrow();
   });
 
+  it("rejects aggregate illustration JSON text over the UTF-8 byte limit", () => {
+    const encodedIllustration = JSON.stringify({
+      kind: "sequence",
+      afterSection: "theory",
+      title: "Đ".repeat(120),
+      description: "ế".repeat(240),
+      steps: Array.from({ length: 8 }, () => ({ label: "ậ".repeat(80), detail: "ừ".repeat(240) })),
+    });
+    expect(Buffer.byteLength(encodedIllustration, "utf8")).toBeLessThan(16 * 1024);
+    expect(Buffer.byteLength(encodedIllustration.repeat(2), "utf8")).toBeGreaterThan(16 * 1024);
+
+    expect(() => parseStudyGuideProviderResponse({
+      ...providerResponse,
+      illustrations: [encodedIllustration, encodedIllustration],
+    })).toThrow();
+  });
+
+  it("bounds sampled points across all illustrations in one guide", () => {
+    const series = (label: string) => ({
+      label,
+      points: Array.from({ length: 64 }, (_, index) => [index, index] as [number, number]),
+    });
+    const plot = {
+      kind: "coordinate-plot" as const,
+      afterSection: "theory" as const,
+      title: "Đồ thị",
+      description: "Mẫu điểm trên hai trục.",
+      xAxis: { label: "x", min: 0, max: 63 },
+      yAxis: { label: "y", min: 0, max: 63 },
+      series: [series("a"), series("b"), series("c")],
+    };
+    const overBudget = [
+      plot,
+      { ...plot, series: [{ label: "d", points: [[0, 0], [1, 1]] as [number, number][] }] },
+    ];
+
+    expect(studyGuideProviderResponseSchema.safeParse({ ...providerResponse, illustrations: overBudget }).success).toBe(false);
+  });
+
   it("normalizes provider Markdown headings and escaped line breaks without changing code or TeX", () => {
     const backslash = String.fromCharCode(92);
     const escapedBreak = `${backslash}n`;
@@ -139,12 +178,74 @@ describe("study guide response contracts", () => {
     expect(parsed.body).toContain("$\\triangle U = A + Q$");
     expect(parsed.body).not.toContain(`$${tab}riangle U = A + Q$`);
 
+    const commandPrefix = parseStudyGuideProviderResponse({
+      ...providerResponse,
+      body: `${providerResponse.body}\n\n$${tab}riangleSuffix$`,
+    });
+    expect(commandPrefix.body).toContain(`$${tab}riangleSuffix$`);
+    expect(commandPrefix.body).not.toContain("\\triangleSuffix");
+
     const unclosed = parseStudyGuideProviderResponse({
       ...providerResponse,
       body: `${providerResponse.body}\n\nUnclosed: $unfinished ${tab}riangle.\n\nCode: \`${tab}riangle\`.`,
     });
     expect(unclosed.body).toContain(`Unclosed: $unfinished ${tab}riangle.`);
     expect(unclosed.body).toContain(`Code: \`${tab}riangle\`.`);
+  });
+
+  it("preserves legacy and user-authored tabs in the public draft and display normalizer", () => {
+    const tab = "\t";
+    const text = `Legacy: $${tab}riangle U$; code: \`${tab}riangle\`; note: ${tab}riangle.\n${providerResponse.body}`;
+
+    expect(studyGuideResponseSchema.parse({ title: "Legacy", text }).text).toBe(text);
+    expect(normalizeStudyGuideAiText(text)).toBe(text);
+  });
+
+  it("repairs a JSON-decoded right arrow only inside closed provider math", () => {
+    const backslash = String.fromCharCode(92);
+    const carriageReturn = String.fromCharCode(13);
+    const body = `${providerResponse.body} $A${backslash}rightarrow B$`;
+    const rawJson = JSON.stringify({ ...providerResponse, body })
+      .replace(`${backslash}${backslash}rightarrow`, `${backslash}rightarrow`);
+    const decoded = JSON.parse(rawJson) as typeof providerResponse;
+
+    expect(decoded.body).toContain(`$A${carriageReturn}ightarrow B$`);
+    expect(studyGuideProviderResponseSchema.parse(decoded).body).toContain(`$A${backslash}rightarrow B$`);
+
+    const literalLineFeed = `${providerResponse.body} $A\nightarrow B$`;
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, body: literalLineFeed }).body)
+      .toContain("$A\nightarrow B$");
+
+    const nonBoundaryBody = `${providerResponse.body} $A${backslash}rightarrowx B$`;
+    const nonBoundaryJson = JSON.stringify({ ...providerResponse, body: nonBoundaryBody })
+      .replace(`${backslash}${backslash}rightarrowx`, `${backslash}rightarrowx`);
+    expect(studyGuideProviderResponseSchema.parse(JSON.parse(nonBoundaryJson)).body)
+      .toContain("$A\nightarrowx B$");
+
+    const outsideMathBody = `${providerResponse.body} ${backslash}rightarrow B`;
+    const outsideMathJson = JSON.stringify({ ...providerResponse, body: outsideMathBody })
+      .replace(`${backslash}${backslash}rightarrow`, `${backslash}rightarrow`);
+    expect(studyGuideProviderResponseSchema.parse(JSON.parse(outsideMathJson)).body)
+      .toContain(`${String.fromCharCode(10)}ightarrow B`);
+
+    const unclosedMath = `${providerResponse.body} $A${carriageReturn}ightarrow B`;
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, body: unclosedMath }).body)
+      .toContain("$A\nightarrow B");
+
+    const fencedCode = `${providerResponse.body}\n\`\`\`tex\n$A${carriageReturn}ightarrow B$\n\`\`\``;
+    expect(studyGuideProviderResponseSchema.parse({ ...providerResponse, body: fencedCode }).body)
+      .toContain("$A\nightarrow B$");
+
+    const fencedOnlyCloser = `${providerResponse.body} $A${backslash}rightarrow B\n\`\`\`tex\n$\n\`\`\``;
+    const fencedOnlyCloserJson = JSON.stringify({ ...providerResponse, body: fencedOnlyCloser })
+      .replace(`${backslash}${backslash}rightarrow`, `${backslash}rightarrow`);
+    expect(studyGuideProviderResponseSchema.parse(JSON.parse(fencedOnlyCloserJson)).body)
+      .toContain("$A\nightarrow B");
+
+    const userText = `${providerResponse.body} $A${carriageReturn}ightarrow B$`;
+    expect(studyGuideResponseSchema.parse({ title: "Legacy", text: userText }).text).toBe(userText);
+    expect(normalizeStudyGuideAiText(userText)).toContain("$A\nightarrow B$");
+    expect(normalizeStudyGuideAiText(userText)).not.toContain(`${backslash}rightarrow`);
   });
 
   it("keeps the public editable title and text contract bounded and accepts short requested content", () => {
