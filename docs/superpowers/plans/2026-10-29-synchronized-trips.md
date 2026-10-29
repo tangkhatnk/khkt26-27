@@ -26,6 +26,13 @@ Scope: issue [#71](https://github.com/tangkhatnk/khkt26-27/issues/71), building 
 - Inspect changed trip UI at 1440, 768, and 390 pixels in light/dark themes, including waiting, ready, error, active, reconnect, and closed states. Use two synthetic users to verify the same server start/end and late-sync behavior when the local environment permits.
 - Review the final lane diff for private-field projection, no invented offline focus, unchanged legacy history, and idempotent settlement. Record test commands, exits, screenshots, and any two-user environment limit.
 
+## Interface map
+
+- Create a tagged synchronized trip at `POST /api/v1/adventure/trips/synchronized`; the shared record stores `mode`, `target`, optional `breakPlan`, and participant readiness, with no shared goal or topic.
+- A joined member reserves their own `sessionId` via `POST /api/v1/adventure/trip/ready`. The owner launches through `POST /api/v1/adventure/trip/start`; the atomic response returns `tripStart: { sessionId, startedAt, endsAt }` and freezes every joined ready member's reservation.
+- Snapshots return current `serverNow`, immutable shared `startedAt`/`endsAt`, and caller-only `ownSessionId`. Client clock conversion is bounded and preserves unobserved intervals as uncredited focus.
+- The legacy `POST /api/v1/adventure/trips` and legacy trip start/settlement payloads continue to serve #66 records.
+
 ## Interfaces and ownership
 
 - Keep lifecycle and settlement rules in `backend/src/adventure` and API boundaries in existing routes/services. Keep presentation in focused `src/adventure` helpers/components; touch `AdventureApp.tsx` only for trip/group regions and avoid quiz/exercise regions.

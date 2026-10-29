@@ -34,6 +34,8 @@ Improve the uploaded-material study flow, make post-session review optional, let
 - Preserve existing focus, distraction, scheduled-break, device-clock rollback, ownership, and settlement rules. Already-bound sessions may synchronize and settle idempotently after trip closure.
 - Keep each person's goals, materials, answers, and solutions private. Preserve existing trip and group history. A member of a legacy persistent group must explicitly leave before creating or joining a new shared trip.
 
+The synchronized flow uses a distinct `/api/v1/adventure/trips/synchronized` creation request and a tagged `trip.mode: "synchronized"` record. Each joined member reserves their own session UUID through `/api/v1/adventure/trip/ready`; the owner starts through the existing trip-start route, which binds the complete ready roster at one timestamp. Snapshots include `serverNow`, the shared `startedAt`/`endsAt`, and only the requesting member's `ownSessionId`. The legacy trip endpoint and payload remain unchanged.
+
 ## Decisions and tradeoffs
 
 - Extend the existing trip and AdventureState model instead of introducing a parallel group system. This reuses current invitations, membership checks, and history while keeping old records readable; synchronization state is limited to a trip's lifecycle.
