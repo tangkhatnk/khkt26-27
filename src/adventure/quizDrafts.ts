@@ -26,6 +26,10 @@ export function isQuizCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 30;
 }
 
+export function canStartSessionWithQuizReview(countInput: string, reviewSkipped: boolean): boolean {
+  return reviewSkipped || isQuizCount(Number(countInput));
+}
+
 function isCorrectionVersion(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
 }
@@ -129,6 +133,23 @@ export const emptyQuizDraft = (correctionVersion = 0): QuizDraft => ({
   answers: {},
 });
 
+export function createSessionQuizDraft(
+  countInput: string,
+  reviewSkipped: boolean,
+  correctionVersion = 0,
+): QuizDraft {
+  const parsedCount = Number(countInput);
+  const count = isQuizCount(parsedCount) ? parsedCount : 3;
+  return {
+    correctionVersion,
+    count,
+    requestedCount: count,
+    questions: [],
+    answers: {},
+    ...(reviewSkipped ? { reviewSkipped: true } : {}),
+  };
+}
+
 /** Adopt a persisted/prefetched draft as the panel's controlled state. */
 export function quizPanelDraftState(value: unknown, correctionVersion = 0): { draft: QuizDraft; countInput: string } {
   const valid = isValidQuizDraft(value) ? structuredClone(value) : null;
@@ -137,6 +158,7 @@ export function quizPanelDraftState(value: unknown, correctionVersion = 0): { dr
     ? { ...valid, correctionVersion }
     : {
         ...emptyQuizDraft(correctionVersion),
+        ...(valid?.reviewSkipped !== undefined ? { reviewSkipped: valid.reviewSkipped } : {}),
         ...(valid ? { count: valid.requestedCount ?? valid.count, requestedCount: valid.requestedCount ?? valid.count } : {}),
       };
   return { draft, countInput: String(draft.requestedCount ?? draft.count) };

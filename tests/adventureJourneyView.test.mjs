@@ -14,6 +14,7 @@ let JourneyView;
 let tripSceneTiming;
 let StudyGuideComposer;
 let QuizPanel;
+let QuizReviewPreference;
 let SessionCorrectionNotice;
 
 before(async () => {
@@ -28,6 +29,7 @@ before(async () => {
   ({ JourneyView } = await vite.ssrLoadModule("/src/adventure/JourneyView.tsx"));
   ({ StudyGuideComposer } = await vite.ssrLoadModule("/src/adventure/StudyGuideComposer.tsx"));
   ({ QuizPanel } = await vite.ssrLoadModule("/src/adventure/QuizPanel.tsx"));
+  ({ QuizReviewPreference } = await vite.ssrLoadModule("/src/adventure/QuizReviewPreference.tsx"));
   ({ SessionCorrectionNotice } = await vite.ssrLoadModule("/src/adventure/SessionCorrectionNotice.tsx"));
   ({ tripSceneTiming } = await vite.ssrLoadModule("/src/adventure/focus.ts"));
 });
@@ -126,6 +128,23 @@ test("a skipped review stays closed after the session and offers an explicit opt
   assert.match(markup, /Đã bỏ qua câu hỏi ôn tập/u);
   assert.match(markup, /Bật ôn tập/u);
   assert.doesNotMatch(markup, /Tạo câu hỏi bằng AI/u);
+});
+
+test("departure review preference uses an explicit skip toggle and hides the count while skipped", () => {
+  const control = (skipped) => renderToStaticMarkup(React.createElement(QuizReviewPreference, {
+    count: "3",
+    skipped,
+    onCountChange: () => {},
+    onToggleSkip: () => {},
+  }));
+  const enabledMarkup = control(false);
+  assert.match(enabledMarkup, /type="number"[^>]*value="3"/u);
+  assert.match(enabledMarkup, /aria-pressed="false"[^>]*>Bỏ qua ôn tập/u);
+
+  const skippedMarkup = control(true);
+  assert.doesNotMatch(skippedMarkup, /type="number"/u);
+  assert.match(skippedMarkup, /aria-pressed="true"[^>]*>Bật ôn tập/u);
+  assert.match(skippedMarkup, /không tạo sẵn câu hỏi/u);
 });
 
 test("corrected summary notice separates effective metrics from the recorded end time", () => {

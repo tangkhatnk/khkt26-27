@@ -36,6 +36,7 @@ import { DurationPicker } from "./DurationPicker";
 import { ExperimentResults } from "./ExperimentResults";
 import { PublicReport } from "./PublicReport";
 import { QuizPanel } from "./QuizPanel";
+import { QuizReviewPreference } from "./QuizReviewPreference";
 import {
   StudyExercisePreparation as StudyExercisePreparationEditor,
   StudyExerciseQuestionViewer,
@@ -93,7 +94,7 @@ import {
   type Saved,
   type SessionHistoryEntry,
 } from "./storage";
-import { isQuizCount, isValidQuizDraft, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
+import { canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidQuizDraft, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
 import { analyzeSession, hasSessionCorrections, knowledgeGaps, reviewPlan } from "./learning";
 import {
   localDayKey,
@@ -1301,7 +1302,7 @@ function AdventureWorkspace() {
       startTarget > 14400 ||
       !Number.isInteger(startTarget) ||
       !startBreaksValid ||
-      (!skipQuizReview && !isQuizCount(Number(quizCount)))
+      !canStartSessionWithQuizReview(quizCount, skipQuizReview)
     )
       return;
     const hasReadyPreparation = isStudyExercisePreparationReadyForSession(draftTripId);
@@ -1340,11 +1341,7 @@ function AdventureWorkspace() {
           state: "focus",
           reconnect: 0,
         };
-        const selectedQuizCount = isQuizCount(Number(quizCount)) ? Number(quizCount) : 3;
-        const initialQuizDraft = {
-          ...quizDraftFromQuestions([], selectedQuizCount),
-          ...(skipQuizReview ? { reviewSkipped: true } : {}),
-        };
+        const initialQuizDraft = createSessionQuizDraft(quizCount, skipQuizReview);
         if (commit({
           ...current.current,
           ...(input.snapshot ? { snapshot: input.snapshot } : {}),
@@ -2248,36 +2245,12 @@ function AdventureWorkspace() {
                           }}
                         />
                       </TicketEditor>
-                      <label className="quiz-count-label" htmlFor="departure-quiz-count">
-                        Số câu hỏi ôn tập
-                        <input
-                          id="departure-quiz-count"
-                          type="number"
-                          min={1}
-                          max={30}
-                          step={1}
-                          value={quizCount}
-                          aria-invalid={!skipQuizReview && !isQuizCount(Number(quizCount))}
-                          onChange={(event) => setQuizCount(event.target.value)}
-                          aria-describedby="departure-quiz-hint"
-                        />
-                      </label>
-                      <label className="departure-quiz-skip">
-                        <input
-                          type="checkbox"
-                          checked={skipQuizReview}
-                          disabled={busy}
-                          onChange={(event) => setSkipQuizReview(event.target.checked)}
-                        />
-                        Bỏ qua câu hỏi ôn tập cho chuyến này
-                      </label>
-                      <small id="departure-quiz-hint" className="departure-quiz-hint">
-                        {skipQuizReview
-                          ? "Ứng dụng sẽ không tạo sẵn câu hỏi trong lúc học. Bạn vẫn có thể bật ôn tập ở phần thành quả."
-                          : isQuizCount(Number(quizCount))
-                            ? "Khi đăng nhập, nguồn đã kiểm tra được gửi cho AI để chuẩn bị câu hỏi trong lúc bạn tập trung. Bạn có thể đổi số lượng ở phần thành quả."
-                          : "Chọn số câu hỏi là số nguyên từ 1 đến 30."}
-                      </small>
+                      <QuizReviewPreference
+                        count={quizCount}
+                        skipped={skipQuizReview}
+                        onCountChange={setQuizCount}
+                        onToggleSkip={() => setSkipQuizReview((value) => !value)}
+                      />
                       <h3 className="departure-companion-title">Bạn đồng hành</h3>
                       <div className="choice-row">
                         <button
@@ -2318,7 +2291,7 @@ function AdventureWorkspace() {
                           !Number.isInteger(minutes) ||
                           minutes < 1 ||
                           minutes > 240 || !validBreaks ||
-                          (!skipQuizReview && !isQuizCount(Number(quizCount))) ||
+                          !canStartSessionWithQuizReview(quizCount, skipQuizReview) ||
                           !exclusive
                         }
                         onClick={() => start()}

@@ -1304,20 +1304,29 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   width: fit-content;
   max-width: 100%;
 }
-.departure-quiz-skip {
+.quiz-review-preference {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.departure-quiz-skip {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
   width: fit-content;
   max-width: 100%;
   margin: 4px 0 8px;
-  color: var(--muted);
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
   font-size: 13px;
+  cursor: pointer;
 }
-.departure-quiz-skip input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  margin: 0;
+.departure-quiz-skip[aria-pressed="true"] {
+  border-color: var(--muted);
 }
 .quiz-review-skipped {
   display: flex;

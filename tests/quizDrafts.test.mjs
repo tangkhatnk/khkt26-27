@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QuizRequestGuard, isQuizCount, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
+import { QuizRequestGuard, canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
 
 const question = {
   id: "123e4567-e89b-42d3-a456-426614174000",
@@ -56,6 +56,23 @@ test("a skipped review survives storage and disables focus-time prefetch while l
   assert.equal(isValidQuizDraft({ ...skipped, reviewSkipped: "yes" }), false);
 });
 
+test("skipping quiz review permits session start with an empty count and persists the skip marker", () => {
+  assert.equal(canStartSessionWithQuizReview("", true), true);
+  assert.equal(canStartSessionWithQuizReview("", false), false);
+  assert.equal(canStartSessionWithQuizReview("5", false), true);
+
+  const draft = createSessionQuizDraft("", true);
+  assert.deepEqual(draft, {
+    correctionVersion: 0,
+    count: 3,
+    requestedCount: 3,
+    questions: [],
+    answers: {},
+    reviewSkipped: true,
+  });
+  assert.equal(isValidQuizDraft(JSON.parse(JSON.stringify(draft))), true);
+});
+
 test("a draft from an older correction version keeps the selected count but drops stale questions and answers", () => {
   const stale = { correctionVersion: 1, count: 1, requestedCount: 4, questions: [question], answers: { [question.id]: 2 } };
   const adopted = quizPanelDraftState(stale, 2);
@@ -65,6 +82,11 @@ test("a draft from an older correction version keeps the selected count but drop
   assert.equal(adopted.draft.requestedCount, 4);
   assert.deepEqual(adopted.draft.questions, []);
   assert.deepEqual(adopted.draft.answers, {});
+
+  const skipped = quizPanelDraftState({ ...stale, reviewSkipped: true }, 2);
+  assert.equal(skipped.draft.reviewSkipped, true);
+  assert.deepEqual(skipped.draft.questions, []);
+  assert.deepEqual(skipped.draft.answers, {});
 });
 
 test("draft updates preserve other sessions and keep the previous saved value immutable", () => {
