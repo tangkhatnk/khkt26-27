@@ -131,9 +131,10 @@ test("a skipped review stays closed after the session and offers an explicit opt
 });
 
 test("departure review preference uses an explicit skip toggle and hides the count while skipped", () => {
-  const control = (skipped) => renderToStaticMarkup(React.createElement(QuizReviewPreference, {
+  const control = (skipped, disabled = false) => renderToStaticMarkup(React.createElement(QuizReviewPreference, {
     count: "3",
     skipped,
+    disabled,
     onCountChange: () => {},
     onToggleSkip: () => {},
   }));
@@ -145,6 +146,10 @@ test("departure review preference uses an explicit skip toggle and hides the cou
   assert.doesNotMatch(skippedMarkup, /type="number"/u);
   assert.match(skippedMarkup, /aria-pressed="true"[^>]*>Bật ôn tập/u);
   assert.match(skippedMarkup, /không tạo sẵn câu hỏi/u);
+
+  const busyMarkup = control(false, true);
+  assert.match(busyMarkup, /<input[^>]*disabled=""/u);
+  assert.match(busyMarkup, /<button[^>]*disabled=""/u);
 });
 
 test("corrected summary notice separates effective metrics from the recorded end time", () => {

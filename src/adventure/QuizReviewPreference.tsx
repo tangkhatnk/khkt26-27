@@ -3,11 +3,13 @@ import { isQuizCount } from "./quizDrafts";
 export function QuizReviewPreference({
   count,
   skipped,
+  disabled = false,
   onCountChange,
   onToggleSkip,
 }: {
   count: string;
   skipped: boolean;
+  disabled?: boolean;
   onCountChange: (value: string) => void;
   onToggleSkip: () => void;
 }) {
@@ -22,6 +24,7 @@ export function QuizReviewPreference({
           max={30}
           step={1}
           value={count}
+          disabled={disabled}
           aria-invalid={!isQuizCount(Number(count))}
           onChange={(event) => onCountChange(event.currentTarget.value)}
           aria-describedby="departure-quiz-hint"
@@ -37,6 +40,7 @@ export function QuizReviewPreference({
       type="button"
       className="departure-quiz-skip"
       aria-pressed={skipped}
+      disabled={disabled}
       onClick={onToggleSkip}
     >
       {skipped ? "Bật ôn tập" : "Bỏ qua ôn tập"}

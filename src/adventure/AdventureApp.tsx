@@ -2248,6 +2248,7 @@ function AdventureWorkspace() {
                       <QuizReviewPreference
                         count={quizCount}
                         skipped={skipQuizReview}
+                        disabled={busy}
                         onCountChange={setQuizCount}
                         onToggleSkip={() => setSkipQuizReview((value) => !value)}
                       />
