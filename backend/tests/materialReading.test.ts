@@ -105,6 +105,10 @@ describe("Gemini material reader", () => {
 
     expect(instruction).toMatch(/Markdown/u);
     expect(instruction).toMatch(/LaTeX|TeX/u);
+    expect(instruction).toContain("$...$");
+    expect(instruction).toContain("$$...$$");
+    expect(instruction).toContain("\\(...\\)");
+    expect(instruction).toContain("\\[...\\]");
     expect(instruction).toMatch(/không đoán.*ký hiệu|không suy đoán.*ký hiệu/iu);
     expect(result.text).toBe(`[Trang 1]\n${structuredTranscript}`);
     expect(result.text).toContain("[không rõ]");
