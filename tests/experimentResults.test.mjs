@@ -113,6 +113,23 @@ test("history details retain the full anonymous ID and the complete duration tex
   assert.match(markup, /<dt>Khoảng học đã diễn ra \(không tính nghỉ\)<\/dt><dd>15 phút<\/dd>/u);
 });
 
+test("trip code and details control occupy separate rows in the first history column", () => {
+  const markup = renderRunList();
+
+  assert.match(markup, /<td class="experiment-code-cell"><div class="experiment-code-actions"><code class="experiment-trip-code">V-1234567890AB<\/code><button class="experiment-details-toggle"/u);
+});
+
+test("expanded details use the open right side for a static decorative route illustration", () => {
+  const markup = renderRunList();
+  const illustration = markup.match(/<div class="experiment-details-art" aria-hidden="true">([\s\S]*?)<\/div>/u)?.[1];
+
+  assert.match(markup, /class="experiment-details-layout"/u);
+  assert.ok(illustration, "expanded details include a decorative, assistive-technology-hidden illustration");
+  assert.match(illustration, /<svg[^>]*viewBox="0 0 360 260"/u);
+  assert.doesNotMatch(illustration, /V-1234567890AB|TESTER-PRIVATE-42|Ôn tập cấu trúc tế bào/u);
+  assert.equal((markup.match(/class="experiment-details-art" aria-hidden="true"/gu) ?? []).length, 2);
+});
+
 test("history explains that saved sessions appear automatically and summarizes goal privacy", () => {
   const markup = renderToStaticMarkup(React.createElement(ExperimentResults));
 

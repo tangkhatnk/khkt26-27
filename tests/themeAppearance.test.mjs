@@ -96,7 +96,12 @@ test("expanded trip details fit the table row and use readable light and dark co
   assert.match(experimentCss, /@media \(max-width:\s*820px\)[\s\S]*?\.experiment-results \.experiment-run-cards\s*\{[^}]*display:\s*grid/u);
   assert.match(experimentCss, /\.experiment-results \.experiment-details\s*\{[^}]*font-size:\s*13px/u);
   assert.match(experimentCss, /\.experiment-results \.experiment-details dl\s*\{[^}]*min-width:\s*0/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-details-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.6fr\) minmax\(240px,\s*0\.8fr\)/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-details-art\s*\{[^}]*min-height:/u);
   assert.match(experimentCss, /\.experiment-results \.experiment-details dl\s*>\s*div\s*\{[^}]*grid-template-columns:\s*minmax\(180px,\s*240px\) minmax\(0,\s*1fr\)/u);
   assert.match(experimentCss, /\.experiment-results \.experiment-details \.experiment-goal-summary\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%/u);
   assert.match(experimentCss, /@media \(max-width:\s*820px\)[\s\S]*?\.experiment-results \.experiment-details dl\s*>\s*div\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
+  assert.match(experimentCss, /@media \(max-width:\s*820px\)[\s\S]*?\.experiment-results \.experiment-details-art\s*\{[^}]*display:\s*none/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-code-actions\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
+  assert.match(experimentCss, /\.experiment-results \.experiment-code-actions \.experiment-trip-code\s*\{[^}]*max-width:\s*100%/u);
 });

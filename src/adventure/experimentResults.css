@@ -58,10 +58,18 @@
   width: 230px;
 }
 
+.experiment-results .experiment-code-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+}
+
 .experiment-results .experiment-trip-code {
   display: inline-block;
-  max-width: 250px;
-  overflow-x: auto;
+  max-width: 100%;
   color: #2e4b3b;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   font-size: 12px;
@@ -71,6 +79,14 @@
   word-break: break-word;
   white-space: normal;
   vertical-align: bottom;
+}
+
+.experiment-results .experiment-code-actions .experiment-details-toggle {
+  margin-top: 0;
+}
+
+.experiment-results .experiment-code-actions .experiment-trip-code {
+  max-width: 100%;
 }
 
 .experiment-results .experiment-started-cell time {
@@ -222,11 +238,34 @@
   font-size: 15px;
 }
 
+.experiment-results .experiment-details-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(240px, 0.8fr);
+  gap: clamp(24px, 3vw, 52px);
+  align-items: stretch;
+}
+
 .experiment-results .experiment-details dl {
   display: grid;
+  width: 100%;
   gap: 5px;
   margin: 8px 0 0;
   min-width: 0;
+}
+
+.experiment-results .experiment-details-art {
+  display: grid;
+  min-width: 0;
+  min-height: 300px;
+  place-items: center;
+  padding: 12px 18px;
+  border-left: 1px solid var(--border);
+}
+
+.experiment-results .experiment-details-art svg {
+  display: block;
+  width: min(100%, 360px);
+  max-height: 300px;
 }
 
 .experiment-results .experiment-details dl > div {
@@ -362,6 +401,15 @@
     display: grid;
     gap: 12px;
     margin: 18px 0;
+  }
+
+  .experiment-results .experiment-details-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .experiment-results .experiment-details-art {
+    display: none;
   }
 
   .experiment-results .experiment-details dl > div {
