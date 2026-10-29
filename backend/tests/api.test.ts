@@ -300,6 +300,10 @@ it("starts one synchronized session for the ready roster and exposes only each m
     expect(launches[0].json().tripStart).toEqual({ sessionId: ownerSessionId, startedAt: commonStart, endsAt: commonStart + 180_000 });
     expect(launches[1].json().tripStart).toEqual(launches[0].json().tripStart);
     expect(JSON.stringify(launches[0].json().group)).not.toContain(memberSessionId);
+    const memberReconnect = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { groupId: tripId, sessionId: memberSessionId } });
+    expect(memberReconnect.statusCode, memberReconnect.body).toBe(200);
+    expect(memberReconnect.json().tripStart).toEqual({ sessionId: memberSessionId, startedAt: commonStart, endsAt: commonStart + 180_000 });
+    expect(JSON.stringify(memberReconnect.json().group)).not.toContain(ownerSessionId);
     const ownerSnapshot = await app.inject({ method: "GET", url: "/api/v1/adventure", headers });
     const memberSnapshot = await app.inject({ method: "GET", url: "/api/v1/adventure", headers: stranger });
     expect(ownerSnapshot.json()).toMatchObject({ serverNow: commonStart });

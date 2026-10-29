@@ -5,6 +5,7 @@ import { isDeviceCategory } from "./device.ts";
 import { isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
 import {
   emptyWorld,
+  type BreakPlan,
   type Snapshot,
   type World,
   type Session,
@@ -16,6 +17,13 @@ export type MaterialSummaryCacheEntry = {
   sourceFingerprint: string;
   summary: string;
   generatedAt: number;
+};
+export type SynchronizedTripDraft = {
+  groupId: string;
+  goal: string;
+  topic: string;
+  target: number;
+  breakPlan?: BreakPlan;
 };
 export type Saved = {
   active: ActiveTrip | null;
@@ -31,6 +39,8 @@ export type Saved = {
   quizDrafts?: Record<string, QuizDraft>;
   summarySessionId?: string;
   materialSummaries?: Record<string, Record<string, MaterialSummaryCacheEntry>>;
+  /** Owner-local private study plan for a member who has marked ready. */
+  readyTripDrafts?: Record<string, SynchronizedTripDraft>;
 };
 export const MAX_MATERIAL_SUMMARY_CACHE_ENTRIES = 20;
 export const MAX_MATERIAL_SUMMARY_LENGTH = 4_000;
@@ -144,6 +154,15 @@ function validMaterialSummaries(value: unknown): value is Saved["materialSummari
 function validMaterialSummaryCacheEntry(value: unknown): value is MaterialSummaryCacheEntry {
   return validMaterialSummaries({ session: { source: value } });
 }
+function validReadyTripDrafts(value: unknown): value is Saved["readyTripDrafts"] {
+  return value === undefined || (record(value) && Object.keys(value).length <= 24 &&
+    Object.entries(value).every(([sessionId, draft]) => sessionId.length > 0 && sessionId.length <= 200 &&
+      record(draft) && typeof draft.groupId === "string" && draft.groupId.length > 0 &&
+      typeof draft.goal === "string" && draft.goal.trim().length >= 3 && draft.goal.length <= 500 &&
+      typeof draft.topic === "string" && draft.topic.length > 0 && draft.topic.length <= 100 &&
+      Number.isSafeInteger(draft.target) && Number(draft.target) >= 60 && Number(draft.target) <= 14400 &&
+      (draft.breakPlan === undefined || isValidBreakPlan(draft.breakPlan, draft.target))));
+}
 export function cacheMaterialSummary(
   saved: Saved,
   sessionId: string,
@@ -215,6 +234,7 @@ function validSaved(v: unknown): v is Saved {
       (v.removedSessionIds !== undefined && !validRemovedSessionIds(v.removedSessionIds)) ||
       (v.quizDrafts !== undefined && !isValidQuizDraftMap(v.quizDrafts)) ||
       (v.materialSummaries !== undefined && !validMaterialSummaries(v.materialSummaries)) ||
+      !validReadyTripDrafts(v.readyTripDrafts) ||
       (v.summarySessionId !== undefined &&
         (typeof v.summarySessionId !== "string" || v.summarySessionId.length === 0)) ||
       !Object.values(v.notes).every((note) => typeof note === "string") ||

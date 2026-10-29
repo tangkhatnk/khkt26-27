@@ -239,15 +239,63 @@ test('synchronized reconnect does not invent focus before observation and early 
     syncClock: true,
     clockOffsetMs: offset,
     breakPlan: { count: 1, seconds: 60 },
+    segments: focus.scheduledBreakSegmentsThrough(started, 120, { count: 1, seconds: 60 }, observedAt),
   };
   const afterOneSecond = tick(waiting, serverTimeFromClientTime(clientNow + 1_000, offset));
   assert.equal(focused(afterOneSecond), 1);
-  assert.deepEqual(afterOneSecond.segments, [{ start: observedAt, end: observedAt + 1_000, kind: 'focus' }]);
+  assert.deepEqual(afterOneSecond.segments, [
+    { start: observedAt, end: observedAt + 1_000, kind: 'focus' },
+  ]);
+  assert.equal(afterOneSecond.distractions ?? 0, 0);
   assert.equal(sessionEndAt(afterOneSecond, serverTimeFromClientTime(clientNow + 20_000, offset)), observedAt + 20_000);
   assert.equal(sessionEndAt(afterOneSecond, serverTimeFromClientTime(clientNow + 200_000, offset)), started + 180_000);
 });
 
-test('server clock offset is bounded when a device timestamp is outside the supported range', () => {
-  assert.equal(estimateServerClockOffset(200_000_000, 0), MAX_SERVER_CLOCK_OFFSET_MS);
-  assert.equal(estimateServerClockOffset(0, 200_000_000), -MAX_SERVER_CLOCK_OFFSET_MS);
+test('a late observer receives scheduled breaks without focus or a fabricated distraction before observation', () => {
+  const started = 3_000_000;
+  const observedAt = started + 150_000;
+  const plan = { count: 1, seconds: 60 };
+  const prefix = focus.scheduledBreakSegmentsThrough(started, 120, plan, observedAt);
+  const waiting = {
+    ...trip(120), started, lastAt: observedAt, syncClock: true,
+    clockOffsetMs: 0, breakPlan: plan, segments: prefix,
+  };
+
+  assert.deepEqual(prefix, [{ start: started + 60_000, end: started + 120_000, kind: 'break' }]);
+  assert.equal(focused(waiting), 0);
+  assert.equal(waiting.distractions ?? 0, 0);
+  const oneSecondFocused = tick(waiting, observedAt + 1_000);
+  assert.equal(focused(oneSecondFocused), 1);
+  assert.equal(oneSecondFocused.distractions ?? 0, 0);
+});
+
+test('a hidden ready member waits for foreground before focused time starts after the host launches', () => {
+  const started = 4_000_000;
+  const observedAt = started + 150_000;
+  const plan = { count: 1, seconds: 60 };
+  const hidden = focus.startSynchronizedSession({
+    ...trip(120), started, lastAt: started, syncClock: true, clockOffsetMs: 0,
+    breakPlan: plan, segments: [],
+  }, observedAt, false);
+
+  assert.equal(hidden.state, 'away');
+  assert.equal(hidden.lastAt, observedAt);
+  assert.equal(focused(hidden), 0);
+  assert.equal(hidden.distractions ?? 0, 0);
+  assert.deepEqual(hidden.segments, [{ start: started + 60_000, end: started + 120_000, kind: 'break' }]);
+
+  const foreground = returnFromBackground(hidden, observedAt + 1_000);
+  assert.equal(foreground.state, 'focus');
+  assert.equal(focused(foreground), 0);
+  assert.equal(foreground.distractions ?? 0, 0);
+  assert.equal(focused(tick(foreground, observedAt + 2_000)), 1);
+  assert.equal(focused(tick(foreground, observedAt + 2_000)), 1);
+});
+
+test('server clock rejects skew beyond the supported range instead of clamping it', () => {
+  assert.equal(estimateServerClockOffset(200_000_000, 0), null);
+  assert.equal(estimateServerClockOffset(0, 200_000_000), null);
+  assert.equal(estimateServerClockOffset(200_000_000, 200_000_000 - MAX_SERVER_CLOCK_OFFSET_MS), MAX_SERVER_CLOCK_OFFSET_MS);
+  assert.equal(estimateServerClockOffset(200_000_000, 200_000_000 - MAX_SERVER_CLOCK_OFFSET_MS - 1), null);
+  assert.ok(Number.isNaN(serverTimeFromClientTime(200_000_000, MAX_SERVER_CLOCK_OFFSET_MS + 1)));
 });

@@ -22,6 +22,24 @@ it("retains attachment metadata after completing a session and reads older backu
   writeSaved("learner", saved);
   expect(readSaved("learner").notes).toEqual({});
 });
+it("keeps a ready member's private draft on the owner device for reconnect", () => {
+  const saved = emptySaved();
+  saved.readyTripDrafts = {
+    "session-1": {
+      groupId: "group-1",
+      goal: "Review cell structure",
+      topic: "biology",
+      target: 600,
+      breakPlan: { count: 1, seconds: 60 },
+    },
+  };
+  saved.notes["session-1"] = "Private local notes";
+  writeSaved("learner", saved);
+
+  const restored = readSaved("learner");
+  expect(restored.readyTripDrafts?.["session-1"]).toEqual(saved.readyTripDrafts?.["session-1"]);
+  expect(restored.notes["session-1"]).toBe("Private local notes");
+});
 it("accepts legacy records without a device category and validates new categories", () => {
   const legacy = emptySaved();
   legacy.active = { id: "old-active", owner: "owner", goal: "Study", topic: "biology", document: "",

@@ -482,8 +482,8 @@ export function adventureRoutes(
       if (requestedGroup?.trip?.mode === "synchronized") {
         const trip = requestedGroup.trip;
         const participant = trip.participants[req.userId];
-        if (requestedGroup.owner !== req.userId || !participant)
-          throw new ApiError(403, "forbidden", "Chỉ chủ chuyến đã sẵn sàng mới có thể khởi hành.");
+        if (!participant)
+          throw new ApiError(403, "forbidden", "Bạn không thuộc chuyến này.");
         if (trip.status === "departed" || trip.status === "closed") {
           if ((participant.status === "bound" || participant.status === "completed") && participant.sessionId === sessionId &&
             trip.startedAt !== undefined && trip.endsAt !== undefined)
@@ -493,6 +493,8 @@ export function adventureRoutes(
             };
           throw new ApiError(409, "conflict", "Chuyến đã khởi hành với phiên khác.");
         }
+        if (requestedGroup.owner !== req.userId)
+          throw new ApiError(403, "forbidden", "Chỉ chủ chuyến đã sẵn sàng mới có thể khởi hành.");
         if (trip.status !== "waiting" || requestedGroup.archived || member?.groupId !== groupId ||
           !requestedGroup.members.includes(req.userId))
           throw new ApiError(409, "conflict", "Không có chuyến đang chờ để khởi hành.");
