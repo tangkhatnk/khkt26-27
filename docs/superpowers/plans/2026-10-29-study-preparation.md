@@ -37,3 +37,5 @@ Scope: issues [#67](https://github.com/tangkhatnk/khkt26-27/issues/67)–[#70](h
 
 - Keep domain/provider rules in existing `src/adventure`, `src/material`, `src/services`, and `backend/src` owners. Touch `AdventureApp.tsx` only for the post-session quiz controls; avoid trip/group regions.
 - Maintain old request and stored-row compatibility. Do not weaken reviewed-source confirmation or grounding.
+- Generated requests accept either the legacy `count` or `counts: { multipleChoice, trueFalse, shortAnswer, essay }`; each count is 0–5 and the total is 1–20. Provider question types are `multiple-choice`, `true-false`, `short-answer`, and `essay`. Persist exact typed request identity in nullable `requested_counts` while retaining `requested_count` for legacy rows; same-mix retries replay, different mixes conflict, and old rows derive their prior composition from `requested_count`.
+- Keep public exercise-question DTOs limited to question content and type. Answers and solutions stay in the owner-scoped preparation/solution response.
