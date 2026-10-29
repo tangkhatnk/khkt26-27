@@ -352,12 +352,21 @@ export function adventureRoutes(
     });
   });
   app.post("/api/v1/adventure/trip/start", opts, async (req) => {
-    const { sessionId } = z.object({ sessionId: z.uuid() }).strict().parse(req.body);
+    const { groupId, sessionId } = z
+      .object({ groupId: z.uuid(), sessionId: z.uuid() })
+      .strict()
+      .parse(req.body);
     return atomic((world) => {
-      const member = person(world, req.userId);
-      const group = member.groupId ? world.groups[member.groupId] : null;
-      const trip = group?.trip;
-      if (!group || !trip || group.archived || trip.status === "closed")
+      const member = world.people[req.userId];
+      const group = member?.groupId ? world.groups[member.groupId] : null;
+      if (!group || group.id !== groupId)
+        throw new ApiError(
+          409,
+          "conflict",
+          "Thành viên đã chuyển sang chuyến khác. Hãy cập nhật tiến độ trước khi bắt đầu.",
+        );
+      const trip = group.trip;
+      if (!trip || group.archived || trip.status === "closed")
         throw new ApiError(409, "conflict", "Không có chuyến đang mở để bắt đầu.");
       const participant = trip.participants[req.userId];
       if (!participant || !group.members.includes(req.userId))

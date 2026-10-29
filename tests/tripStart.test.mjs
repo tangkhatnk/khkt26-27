@@ -52,6 +52,8 @@ test("does not install a bound trip over an active session acquired while bindin
     expectedAuthGeneration: 4,
     authGeneration: 4,
     authenticatedUserId: "owner-a",
+    expectedGroupId: "trip-a",
+    currentGroupId: "trip-a",
     needsLogin: false,
     currentView: "ticket",
   };
@@ -78,6 +80,7 @@ test("does not install a reservation after losing the workspace lease, account, 
     (state) => { state.ownerId = "owner-b"; state.authenticatedUserId = "owner-b"; },
     (state) => { state.authGeneration += 1; },
     (state) => { state.draftSessionId = "rotated-session-id"; },
+    (state) => { state.currentGroupId = "trip-b"; },
     (state) => { state.currentView = "group"; },
   ]) {
     const reservation = deferred();
@@ -93,6 +96,8 @@ test("does not install a reservation after losing the workspace lease, account, 
       expectedAuthGeneration: 4,
       authGeneration: 4,
       authenticatedUserId: "owner-a",
+      expectedGroupId: "trip-a",
+      currentGroupId: "trip-a",
       needsLogin: false,
       currentView: "ticket",
     };

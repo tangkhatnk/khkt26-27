@@ -22,11 +22,14 @@ export function isTripStartCurrent(input: {
   expectedAuthGeneration: number;
   authGeneration: number;
   authenticatedUserId?: string;
+  expectedGroupId: string;
+  currentGroupId: string | null;
   needsLogin: boolean;
   currentView: string;
 }): boolean {
   return input.expectedOwnerId === input.ownerId && input.workspaceLive && input.exclusiveLease &&
     input.activeSessionId === null && input.expectedSessionId === input.draftSessionId &&
+    input.expectedGroupId === input.currentGroupId &&
     input.expectedAuthGeneration === input.authGeneration &&
     input.authenticatedUserId === input.expectedOwnerId && !input.needsLogin &&
     input.currentView === "ticket";

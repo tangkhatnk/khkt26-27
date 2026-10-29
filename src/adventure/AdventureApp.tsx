@@ -1373,7 +1373,7 @@ function AdventureWorkspace() {
                 reserve: async (requestedId) => {
                   const binding = await post<Snapshot & { tripStart: { sessionId: string } }>(
                     "/adventure/trip/start",
-                    { sessionId: requestedId },
+                    { groupId: group.id, sessionId: requestedId },
                   );
                   if (binding.tripStart.sessionId !== requestedId)
                     throw new Error("Máy chủ không xác nhận đúng mã phiên đã chuẩn bị.");
@@ -1398,6 +1398,8 @@ function AdventureWorkspace() {
                     expectedAuthGeneration: authGeneration,
                     authGeneration: getAuthGeneration(),
                     authenticatedUserId: auth.user?.id,
+                    expectedGroupId: group.id,
+                    currentGroupId: current.current.snapshot?.group?.id ?? null,
                     needsLogin: auth.needsLogin,
                     currentView: viewRef.current,
                   });
