@@ -345,46 +345,62 @@ function isTableDelimiter(line: string) {
 function tableCells(line: string) {
   const cells: string[] = [];
   let cell = "";
+  let endedWithSeparator = false;
   let mathDelimiter: "$" | "\\)" | undefined;
+  const hasClosingDollar = (start: number) => {
+    for (let index = start + 1; index < line.length; index += 1) {
+      if (line[index] === "$" && line[index - 1] !== "\\" && line[index + 1] !== "$" && line[index - 1] !== "$")
+        return true;
+    }
+    return false;
+  };
   for (let index = 0; index < line.length; index += 1) {
     const character = line[index];
     if (character === "\\") {
       if (line[index + 1] === "|") {
         cell += mathDelimiter ? "\\|" : "|";
+        endedWithSeparator = false;
         index += 1;
         continue;
       }
       if (mathDelimiter === "\\)" && line.startsWith("\\)", index)) {
         cell += "\\)";
+        endedWithSeparator = false;
         index += 1;
         mathDelimiter = undefined;
         continue;
       }
-      if (!mathDelimiter && line.startsWith("\\(", index)) {
+      if (!mathDelimiter && line.startsWith("\\(", index) && line.indexOf("\\)", index + 2) > index + 2) {
         cell += "\\(";
+        endedWithSeparator = false;
         index += 1;
         mathDelimiter = "\\)";
         continue;
       }
       cell += character;
+      endedWithSeparator = false;
       continue;
     }
     if (character === "$" && line[index - 1] !== "\\") {
       if (mathDelimiter === "$" && line[index + 1] !== "$") mathDelimiter = undefined;
-      else if (!mathDelimiter && line[index + 1] !== "$" && line[index - 1] !== "$") mathDelimiter = "$";
+      else if (!mathDelimiter && line[index + 1] !== "$" && line[index - 1] !== "$" && hasClosingDollar(index))
+        mathDelimiter = "$";
       cell += character;
+      endedWithSeparator = false;
       continue;
     }
     if (character === "|" && !mathDelimiter) {
       cells.push(cell.trim());
       cell = "";
+      endedWithSeparator = true;
       continue;
     }
     cell += character;
+    if (!endedWithSeparator || !/\s/u.test(character)) endedWithSeparator = false;
   }
   cells.push(cell.trim());
   if (line.trim().startsWith("|")) cells.shift();
-  if (line.trim().endsWith("|")) cells.pop();
+  if (endedWithSeparator) cells.pop();
   return cells;
 }
 
