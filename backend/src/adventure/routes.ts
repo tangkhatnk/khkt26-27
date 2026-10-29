@@ -13,11 +13,62 @@ import {
   projectSessionMetrics,
   settle,
   snapshot,
+  type Group,
   type World,
 } from "./domain.js";
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 const text = z.string().trim().min(1).max(60);
+function revokeGroupInvites(world: World, groupId: string) {
+  for (const invite of Object.values(world.invites))
+    if (invite.groupId === groupId) invite.revoked = true;
+}
+function endGroupMembership(group: Group, world: World, userId: string, now: number) {
+  group.membershipHistory ??= {};
+  const history = (group.membershipHistory[userId] ??= []);
+  const currentMembership = history.slice().reverse().find((item) => item.left === null);
+  if (currentMembership) currentMembership.left = now;
+  const member = world.people[userId];
+  if (member?.groupId === group.id) member.groupId = null;
+}
+function closeTripWhenTerminal(group: Group) {
+  if (!group.trip || group.trip.status !== "departed") return;
+  if (Object.values(group.trip.participants).every((member) =>
+    member.status === "completed" || member.status === "skipped",
+  )) {
+    group.trip.status = "closed";
+    group.archived = true;
+  }
+}
+function cancelWaitingTrip(world: World, group: Group, now: number) {
+  if (!group.trip || group.trip.status !== "waiting")
+    throw new ApiError(409, "conflict", "Chuyến đã khởi hành hoặc đã đóng.");
+  group.trip.status = "closed";
+  group.archived = true;
+  revokeGroupInvites(world, group.id);
+  for (const userId of Object.keys(group.trip.participants)) {
+    group.trip.participants[userId]!.status = "skipped";
+    endGroupMembership(group, world, userId, now);
+  }
+}
+function skipTripMember(world: World, group: Group, userId: string, now: number) {
+  const trip = group.trip;
+  const participant = trip?.participants[userId];
+  if (!trip || !participant || !group.members.includes(userId))
+    throw new ApiError(400, "validation-error", "Bạn không thuộc chuyến này.");
+  if (participant.status === "bound")
+    throw new ApiError(
+      409,
+      "conflict",
+      "Hãy kết thúc phiên và đồng bộ trước khi rời chuyến.",
+      true,
+    );
+  if (participant.status === "completed" || participant.status === "skipped") return;
+  participant.status = "skipped";
+  if (trip.status === "waiting") group.members = group.members.filter((memberId) => memberId !== userId);
+  endGroupMembership(group, world, userId, now);
+  closeTripWhenTerminal(group);
+}
 const sessionSchema = z.object({
   id: z.uuid(),
   groupId: z.uuid().nullable(),
@@ -93,7 +144,9 @@ export function adventureRoutes(
       return snapshot(w, req.userId, Date.now());
     });
   });
-  app.post("/api/v1/adventure/groups", opts, async (req) => {
+  // Backward-compatible endpoint for old clients. The current app creates planned trips at /trips.
+  app.post("/api/v1/adventure/groups", opts, async (req, reply) => {
+    reply.header("Deprecation", "true");
     const value = z
       .object({ name: text, timezone: z.string().max(100) })
       .parse(req.body);
@@ -125,6 +178,48 @@ export function adventureRoutes(
       return snapshot(w, req.userId, Date.now());
     });
   });
+  app.post("/api/v1/adventure/trips", opts, async (req) => {
+    const value = z.object({
+      name: text,
+      timezone: z.string().max(100),
+      goal: z.string().trim().min(3).max(500),
+      topic: z.string().trim().min(1).max(100),
+      target: z.number().int().min(60).max(14400),
+    }).strict().parse(req.body);
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: value.timezone }).format();
+    } catch {
+      throw new ApiError(400, "validation-error", "Múi giờ không hợp lệ.");
+    }
+    return atomic((world) => {
+      const member = person(world, req.userId);
+      if (member.groupId)
+        throw new ApiError(400, "validation-error", "Hãy rời chuyến hiện tại trước khi lập chuyến mới.");
+      const id = randomUUID();
+      const joined = Date.now();
+      world.groups[id] = {
+        id,
+        name: value.name,
+        owner: req.userId,
+        members: [req.userId],
+        timezone: value.timezone,
+        archived: false,
+        journey: journey(),
+        daily: {},
+        membershipHistory: { [req.userId]: [{ joined, left: null }] },
+        trip: {
+          status: "waiting",
+          goal: value.goal,
+          topic: value.topic,
+          target: value.target,
+          participants: { [req.userId]: { status: "ready" } },
+        },
+      };
+      member.groupId = id;
+      member.joinedAt = joined;
+      return snapshot(world, req.userId, joined);
+    });
+  });
   app.post("/api/v1/adventure/invite", opts, (req) =>
     atomic((w) => {
       const p = person(w, req.userId),
@@ -135,9 +230,12 @@ export function adventureRoutes(
           "forbidden",
           "Chỉ chủ đoàn có thể tạo lời mời.",
         );
+      if (!g.trip)
+        throw new ApiError(409, "conflict", "Chỉ có thể tạo lời mời cho chuyến học đã lập.");
+      if (g.trip.status !== "waiting" || g.archived)
+        throw new ApiError(409, "conflict", "Chuyến đã khởi hành hoặc đã đóng.");
       // Rotating the code revokes all prior invitations.
-      for (const invite of Object.values(w.invites))
-        if (invite.groupId === g.id) invite.revoked = true;
+      revokeGroupInvites(w, g.id);
       const token = randomBytes(18).toString("base64url");
       const expires = Date.now() + 86400000;
       w.invites[hash(token)] = { groupId: g.id, expires, revoked: false };
@@ -150,8 +248,9 @@ export function adventureRoutes(
         g = p.groupId ? w.groups[p.groupId] : null;
       if (!g || g.owner !== req.userId)
         throw new ApiError(403, "forbidden", "Chỉ chủ đoàn có thể thu hồi.");
-      for (const invite of Object.values(w.invites))
-        if (invite.groupId === g.id) invite.revoked = true;
+      if (g.trip && (g.trip.status !== "waiting" || g.archived))
+        throw new ApiError(409, "conflict", "Chuyến đã khởi hành hoặc đã đóng.");
+      revokeGroupInvites(w, g.id);
       return { ok: true };
     }),
   );
@@ -172,6 +271,12 @@ export function adventureRoutes(
             "Lời mời hết hạn hoặc đã thu hồi.",
           );
         const g = w.groups[invite.groupId];
+        if (!g)
+          throw new ApiError(400, "validation-error", "Lời mời hết hạn hoặc đã thu hồi.");
+        if (!g.trip)
+          throw new ApiError(400, "validation-error", "Lời mời không thuộc chuyến học hợp lệ.");
+        if (g.trip.status !== "waiting" || g.archived)
+          throw new ApiError(400, "validation-error", "Chuyến đã khởi hành hoặc đã đóng.");
         if (p.groupId === g.id) return snapshot(w, req.userId, Date.now());
         if (p.groupId || g.archived || g.members.length >= 6)
           throw new ApiError(
@@ -187,6 +292,7 @@ export function adventureRoutes(
           joined: p.joinedAt,
           left: null,
         });
+        if (g.trip) g.trip.participants[req.userId] = { status: "ready" };
         return snapshot(w, req.userId, Date.now());
       });
     },
@@ -196,6 +302,14 @@ export function adventureRoutes(
       const p = person(w, req.userId),
         g = p.groupId ? w.groups[p.groupId] : null;
       if (g) {
+        if (g.trip) {
+          if (g.owner === req.userId && g.trip.status === "waiting") {
+            cancelWaitingTrip(w, g, Date.now());
+          } else {
+            skipTripMember(w, g, req.userId, Date.now());
+          }
+          return snapshot(w, req.userId, Date.now());
+        }
         g.membershipHistory ??= {};
         const history = (g.membershipHistory[req.userId] ??= [
           { joined: p.joinedAt, left: null },
@@ -228,12 +342,67 @@ export function adventureRoutes(
           "forbidden",
           "Không thể chuyển quyền cho thành viên này.",
         );
+      if (g.trip && (g.trip.status !== "waiting" || g.archived))
+        throw new ApiError(409, "conflict", "Không thể chuyển quyền sau khi chuyến khởi hành.");
       g.owner = userId;
-      for (const invite of Object.values(w.invites))
-        if (invite.groupId === g.id) invite.revoked = true;
+      if (g.trip && g.trip.participants[userId])
+        g.trip.participants[req.userId]!.status = "ready";
+      revokeGroupInvites(w, g.id);
       return snapshot(w, req.userId, Date.now());
     });
   });
+  app.post("/api/v1/adventure/trip/start", opts, async (req) => {
+    const { groupId, sessionId } = z
+      .object({ groupId: z.uuid(), sessionId: z.uuid() })
+      .strict()
+      .parse(req.body);
+    return atomic((world) => {
+      const member = world.people[req.userId];
+      const group = member?.groupId ? world.groups[member.groupId] : null;
+      if (!group || group.id !== groupId)
+        throw new ApiError(
+          409,
+          "conflict",
+          "Thành viên đã chuyển sang chuyến khác. Hãy cập nhật tiến độ trước khi bắt đầu.",
+        );
+      const trip = group.trip;
+      if (!trip || group.archived || trip.status === "closed")
+        throw new ApiError(409, "conflict", "Không có chuyến đang mở để bắt đầu.");
+      const participant = trip.participants[req.userId];
+      if (!participant || !group.members.includes(req.userId))
+        throw new ApiError(403, "forbidden", "Bạn không thuộc chuyến này.");
+      if (participant.status === "bound" && participant.sessionId === sessionId)
+        return {
+          ...snapshot(world, req.userId, Date.now()),
+          tripStart: { sessionId },
+        };
+      if (trip.status === "waiting") {
+        if (group.owner !== req.userId)
+          throw new ApiError(409, "conflict", "Chủ chuyến cần khởi hành trước.");
+        trip.status = "departed";
+        revokeGroupInvites(world, group.id);
+      }
+      if (participant.status !== "ready")
+        throw new ApiError(409, "conflict", "Bạn đã bắt đầu hoặc hoàn tất phiên của chuyến này.");
+      if (world.sessions[sessionId] || Object.values(world.groups).some((candidate) =>
+        Object.values(candidate.trip?.participants ?? {}).some((bound) => bound.sessionId === sessionId),
+      ))
+        throw new ApiError(409, "conflict", "Mã phiên đã được sử dụng.");
+      participant.status = "bound";
+      participant.sessionId = sessionId;
+      return { ...snapshot(world, req.userId, Date.now()), tripStart: { sessionId } };
+    });
+  });
+  app.post("/api/v1/adventure/trip/cancel", opts, (req) =>
+    atomic((world) => {
+      const member = person(world, req.userId);
+      const group = member.groupId ? world.groups[member.groupId] : null;
+      if (!group?.trip || group.owner !== req.userId)
+        throw new ApiError(403, "forbidden", "Chỉ chủ chuyến mới có thể hủy chuyến.");
+      cancelWaitingTrip(world, group, Date.now());
+      return snapshot(world, req.userId, Date.now());
+    }),
+  );
   app.post("/api/v1/adventure/vote", opts, async (req) => {
     const { mode, branch } = z
       .object({

@@ -1075,6 +1075,74 @@ body,
   gap: 16px;
   margin-top: 26px;
 }
+.trip-plan-summary {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 16px;
+  margin: 16px 0 22px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--green);
+  border-radius: 10px;
+  background: var(--surface-raised, #f8f8f3);
+}
+.trip-plan-summary h3 {
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.trip-plan-summary p,
+.trip-roster-note {
+  margin: 0;
+}
+.trip-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #edf0e8;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+.trip-state--waiting {
+  background: #f5eedf;
+  color: #72552c;
+}
+.trip-state--departed {
+  background: #e8f1eb;
+  color: #2f695a;
+}
+.trip-state--closed {
+  background: #ecece8;
+  color: #666c66;
+}
+.trip-member-status {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+html[data-theme="dark"] .adventure .trip-plan-summary {
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+html[data-theme="dark"] .adventure .trip-state {
+  background: #34473a;
+  color: var(--text);
+}
+html[data-theme="dark"] .adventure .trip-state--waiting {
+  background: #4b3f29;
+  color: #f0dbaa;
+}
+html[data-theme="dark"] .adventure .trip-state--departed {
+  background: #294534;
+  color: #c4e3cb;
+}
+html[data-theme="dark"] .adventure .trip-state--closed {
+  background: #343d37;
+  color: #cbd3cc;
+}
 .member {
   min-width: 170px;
   text-align: center;
@@ -1503,6 +1571,9 @@ body,
   }
   .group-cars .member {
     max-width: 210px;
+  }
+  .trip-plan-summary {
+    padding: 14px;
   }
   .station-stop {
     gap: 16px;

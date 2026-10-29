@@ -26,6 +26,7 @@ export function DurationPicker({
   breakMinutes = 5,
   onBreakCountChange,
   onBreakMinutesChange,
+  durationLocked = false,
 }: {
   value: number;
   onChange: (minutes: number) => void;
@@ -33,6 +34,7 @@ export function DurationPicker({
   breakMinutes?: number;
   onBreakCountChange?: (count: number) => void;
   onBreakMinutesChange?: (minutes: number) => void;
+  durationLocked?: boolean;
 }) {
   const id = useId();
   const durationHelpId = `${id}-duration-help`;
@@ -88,6 +90,7 @@ export function DurationPicker({
             type="button"
             aria-pressed={value === minutes}
             className={value === minutes ? "selected" : ""}
+            disabled={durationLocked}
             onClick={() => onChange(minutes)}
           >
             {minutes} phút
@@ -104,6 +107,7 @@ export function DurationPicker({
             min={1}
             max={240}
             step={1}
+            disabled={durationLocked}
             value={inputValue(value)}
             onChange={(event) =>
               onChange(event.target.value === "" ? NaN : Number(event.target.value))
@@ -115,7 +119,7 @@ export function DurationPicker({
         </span>
       </label>
       <small id={durationHelpId}>
-        Nhập từ 1 đến 240 phút, theo nhịp học của bạn.
+        {durationLocked ? "Thời lượng này do chủ chuyến đặt." : "Nhập từ 1 đến 240 phút, theo nhịp học của bạn."}
       </small>
 
       {canConfigureBreaks && (

@@ -12,7 +12,6 @@
 .study-guide__heading > span { color: #a36e47; font-size: 28px; line-height: 1.2; }
 .study-guide__heading h3 { margin: 0 0 8px; font-size: 18px; }
 .study-guide__heading p { margin: 0; font-size: 14px; line-height: 1.65; color: #66736a; }
-.study-guide__outline { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 22px; margin: 8px 0 0; padding-left: 22px; color: #66736a; font-size: 13px; line-height: 1.5; }
 .study-guide label { display: grid; gap: 8px; font-weight: 600; }
 .study-guide textarea { margin: 0; line-height: 1.65; }
 .study-guide .material-hint { margin: 0; }
@@ -88,7 +87,6 @@
 .adventure .study-guide__notation-arrow-symbol { line-height: .9; }
 .adventure .study-guide__notation--display { display: block; overflow-x: auto; padding: 14px; text-align: center; font-size: 1.15em; }
 html[data-theme="dark"] .adventure .study-guide__article { border-color: var(--line); background: var(--surface); color: var(--text); }
-html[data-theme="dark"] .adventure .study-guide__outline { color: var(--text-muted); }
 html[data-theme="dark"] .adventure .study-guide__draft-toolbar button[aria-pressed="true"] { background: #355446; border-color: #839879; color: #eff5e8; }
 html[data-theme="dark"] .adventure .material-reader__toolbar button[aria-pressed="true"] { background: #355446; border-color: #839879; color: #eff5e8; }
 html[data-theme="dark"] .adventure .study-guide__article h2 { color: var(--text); }
@@ -117,7 +115,6 @@ html[data-theme="dark"] .adventure .study-guide__legend-swatch--2 { background: 
 @media (max-width: 600px) {
   .study-guide { padding: 16px; }
   .study-guide__generate { justify-self: stretch; }
-  .study-guide__outline { grid-template-columns: 1fr; }
   .adventure .study-guide__article { padding: 16px; }
   .adventure .study-guide__article th, .adventure .study-guide__article td { padding: 7px 9px; }
   .adventure .study-guide__plot-label, .adventure .study-guide__plot-axis-label, .adventure .study-guide__plot-tick { font-size: 16px; }

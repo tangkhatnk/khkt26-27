@@ -101,6 +101,28 @@ function GoalSummary({ run }: { run: ExperimentRun }) {
   </div>;
 }
 
+function ExperimentRouteIllustration() {
+  return <div className="experiment-details-art" aria-hidden="true">
+    <svg viewBox="0 0 360 260" focusable="false">
+      <path d="M40 205 C74 192 92 146 126 144 C163 142 166 202 206 190 C248 177 244 100 286 82 C302 75 317 78 330 88"
+        fill="none" stroke="var(--line, #d8dfd4)" strokeWidth="22" strokeLinecap="round" />
+      <path d="M40 205 C74 192 92 146 126 144 C163 142 166 202 206 190 C248 177 244 100 286 82 C302 75 317 78 330 88"
+        fill="none" stroke="var(--green, #377566)" strokeWidth="2.5" strokeDasharray="2 10" strokeLinecap="round" />
+      <circle cx="40" cy="205" r="9" fill="var(--surface, #fffefa)" stroke="var(--green, #377566)" strokeWidth="3" />
+      <circle cx="330" cy="88" r="9" fill="var(--surface, #fffefa)" stroke="var(--green, #377566)" strokeWidth="3" />
+      <g transform="translate(177 119) rotate(-12 31 19)">
+        <rect x="2" y="3" width="62" height="34" rx="11" fill="var(--surface-raised, #f1f5ee)" stroke="var(--green, #377566)" strokeWidth="2" />
+        <path d="M13 12h14v9H13zm20 0h14v9H33z" fill="var(--green, #377566)" opacity=".72" />
+        <path d="M2 27h62" stroke="var(--green, #377566)" strokeWidth="2" opacity=".55" />
+        <circle cx="17" cy="38" r="4" fill="var(--muted, #788078)" />
+        <circle cx="49" cy="38" r="4" fill="var(--muted, #788078)" />
+      </g>
+      <path d="M76 66h54M92 54v24M109 58v16" fill="none" stroke="var(--line, #d8dfd4)" strokeWidth="4" strokeLinecap="round" />
+      <path d="M249 222h55M266 210v24M283 214v16" fill="none" stroke="var(--line, #d8dfd4)" strokeWidth="4" strokeLinecap="round" />
+    </svg>
+  </div>;
+}
+
 function RunDetailsContent({ run, id }: { run: ExperimentRun; id: string }) {
   const fullTimestampOptions: Intl.DateTimeFormatOptions = {
     day: "2-digit", month: "2-digit", year: "numeric",
@@ -110,7 +132,8 @@ function RunDetailsContent({ run, id }: { run: ExperimentRun; id: string }) {
   const endedDate = compactDateTime(run.endedAt, fullTimestampOptions);
   return <div id={id} className="experiment-details experiment-details-content">
     <h3>Chi tiết chuyến</h3>
-    <dl>
+    <div className="experiment-details-layout">
+      <dl>
       <div><dt>ID chuyến ẩn danh</dt><dd><code>{run.id}</code></dd></div>
       <div><dt>Mã người thử</dt><dd><code>{run.testerCode}</code></dd></div>
       <div><dt>Tóm tắt mục tiêu</dt><dd><GoalSummary run={run} /></dd></div>
@@ -127,7 +150,9 @@ function RunDetailsContent({ run, id }: { run: ExperimentRun; id: string }) {
       <div><dt>Xao nhãng</dt><dd>{run.distractions} lần</dd></div>
       <div><dt>Giải lao thực tế</dt><dd>{run.breakSeconds == null ? "Chưa có thời gian giải lao" : formatExperimentDuration(run.breakSeconds)}</dd></div>
       <div><dt>Giải lao dự kiến</dt><dd>{run.plannedBreakSeconds == null ? "Không ghi nhận lịch nghỉ" : formatExperimentDuration(run.plannedBreakSeconds)}</dd></div>
-    </dl>
+      </dl>
+      <ExperimentRouteIllustration />
+    </div>
   </div>;
 }
 
@@ -196,8 +221,10 @@ export function ExperimentRunListView({
           return <Fragment key={run.id}>
             <tr>
               <td className="experiment-code-cell">
-                <code className="experiment-trip-code">{run.tripCode}</code>
-                <RunDetailsToggle run={run} expanded={expanded} detailsId={detailsId} onToggle={onToggle} />
+                <div className="experiment-code-actions">
+                  <code className="experiment-trip-code">{run.tripCode}</code>
+                  <RunDetailsToggle run={run} expanded={expanded} detailsId={detailsId} onToggle={onToggle} />
+                </div>
               </td>
           <td className="experiment-started-cell">
             <time dateTime={run.startedAt}>

@@ -49,6 +49,14 @@ import {
   studyExerciseSourcesForSession,
 } from "./studyExerciseSessionFlow";
 import { useStudyExerciseFlow } from "./useStudyExerciseFlow";
+import {
+  groupDraftSessionId,
+  isTripStartCurrent,
+  recoverBoundTripSessionId,
+  rotateDraftSessionId,
+  startAfterTripReservation,
+  type TripDraftSessionIds,
+} from "./tripStart";
 import { buildQuizGenerationPayload, quizDraftFromQuestions, quizGenerationSourceKey } from "./quizGeneration";
 import { guestPublicationNotice, permanentGuestFailure, publishGuestSessions, type GuestPublicationStatus } from "./guestPublication";
 import { GuestHistorySync } from "./GuestHistorySync";
@@ -191,6 +199,7 @@ function AdventureWorkspace() {
   const current = useRef(saved),
     ownerRef = useRef(owner);
   const workspaceLive = useRef(false);
+  const exclusiveLease = useRef(false);
   const materialSummaryWorkspaceGeneration = useRef(0);
   const [materialSummaryWorkspaceVersion, setMaterialSummaryWorkspaceVersion] = useState(0);
   const materialSummaryRequestGeneration = useRef(0);
@@ -256,7 +265,13 @@ function AdventureWorkspace() {
       if (lifecycle.generation === lease) quizPrefetch.cancel();
     });
   }, [quizPrefetch]);
-  const [draftTripId, setDraftTripId] = useState(() => crypto.randomUUID());
+  const [draftTripId, setDraftTripIdState] = useState<string>(() => crypto.randomUUID());
+  const draftTripIdRef = useRef(draftTripId);
+  const draftSessionIdsRef = useRef<TripDraftSessionIds>({ solo: draftTripId, groups: new Map() });
+  function setDraftTripId(id: string) {
+    draftTripIdRef.current = id;
+    setDraftTripIdState(id);
+  }
   const [ticketCode, setTicketCode] = useState<{ id: string; value: string } | null>(null);
   const ticketId = saved.active?.id ?? draftTripId;
   const needsTicketCode = view === "ticket" || view === "focus";
@@ -294,8 +309,9 @@ function AdventureWorkspace() {
     token: string;
     expires: number;
   } | null>(null);
-  const [confirm, setConfirm] = useState<"finish" | "leave" | "reset" | null>(null),
+  const [confirm, setConfirm] = useState<"finish" | "leave" | "cancel-trip" | "reset" | null>(null),
     [summary, setSummary] = useState<Session | null>(null);
+  const tripStartInFlight = useRef(false);
   const [topics, setTopics] = useState<{ id: string; name: string }[]>([]);
   const commitRef = useRef<(v: Saved) => boolean>(() => false);
   function commit(value: Saved) {
@@ -343,6 +359,7 @@ function AdventureWorkspace() {
       async (lock) => {
         if (disposed) return;
         if (!lock) {
+          exclusiveLease.current = false;
           setError(
             "Hành trình đang mở ở cửa sổ khác. Đóng cửa sổ đó rồi tải lại để tiếp tục.",
           );
@@ -355,6 +372,7 @@ function AdventureWorkspace() {
             value.snapshot = snapshot(value.local, owner, Date.now());
           if (commitRef.current(value)) {
             workspaceLive.current = true;
+            exclusiveLease.current = true;
             setLoaded(true);
             setExclusive(true);
           }
@@ -371,6 +389,7 @@ function AdventureWorkspace() {
     return () => {
       disposed = true;
       workspaceLive.current = false;
+      exclusiveLease.current = false;
       cancelMaterialSummaryRequest(undefined, undefined, false);
       release?.();
     };
@@ -585,6 +604,15 @@ function AdventureWorkspace() {
   [owner, saved.local.sessions, data?.sessions, saved.pending, removedSessionIds]);
   const carriage = data?.person;
   const group = data?.group;
+  const selectedGroupTrip = mode === "group" ? group?.trip : undefined;
+  const recoverableGroupTripSessionId = group?.trip?.ownSessionId
+    ? recoverBoundTripSessionId({
+        ownSessionId: group.trip.ownSessionId,
+        activeSessionId: saved.active?.id ?? null,
+        pendingSessionIds: saved.pending.map((session) => session.id),
+        savedSessionIds: saved.snapshot?.sessions.map((session) => session.id) ?? [],
+      })
+    : null;
   const removedIds = new Set(removedSessionIds);
   const pendingSoloSeconds = saved.pending.filter(session => !session.groupId &&
     session.userId === owner && !removedIds.has(session.id) &&
@@ -1145,14 +1173,14 @@ function AdventureWorkspace() {
 
   }, [view, activeTripId, activeQuizPrefetchKey, activeQuizPrefetch, activeQuizCount, owner, user, needsLogin, authOffline, online, loaded, exclusive, quizPrefetch, requestQuizQuestions, recordQuizPrefetchFailure, recordQuizPrefetchResult]);
   const minutesTotal = Math.floor((carriage?.seconds ?? 0) / 60);
-  const go = (next: string) => {
+  const go = (next: string, options: { preserveTicketPlan?: boolean } = {}) => {
     if (next === "focus" && current.current.active) studyFullscreen.request();
     else if (next !== "focus") studyFullscreen.leave();
     if (next !== "focus" && current.current.active)
       commit({ ...current.current, active: leaveFocusView(current.current.active, Date.now()) });
     setError("");
     setNotice("");
-    if (next === "ticket" && !studyGuideNeedsConfirmation) {
+    if (next === "ticket" && !studyGuideNeedsConfirmation && !options.preserveTicketPlan) {
       const draft = quickTripDraft.current;
       setGoal(draft.goal);
       setTopic(draft.topic);
@@ -1163,6 +1191,16 @@ function AdventureWorkspace() {
     setView(next);
     window.scrollTo({ top: 0, behavior: "auto" });
   };
+  function selectSoloMode() {
+    setMode("solo");
+    setDraftTripId(draftSessionIdsRef.current.solo);
+    const draft = quickTripDraft.current;
+    setGoal(draft.goal);
+    setTopic(draft.topic);
+    setMinutes(draft.minutes);
+    setBreakCount(draft.breakCount);
+    setBreakMinutes(draft.breakMinutes);
+  }
   const prepareQuickTripRef = useRef<(draft: QuickTripDraft) => void>(() => {});
   const onPrepareQuickTrip = useCallback((draft: QuickTripDraft) => prepareQuickTripRef.current(draft), []);
   prepareQuickTripRef.current = (draft) => {
@@ -1175,6 +1213,7 @@ function AdventureWorkspace() {
       go("focus");
       return;
     }
+    selectSoloMode();
     setGoal(draft.goal);
     setTopic(draft.topic);
     setMinutes(draft.minutes);
@@ -1190,17 +1229,69 @@ function AdventureWorkspace() {
       commit({ ...current.current, snapshot: result });
     return result;
   }
+  function prepareGroupTripTicket() {
+    const trip = group?.trip;
+    if (!trip || !group) return;
+    if (trip.status === "closed") {
+      setError("Chuyến này đã đóng. Hãy lập một chuyến mới để bắt đầu phiên khác.");
+      return;
+    }
+    if (trip.status === "waiting" && group.owner !== user?.id) return;
+    const memberStatus = group.members.find((member) => member.id === user?.id)?.tripStatus;
+    let reservationId: string | undefined;
+    if (trip.status === "departed" && memberStatus === "bound") {
+      const recoveredId = recoverBoundTripSessionId({
+        ownSessionId: trip.ownSessionId,
+        activeSessionId: saved.active?.id ?? null,
+        pendingSessionIds: saved.pending.map((session) => session.id),
+        savedSessionIds: saved.snapshot?.sessions.map((session) => session.id) ?? [],
+      });
+      if (!recoveredId) {
+        setError("Phiên đã liên kết nhưng chưa có bản cục bộ để tiếp tục. Hãy kết thúc và đồng bộ phiên đang chạy trước.");
+        return;
+      }
+      reservationId = recoveredId;
+    } else {
+      if (memberStatus !== "ready") return;
+    }
+    const sessionId = groupDraftSessionId(draftSessionIdsRef.current, group.id, reservationId);
+    setDraftTripId(sessionId);
+    const nextBreakCount = breakCount > 0 && !isValidBreakPlan(plannedBreaks, trip.target)
+      ? 0
+      : breakCount;
+    setGoal(trip.goal);
+    setTopic(trip.topic);
+    setMinutes(trip.target / 60);
+    if (nextBreakCount !== breakCount) setBreakCount(nextBreakCount);
+    setMode("group");
+    go("ticket", { preserveTicketPlan: true });
+  }
   function start(skipPendingExercises = false) {
+    const sharedTrip = mode === "group" ? group?.trip : undefined;
+    if (mode === "group" && !sharedTrip) {
+      setError("Đoàn cũ chỉ giữ lịch sử và các phiên đã liên kết. Hãy lập chuyến mới để bắt đầu phiên chung.");
+      return;
+    }
+    if (sharedTrip?.status === "closed") {
+      setError("Chuyến này đã đóng. Hãy lập một chuyến mới để bắt đầu phiên khác.");
+      return;
+    }
+    const startGoal = sharedTrip?.goal ?? goal.trim();
+    const startTopic = sharedTrip?.topic ?? topic;
+    const startTarget = sharedTrip?.target ?? minutes * 60;
+    const startBreaksValid = breakCount === 0 || isValidBreakPlan(plannedBreaks, startTarget);
     if (
       busy || materialRequest.current ||
       studyGuideNeedsConfirmation ||
       !loaded ||
       !exclusive ||
       current.current.active ||
-      goal.trim().length < 3 ||
-      minutes < 1 ||
-      minutes > 240 ||
-      !Number.isInteger(minutes) || !validBreaks || !isQuizCount(Number(quizCount))
+      startGoal.trim().length < 3 ||
+      startTarget < 60 ||
+      startTarget > 14400 ||
+      !Number.isInteger(startTarget) ||
+      !startBreaksValid ||
+      !isQuizCount(Number(quizCount))
     )
       return;
     const hasReadyPreparation = isStudyExercisePreparationReadyForSession(draftTripId);
@@ -1211,19 +1302,28 @@ function AdventureWorkspace() {
       skipConfirmed: skipPendingExercises,
       cancelPending: () => cancelPendingStudyExerciseForStart(draftTripId),
       startFocus: (withExercises) => {
-        const at = Date.now();
+        const beginFocus = (input: {
+          id: string;
+          started: number;
+          goal: string;
+          topic: string;
+          target: number;
+          groupId: string | null;
+          snapshot?: Snapshot;
+        }) => {
+        const at = input.started;
         const trip: ActiveTrip = {
-          id: draftTripId,
+          id: input.id,
           owner,
-          goal: goal.trim(),
-          topic,
+          goal: input.goal,
+          topic: input.topic,
           document: documentText,
           materials,
           sources,
-          target: minutes * 60,
+          target: input.target,
           breakPlan: breakCount > 0 ? plannedBreaks : undefined,
           deviceCategory: detectDeviceCategory(navigator.userAgent, navigator.maxTouchPoints),
-          groupId: mode === "group" && group ? group.id : null,
+          groupId: input.groupId,
           started: at,
           lastAt: at,
           segments: [],
@@ -1234,17 +1334,109 @@ function AdventureWorkspace() {
         const initialQuizDraft = quizDraftFromQuestions([], selectedQuizCount);
         if (commit({
           ...current.current,
+          ...(input.snapshot ? { snapshot: input.snapshot } : {}),
           active: trip,
           quizDrafts: updateQuizDrafts(current.current.quizDrafts, trip.id, initialQuizDraft),
         })) {
           setNow(at);
           setQuizPrefetchUi(null);
-          setDraftTripId(crypto.randomUUID());
+          const nextDraftTripId = rotateDraftSessionId(
+            draftSessionIdsRef.current,
+            input.groupId ? "group" : "solo",
+            input.groupId,
+          );
+          setDraftTripId(nextDraftTripId);
           setSummary(null);
           if (withExercises && owner !== "guest") onStudyExerciseFocusStarted(trip.id);
           setStudyExerciseStartPrompt(false);
           go("focus");
         }
+        };
+        if (sharedTrip && group) {
+          if (!user || needsLogin) {
+            setError("Đăng nhập lại để bắt đầu phiên của chuyến.");
+            return;
+          }
+          if (sharedTrip.status === "waiting" && group.owner !== user.id) {
+            setError("Hãy chờ chủ chuyến khởi hành trước.");
+            return;
+          }
+          if (tripStartInFlight.current) return;
+          tripStartInFlight.current = true;
+          const sessionId = draftTripId;
+          const ownerId = ownerRef.current;
+          const authGeneration = getAuthGeneration();
+          void run(async () => {
+            try {
+              const started = await startAfterTripReservation({
+                sessionId,
+                reserve: async (requestedId) => {
+                  const binding = await post<Snapshot & { tripStart: { sessionId: string } }>(
+                    "/adventure/trip/start",
+                    { groupId: group.id, sessionId: requestedId },
+                  );
+                  if (binding.tripStart.sessionId !== requestedId)
+                    throw new Error("Máy chủ không xác nhận đúng mã phiên đã chuẩn bị.");
+                  const boundGroup = binding.group;
+                  const canonicalPlan = boundGroup?.trip;
+                  const boundMember = boundGroup?.members.find((member) => member.id === ownerId);
+                  if (!boundGroup || boundGroup.id !== group.id || canonicalPlan?.status !== "departed" ||
+                      boundMember?.tripStatus !== "bound")
+                    throw new Error("Chuyến chưa sẵn sàng để bắt đầu phiên. Hãy cập nhật tiến độ rồi thử lại.");
+                  return binding;
+                },
+                isCurrent: () => {
+                  const auth = useAuthStore.getState();
+                  return isTripStartCurrent({
+                    expectedOwnerId: ownerId,
+                    ownerId: ownerRef.current,
+                    workspaceLive: workspaceLive.current,
+                    exclusiveLease: exclusiveLease.current,
+                    activeSessionId: current.current.active?.id ?? null,
+                    expectedSessionId: sessionId,
+                    draftSessionId: draftTripIdRef.current,
+                    expectedAuthGeneration: authGeneration,
+                    authGeneration: getAuthGeneration(),
+                    authenticatedUserId: auth.user?.id,
+                    expectedGroupId: group.id,
+                    currentGroupId: current.current.snapshot?.group?.id ?? null,
+                    needsLogin: auth.needsLogin,
+                    currentView: viewRef.current,
+                  });
+                },
+                start: (binding, startedAt) => {
+                  const boundGroup = binding.group!;
+                  const canonicalPlan = boundGroup.trip!;
+                  beginFocus({
+                    id: sessionId,
+                    started: startedAt,
+                    goal: canonicalPlan.goal,
+                    topic: canonicalPlan.topic,
+                    target: canonicalPlan.target,
+                    groupId: boundGroup.id,
+                    snapshot: binding,
+                  });
+                },
+              });
+              if (!started && ownerRef.current === ownerId && workspaceLive.current) {
+                setError(current.current.active
+                  ? "Một phiên học khác đã bắt đầu. Hãy tiếp tục phiên đang chạy trước."
+                  : "Trạng thái chuyến đã thay đổi trước khi bắt đầu. Hãy cập nhật tiến độ rồi thử lại.");
+              }
+            } finally {
+              tripStartInFlight.current = false;
+            }
+          });
+          return;
+        }
+        beginFocus({
+          id: draftTripId,
+          started: Date.now(),
+          goal: startGoal,
+          topic: startTopic,
+          target: startTarget,
+          groupId: mode === "group" && group ? group.id : null,
+        });
       },
     });
     if (startResult === "needs-skip-choice") setStudyExerciseStartPrompt(true);
@@ -1615,12 +1807,13 @@ function AdventureWorkspace() {
     const restoredSources = current.current.sources?.[session.id] ?? [];
     cancelPendingStudyExerciseForStart(draftTripId);
     invalidateStudyExercisePreparationForSession(draftTripId);
-    setDraftTripId(crypto.randomUUID());
+    const reviewSessionId = rotateDraftSessionId(draftSessionIdsRef.current, "solo", null);
+    setDraftTripId(reviewSessionId);
     setSources(structuredClone(restoredSources.length ? restoredSources : plan.materials.length ? [recoveredMaterialSource(plan.documentText,plan.materials)] : []));
     setMinutes(plan.minutes);
     setBreakCount(0);
     setBreakMinutes(5);
-    setMode(session.groupId && group && session.groupId === group.id ? "group" : "solo");
+    setMode("solo");
     go("ticket");
   }
   const progress = journey
@@ -1897,7 +2090,7 @@ function AdventureWorkspace() {
                   />
                   <BoardingTicket
                     goal={goal}
-                    topicName={availableTopics.find((item) => item.id === topic)?.name ?? "Tự học"}
+                    topicName={availableTopics.find((item) => item.id === topic)?.name ?? selectedGroupTrip?.topic ?? "Tự học"}
                     minutes={minutes}
                     breakCount={breakCount}
                     breakMinutes={breakMinutes}
@@ -1995,7 +2188,7 @@ function AdventureWorkspace() {
                           <textarea
                             value={goal}
                             maxLength={500}
-                              disabled={busy || studyGuideNeedsConfirmation}
+                              disabled={busy || studyGuideNeedsConfirmation || Boolean(selectedGroupTrip)}
                             onChange={(e) => {
                               updateQuickTripDraft(quickTripDraft, { goal: e.target.value });
                               setGoal(e.target.value);
@@ -2007,12 +2200,14 @@ function AdventureWorkspace() {
                           Chủ đề
                           <select
                             value={topic}
-                              disabled={busy || studyGuideNeedsConfirmation}
+                              disabled={busy || studyGuideNeedsConfirmation || Boolean(selectedGroupTrip)}
                             onChange={(e) => {
                               updateQuickTripDraft(quickTripDraft, { topic: e.target.value });
                               setTopic(e.target.value);
                             }}
                           >
+                            {selectedGroupTrip && !availableTopics.some((item) => item.id === selectedGroupTrip.topic) &&
+                              <option value={selectedGroupTrip.topic}>{selectedGroupTrip.topic}</option>}
                             {availableTopics.map((t) => (
                               <option key={t.id} value={t.id}>
                                 {t.name}
@@ -2028,12 +2223,13 @@ function AdventureWorkspace() {
                           }}
                           breakCount={breakCount}
                           breakMinutes={breakMinutes}
+                          durationLocked={Boolean(selectedGroupTrip)}
                           onBreakCountChange={(value) => {
-                            updateQuickTripDraft(quickTripDraft, { breakCount: value });
+                            if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakCount: value });
                             setBreakCount(value);
                           }}
                           onBreakMinutesChange={(value) => {
-                            updateQuickTripDraft(quickTripDraft, { breakMinutes: value });
+                            if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakMinutes: value });
                             setBreakMinutes(value);
                           }}
                         />
@@ -2061,21 +2257,29 @@ function AdventureWorkspace() {
                       <div className="choice-row">
                         <button
                           className={mode === "solo" ? "selected" : ""}
-                          onClick={() => setMode("solo")}
+                          onClick={selectSoloMode}
                         >
                           Một mình
                         </button>
-                        <button
-                          disabled={!group}
+                        {group?.trip && group.trip.status !== "closed" && <button
+                          disabled={Boolean(group.trip.status === "waiting" && group.owner !== user?.id) ||
+                            Boolean(group.trip.status === "departed" &&
+                              group.members.find((member) => member.id === user?.id)?.tripStatus !== "ready")}
                           className={mode === "group" ? "selected" : ""}
-                          onClick={() => setMode("group")}
+                          onClick={prepareGroupTripTicket}
                         >
-                          Cùng đoàn
-                        </button>
+                          Cùng chuyến
+                        </button>}
                       </div>
                       <p>
-                        {mode === "group"
-                          ? "Đóng góp được máy chủ xác nhận sau phiên, tối đa 60 phút/ngày theo múi giờ đoàn."
+                        {mode === "group" && group?.trip
+                          ? group.trip.status === "waiting"
+                            ? "Mục tiêu chung đã sẵn sàng. Khi bạn bắt đầu, chuyến sẽ khởi hành và khóa danh sách thành viên."
+                            : "Mục tiêu, chủ đề và thời lượng đã được chủ chuyến đặt. Mỗi người tự bắt đầu phiên và học theo nhịp riêng."
+                          : mode === "group"
+                            ? "Mỗi phiên chung cần thuộc một chuyến đã lập với mục tiêu, chủ đề và thời lượng cụ thể."
+                            : group && !group.trip
+                              ? "Đoàn cũ chỉ giữ lịch sử và phiên đã liên kết. Hãy lập chuyến mới để học cùng bạn bè."
                           : "Tiến độ được giữ trong hành trình cá nhân của bạn."}
                       </p>
                       <p className="material-hint">Phiên đã lưu tự động xuất hiện trong lịch sử chung; nơi đó hiển thị tóm tắt mục tiêu tối đa 200 ký tự. Tránh ghi thông tin riêng tư vào mục tiêu.</p>
@@ -2094,7 +2298,11 @@ function AdventureWorkspace() {
                         }
                         onClick={() => start()}
                       >
-                        Bắt đầu chuyến ·{" "}
+                        {selectedGroupTrip?.status === "waiting"
+                          ? "Khởi hành và bắt đầu phiên · "
+                          : selectedGroupTrip
+                            ? "Bắt đầu phiên cho chuyến chung · "
+                            : "Bắt đầu chuyến · "}{" "}
                         {Number.isFinite(minutes) ? minutes : "…"} phút học →
                       </button>
                       {studyExerciseStartPrompt && pendingStudyExercise?.ownerId === owner &&
@@ -2256,7 +2464,7 @@ function AdventureWorkspace() {
                     title="Chưa có chuyến đang chạy"
                     text="Chuẩn bị một tấm vé và bắt đầu hành trình của bạn."
                     action="Chuẩn bị vé"
-                    onClick={() => go("ticket")}
+                    onClick={() => { selectSoloMode(); go("ticket"); }}
                   />
                 ))}
               {view === "map" && (
@@ -2270,7 +2478,7 @@ function AdventureWorkspace() {
                     <div className="choice-row">
                       <button
                         className={mode === "solo" ? "selected" : ""}
-                        onClick={() => setMode("solo")}
+                        onClick={selectSoloMode}
                       >
                         Bản đồ của tôi
                       </button>
@@ -2496,9 +2704,11 @@ function AdventureWorkspace() {
               {view === "group" && (
                 <>
                   <Heading
-                    kicker="KHÁC LỊCH HỌC · CHUNG ĐIỂM ĐẾN"
+                    kicker={group?.trip ? "MỘT CHUYẾN · TỐI ĐA 6 NGƯỜI" : "KHÁC LỊCH HỌC · CHUNG ĐIỂM ĐẾN"}
                     title={group?.name ?? "Đi cùng những người bạn"}
-                    text="Đoàn riêng từ 2 đến 6 người. Mỗi người giữ mục tiêu và nhịp học của mình."
+                    text={group?.trip
+                      ? "Cả nhóm dùng chung mục tiêu, chủ đề và thời lượng. Mỗi người tự bắt đầu, kết thúc và đồng bộ phiên học của mình."
+                      : "Mỗi chuyến riêng có tối đa 6 người. Lời mời chỉ dùng cho một chuyến."}
                   />
                   {!user || needsLogin ? (
                     <Empty
@@ -2520,10 +2730,15 @@ function AdventureWorkspace() {
                             </div>
                             <h3>{m.name}</h3>
                             <p>
-                              {m.id === group.owner ? "Chủ đoàn" : "Thành viên"}
+                              {m.id === group.owner ? (group.trip ? "Chủ chuyến" : "Chủ đoàn") : "Thành viên"}
                               {m.id === user.id ? " · Bạn" : ""}
                             </p>
-                            {group.owner === user.id && m.id !== user.id && (
+                            {group.trip && <small className="trip-member-status">
+                              {m.tripStatus === "bound" ? "Đang học"
+                                : m.tripStatus === "completed" ? "Đã hoàn thành"
+                                  : m.tripStatus === "skipped" ? "Đã bỏ qua" : "Sẵn sàng"}
+                            </small>}
+                            {group.owner === user.id && m.id !== user.id && (!group.trip || group.trip.status === "waiting") && (
                               <button
                                 disabled={busy}
                                 onClick={() =>
@@ -2542,22 +2757,60 @@ function AdventureWorkspace() {
                         <section className="panel">
                           <h2>Chuyến đi chung</h2>
                           <p>
-                            {group.members.length} / 6 toa · Múi giờ{" "}
-                            {group.timezone}
+                            {group.members.length} / 6 người · Múi giờ {group.timezone}
                           </p>
-                          <p>
-                            Đã đến {stations[group.journey.station]}. Ngưỡng
-                            chặng này được giữ nguyên khi thành viên thay đổi.
-                          </p>
-                          <button
-                            className="primary"
-                            onClick={() => {
-                              setMode("group");
-                              go("ticket");
-                            }}
-                          >
-                            Đóng góp một phiên học →
-                          </button>
+                          {group.trip ? (
+                            <div className="trip-plan-summary">
+                              <span className={`trip-state trip-state--${group.trip.status}`}>
+                                {group.trip.status === "waiting" ? "Đang chờ khởi hành"
+                                  : group.trip.status === "departed" ? "Đã khởi hành" : "Đã đóng"}
+                              </span>
+                              <h3>{group.trip.goal}</h3>
+                              <p>
+                                Chủ đề {availableTopics.find((item) => item.id === group.trip?.topic)?.name ?? group.trip.topic}
+                                {" · "}{group.trip.target / 60} phút học
+                              </p>
+                              {group.trip.status === "waiting" && group.owner === user.id && (
+                                <button className="primary" disabled={busy} onClick={prepareGroupTripTicket}>
+                                  Mở vé để khởi hành và học →
+                                </button>
+                              )}
+                              {group.trip.status === "waiting" && group.owner !== user.id && (
+                                <p role="status">Chờ chủ chuyến khởi hành. Danh sách thành viên sẽ khóa khi chủ chuyến bắt đầu phiên.</p>
+                              )}
+                              {group.trip.status === "departed" && group.members.find((member) => member.id === user.id)?.tripStatus === "ready" && (
+                                <button className="primary" disabled={busy} onClick={prepareGroupTripTicket}>
+                                  Chuẩn bị phiên học của bạn →
+                                </button>
+                              )}
+                              {group.trip.status === "departed" && group.members.find((member) => member.id === user.id)?.tripStatus === "bound" && (
+                                active?.id === group.trip.ownSessionId
+                                  ? <button className="primary" onClick={() => go("focus")}>Tiếp tục phiên đang học →</button>
+                                  : recoverableGroupTripSessionId
+                                    ? <button className="primary" disabled={busy} onClick={prepareGroupTripTicket}>Khôi phục phiên đã liên kết →</button>
+                                    : <p role="status">{saved.active
+                                      ? "Một phiên học khác đang chạy. Hãy kết thúc và đồng bộ phiên đó trước."
+                                      : group.trip.ownSessionId && saved.pending.some((session) => session.id === group.trip?.ownSessionId)
+                                        ? "Phiên này đã kết thúc trên thiết bị và đang chờ đồng bộ. Kết nối mạng rồi cập nhật tiến độ."
+                                        : "Không tìm thấy phiên cục bộ có thể tiếp tục. Hãy cập nhật tiến độ để kiểm tra trạng thái chuyến."}</p>
+                              )}
+                              <p className="trip-roster-note">
+                                {group.trip.status === "waiting"
+                                  ? "Bạn có thể rời chuyến trước khi khởi hành; chỗ của bạn sẽ được giải phóng."
+                                  : "Danh sách đã cố định. Mỗi thành viên kết thúc phiên riêng; hoàn thành một phiên không dừng phiên của người khác."}
+                              </p>
+                            </div>
+                          ) : (
+                            <>
+                              <p>
+                                Đoàn lịch sử vẫn giữ các phiên và tiến độ đã lưu.
+                                Phiên mới cần thuộc một chuyến có kế hoạch riêng.
+                              </p>
+                              {active?.groupId === group.id
+                                ? <button className="primary" onClick={() => go("focus")}>Tiếp tục phiên đang chạy →</button>
+                                : <p>Hãy rời đoàn cũ trước khi lập một chuyến học mới.</p>}
+                            </>
+                          )}
                           <h3>Nhật ký đoàn</h3>
                           {group.journey.journal.length ? (
                             group.journey.journal.map((e, i) => (
@@ -2575,10 +2828,9 @@ function AdventureWorkspace() {
                         <section className="panel form">
                           <h2>Lời mời & quyền riêng tư</h2>
                           <p>
-                            Chỉ tên toa và trang trí được chia sẻ. Đoàn không
-                            thấy tài liệu, lời giải hay chi tiết trả lời quiz.
+                            Thành viên chỉ thấy tên toa, trang trí và kế hoạch chung. Tài liệu, câu hỏi và câu trả lời của từng người luôn riêng tư.
                           </p>
-                          {group.owner === user.id && (
+                          {group.owner === user.id && group.trip?.status === "waiting" && (
                             <>
                               <button
                                 disabled={busy}
@@ -2634,19 +2886,29 @@ function AdventureWorkspace() {
                               </button>
                             </>
                           )}
+                          {!group.trip && <p role="status">Đoàn lịch sử không nhận lời mời mới. Lời mời chỉ được tạo cho một chuyến có kế hoạch.</p>}
+                          {group.trip && group.trip.status !== "waiting" && (
+                            <p role="status">Lời mời đã đóng khi chuyến khởi hành. Mã cũ không thể dùng cho chuyến khác.</p>
+                          )}
                           <button
                             className="danger-button"
                             disabled={
                               !!active || saved.pending.length > 0 || busy
                             }
-                            onClick={() => setConfirm("leave")}
+                            onClick={() => setConfirm(group.trip?.status === "waiting" && group.owner === user.id ? "cancel-trip" : "leave")}
                           >
-                            Rời đoàn
+                            {group.trip?.status === "waiting" && group.owner === user.id
+                              ? "Hủy chuyến"
+                              : group.trip ? "Rời chuyến" : "Rời đoàn"}
                           </button>
                           <small>
-                            Hãy đồng bộ các phiên trước khi rời. Chủ đoàn rời sẽ
-                            chuyển quyền cho thành viên tham gia sớm nhất còn
-                            lại.
+                            {group.trip?.status === "waiting" && group.owner === user.id
+                              ? "Hủy chuyến sẽ giải phóng mọi thành viên và thu hồi các mã mời."
+                              : group.trip?.status === "departed"
+                                ? "Phiên đang học cần được kết thúc và đồng bộ trước khi rời; rời khi chưa bắt đầu sẽ đánh dấu bạn bỏ qua."
+                                : group.trip
+                                  ? "Rời khi đang chờ sẽ giải phóng chỗ của bạn; chuyến vẫn chờ chủ khởi hành."
+                                  : "Hãy đồng bộ các phiên trước khi rời. Chủ đoàn rời sẽ chuyển quyền cho thành viên còn lại."}
                           </small>
                           <button
                             disabled={busy}
@@ -2660,31 +2922,59 @@ function AdventureWorkspace() {
                   ) : (
                     <div className="two-columns">
                       <section className="panel form">
-                        <h2>Mở một đoàn mới</h2>
+                        <h2>Lập chuyến học mới</h2>
                         <label>
-                          Tên đoàn
+                          Tên chuyến
                           <input
                             maxLength={60}
                             value={groupName}
                             onChange={(e) => setGroupName(e.target.value)}
-                            placeholder="Những người đi tìm bình minh"
+                            placeholder="Ôn tập buổi sáng"
                           />
                         </label>
+                        <label>
+                          Mục tiêu chung
+                          <textarea
+                            maxLength={500}
+                            value={goal}
+                            onChange={(event) => setGoal(event.target.value)}
+                            placeholder="Cả nhóm muốn học được gì trong chuyến này?"
+                          />
+                        </label>
+                        <label>
+                          Chủ đề chung
+                          <select value={topic} onChange={(event) => setTopic(event.target.value)}>
+                            {availableTopics.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                          </select>
+                        </label>
+                        <DurationPicker
+                          value={minutes}
+                          onChange={setMinutes}
+                          breakCount={breakCount}
+                          breakMinutes={breakMinutes}
+                          onBreakCountChange={setBreakCount}
+                          onBreakMinutesChange={setBreakMinutes}
+                        />
+                        <small>Chủ đề, mục tiêu và số phút học được dùng chung. Mỗi người tự chọn lịch nghỉ và bắt đầu phiên khi sẵn sàng.</small>
                         <button
                           className="primary"
-                          disabled={busy || !groupName.trim()}
-                          onClick={() =>
-                            void run(() =>
-                              mutation("groups", {
+                          disabled={busy || !groupName.trim() || goal.trim().length < 3 || !Number.isInteger(minutes) || minutes < 1 || minutes > 240 || !validBreaks}
+                          onClick={() => void run(async () => {
+                            await mutation("trips", {
                                 name: groupName,
                                 timezone:
                                   Intl.DateTimeFormat().resolvedOptions()
                                     .timeZone,
-                              }),
-                            )
-                          }
+                                goal: goal.trim(),
+                                topic,
+                                target: minutes * 60,
+                              });
+                              setMode("group");
+                              setInviteResult(null);
+                              setNotice("Đã lập chuyến. Tạo mã mời để mọi người cùng tham gia.");
+                            })}
                         >
-                          Tạo đoàn của bạn →
+                          Lập chuyến và mời mọi người →
                         </button>
                       </section>
                       <section className="panel form">
@@ -2699,11 +2989,19 @@ function AdventureWorkspace() {
                         </label>
                         <button
                           disabled={busy || !invite.trim()}
-                          onClick={() =>
-                            void run(() =>
-                              mutation("join", { token: invite.trim() }),
-                            )
-                          }
+                          onClick={() => void run(async () => {
+                            const joined = await mutation("join", { token: invite.trim() });
+                            setInvite("");
+                            setMode("group");
+                            if (joined.group?.trip) {
+                              setGoal(joined.group.trip.goal);
+                              setTopic(joined.group.trip.topic);
+                              setMinutes(joined.group.trip.target / 60);
+                              if (breakCount > 0 && !isValidBreakPlan(plannedBreaks, joined.group.trip.target))
+                                setBreakCount(0);
+                            }
+                            setNotice("Bạn đã tham gia chuyến học.");
+                          })}
                         >
                           Nối toa vào đoàn
                         </button>
@@ -2711,11 +3009,9 @@ function AdventureWorkspace() {
                     </div>
                   )}
                   <div className="info-box">
-                    <strong>Đồng hành bất đồng bộ</strong>
+                    <strong>Mỗi lời mời, một chuyến</strong>
                     <p>
-                      Tiến độ chỉ cộng sau khi phiên học được xác nhận. Bản này
-                      chưa có phòng khởi hành trực tiếp hoặc thưởng phối hợp
-                      thời gian thực.
+                      Mỗi chuyến có tối đa 6 người, tính cả chủ chuyến. Khi chủ chuyến bắt đầu, danh sách và kế hoạch được khóa; mọi người học vào thời điểm riêng và chỉ tiến độ của chính họ được lưu sau khi đồng bộ.
                     </p>
                   </div>
                 </>
@@ -2780,7 +3076,7 @@ function AdventureWorkspace() {
                       title="Nhật ký đang chờ chuyến đầu tiên"
                       text="Bắt đầu học và trở lại đây để nhìn thấy quãng đường của mình."
                       action="Bắt đầu"
-                      onClick={() => go("ticket")}
+                      onClick={() => { selectSoloMode(); go("ticket"); }}
                     />
                   )}
                   <button onClick={exportData}>
@@ -3080,12 +3376,21 @@ function AdventureWorkspace() {
             <h2 id="confirm-title">
               {confirm === "finish"
                 ? "Dừng ở ga này nhé?"
-                : confirm === "reset" ? "Tạo lại hành trình trên thiết bị?" : "Rời đoàn hiện tại?"}
+                : confirm === "reset" ? "Tạo lại hành trình trên thiết bị?"
+                  : confirm === "cancel-trip" ? "Hủy chuyến đang chờ?"
+                    : group?.trip ? "Rời chuyến hiện tại?" : "Rời đoàn hiện tại?"}
             </h2>
             <p>
               {confirm === "finish"
                 ? "Phần thời gian học hợp lệ sẽ được lưu. Bạn không mất kinh nghiệm đã kiếm được."
-                : confirm === "reset" ? "Dữ liệu cục bộ của tài khoản này sẽ bị xóa. Hãy tải dữ liệu gốc trước. Dữ liệu đã đồng bộ trên máy chủ vẫn được giữ." : "Toa cá nhân được giữ nguyên. Đóng góp cũ vẫn thuộc hành trình của đoàn."}
+                : confirm === "reset" ? "Dữ liệu cục bộ của tài khoản này sẽ bị xóa. Hãy tải dữ liệu gốc trước. Dữ liệu đã đồng bộ trên máy chủ vẫn được giữ."
+                  : confirm === "cancel-trip"
+                    ? "Mọi thành viên sẽ được tách khỏi chuyến và các mã mời bị thu hồi. Chưa có phiên học hay điểm nào được tạo."
+                    : group?.trip?.status === "waiting"
+                      ? "Bạn sẽ rời danh sách chờ và giải phóng chỗ của mình. Nếu bạn là chủ chuyến, hãy dùng lệnh hủy chuyến để giải phóng mọi người."
+                      : group?.trip?.status === "departed"
+                        ? "Danh sách thành viên đã khóa. Rời trước khi bắt đầu sẽ đánh dấu bạn bỏ qua; phiên đang học cần được kết thúc và đồng bộ trước khi rời."
+                        : "Toa cá nhân được giữ nguyên. Đóng góp cũ vẫn thuộc hành trình của đoàn."}
             </p>
             <div className="choice-row">
               <button autoFocus onClick={() => setConfirm(null)}>
@@ -3101,16 +3406,23 @@ function AdventureWorkspace() {
                       localStorage.removeItem(`train-adventure:v1:${owner}`);
                       window.location.reload();
                     } catch { setError("Không xóa được dữ liệu. Hãy kiểm tra quyền lưu trữ của trình duyệt."); }
-                  }
-                  else
+                  } else if (confirm === "cancel-trip") {
+                    void run(async () => {
+                      await mutation("trip/cancel", {});
+                      setInviteResult(null);
+                      selectSoloMode();
+                      setConfirm(null);
+                    });
+                  } else
                     void run(async () => {
                       await mutation("leave", {});
-                      setMode("solo");
+                      setInviteResult(null);
+                      selectSoloMode();
                       setConfirm(null);
                     });
                 }}
               >
-                Xác nhận
+                {confirm === "cancel-trip" ? "Hủy chuyến" : confirm === "leave" ? "Rời chuyến" : "Xác nhận"}
               </button>
             </div>
           </section>

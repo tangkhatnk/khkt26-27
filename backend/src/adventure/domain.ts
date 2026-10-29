@@ -182,6 +182,17 @@ export type Person = {
   joinedAt: number;
   journey: Journey;
 };
+export type TripParticipantStatus = "ready" | "bound" | "completed" | "skipped";
+export type GroupTrip = {
+  status: "waiting" | "departed" | "closed";
+  goal: string;
+  topic: string;
+  target: number;
+  participants: Record<string, {
+    status: TripParticipantStatus;
+    sessionId?: string;
+  }>;
+};
 export type Group = {
   id: string;
   name: string;
@@ -192,6 +203,8 @@ export type Group = {
   journey: Journey;
   daily: Record<string, number>;
   membershipHistory?: Record<string, { joined: number; left: number | null }[]>;
+  /** New groups use this tagged record for one shared trip; absent on legacy groups. */
+  trip?: GroupTrip;
 };
 export type Session = {
   id: string;
@@ -445,9 +458,38 @@ export function settle(
   if (seconds > input.target + 1)
     throw new Error("Thời gian học vượt mục tiêu.");
   const p = person(world, input.userId);
+  const tripBinding = Object.values(world.groups).find((group) =>
+    Object.values(group.trip?.participants ?? {}).some((participant) => participant.sessionId === input.id),
+  );
+  const tripGroup = input.groupId ? world.groups[input.groupId] : null;
+  const participant = tripGroup?.trip?.participants[input.userId];
+  const boundParticipant = tripBinding?.trip?.participants[input.userId];
+  if (tripBinding && boundParticipant?.sessionId !== input.id)
+    throw new Error("Mã phiên đã được liên kết với thành viên khác.");
+  if (tripBinding && tripBinding.id !== input.groupId)
+    throw new Error("Phiên đã được liên kết với một chuyến khác.");
+  if (tripGroup?.trip) {
+    if (
+      tripGroup.trip.status !== "departed" ||
+      tripGroup.archived ||
+      p.groupId !== tripGroup.id ||
+      !tripGroup.members.includes(input.userId) ||
+      participant?.status !== "bound" ||
+      participant.sessionId !== input.id
+    )
+      throw new Error("Phiên chưa được liên kết hợp lệ với chuyến này.");
+    if (
+      input.goal !== tripGroup.trip.goal ||
+      input.topic !== tripGroup.trip.topic ||
+      input.target !== tripGroup.trip.target
+    )
+      throw new Error("Mục tiêu, chủ đề hoặc thời lượng không khớp với chuyến đã lập.");
+  } else if (!input.groupId && tripBinding) {
+    throw new Error("Phiên cần được lưu theo chuyến đã liên kết.");
+  }
   let contribution = seconds;
   if (input.groupId) {
-    const group = world.groups[input.groupId];
+    const group = tripGroup;
     const membership =
       group?.membershipHistory?.[input.userId]?.find(
         (m) =>
@@ -495,6 +537,19 @@ export function settle(
       input.segments.filter((segment) => segment.kind === "distraction").length,
   };
   world.sessions[input.id] = session;
+  if (tripGroup?.trip && participant) {
+    participant.status = "completed";
+    const history = tripGroup.membershipHistory?.[input.userId];
+    const membership = history?.slice().reverse().find((item) => item.left === null);
+    if (membership) membership.left = now;
+    p.groupId = null;
+    if (Object.values(tripGroup.trip.participants).every((member) =>
+      member.status === "completed" || member.status === "skipped",
+    )) {
+      tripGroup.trip.status = "closed";
+      tripGroup.archived = true;
+    }
+  }
   return session;
 }
 export function snapshot(world: World, userId: string, now: number) {
@@ -502,6 +557,9 @@ export function snapshot(world: World, userId: string, now: number) {
   resolveVote(p.journey, now);
   const g = p.groupId ? world.groups[p.groupId] : null;
   if (g) resolveVote(g.journey, now);
+  const ownTripSessionId = g?.trip?.participants[userId]?.status === "bound"
+    ? g.trip.participants[userId]?.sessionId
+    : undefined;
   const ownedSessions = Object.values(world.sessions).filter((session) => session.userId === userId);
   const removedOwnedSessionIds = ownedSessions
     .filter((session) => isSessionRemoved(world, session.id))
@@ -530,7 +588,15 @@ export function snapshot(world: World, userId: string, now: number) {
             name: person(world, id).name,
             color: person(world, id).color,
             decor: person(world, id).decor,
+            ...(g.trip ? { tripStatus: g.trip.participants[id]?.status ?? "ready" } : {}),
           })),
+          ...(g.trip ? { trip: {
+            status: g.trip.status,
+            goal: g.trip.goal,
+            topic: g.trip.topic,
+            target: g.trip.target,
+            ...(ownTripSessionId ? { ownSessionId: ownTripSessionId } : {}),
+          } } : {}),
         }
       : null,
     sessions: ownedSessions
