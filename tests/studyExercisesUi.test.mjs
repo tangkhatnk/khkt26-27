@@ -304,6 +304,8 @@ test("exercise preparation offers local file and image reading without replacing
   assert.match(markup, /đọc ngay trên thiết bị|đọc cục bộ/iu);
   assert.match(markup, /thay thế hoặc nối vào đề/u);
   assert.match(markup, /id="study-exercise-provided-text"/u);
+  assert.match(markup, /class="study-exercises__mode study-exercises__mode--selected"/u);
+  assert.match(markup, /class="study-exercises__confirmation"/u);
   assert.doesNotMatch(markup, /Nội dung nguồn đã được xem lại\.\\nGiữ nguyên dấu và xuống dòng\.<\/textarea>/u);
 });
 

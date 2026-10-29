@@ -523,10 +523,12 @@ export function StudyExercisePreparation({
 
     <fieldset className="study-exercises__modes" disabled={disabled || pending || invalidating}>
       <legend>Chọn cách chuẩn bị</legend>
-      <label><input type="radio" name="study-exercise-mode" value="provided" checked={mode === "provided"}
+      <label className={`study-exercises__mode${mode === "provided" ? " study-exercises__mode--selected" : ""}`}>
+        <input type="radio" name="study-exercise-mode" value="provided" checked={mode === "provided"}
         onChange={() => changeMode("provided")} />
         Tôi sẽ nhập đề</label>
-      <label><input type="radio" name="study-exercise-mode" value="generated" checked={mode === "generated"}
+      <label className={`study-exercises__mode${mode === "generated" ? " study-exercises__mode--selected" : ""}`}>
+        <input type="radio" name="study-exercise-mode" value="generated" checked={mode === "generated"}
         onChange={() => changeMode("generated")} />
         Tạo đề từ tài liệu đã xem lại</label>
     </fieldset>
