@@ -83,6 +83,24 @@ test("a changed source or count aborts the prior request and rejects its late re
   coordinator.dispose();
 });
 
+test("skipping a session cancels its pending prefetch and fences a late result", async () => {
+  const coordinator = new QuizPrefetchCoordinator();
+  const currentScope = scope();
+  let signal;
+  let resolveGeneration;
+  const pendingRequest = coordinator.getOrStart(currentScope, (requestSignal) => {
+    signal = requestSignal;
+    return new Promise((resolve) => { resolveGeneration = resolve; });
+  });
+
+  coordinator.cancelSession(currentScope.ownerId, currentScope.sessionId);
+  resolveGeneration([{ id: "stale-question" }]);
+
+  assert.equal(signal.aborted, true);
+  await assert.rejects(pendingRequest, { name: "AbortError" });
+  assert.equal(coordinator.status(currentScope), undefined);
+});
+
 test("a corrected session version gets a distinct prefetch scope even when source and count are unchanged", () => {
   const beforeCorrection = scope({ correctionVersion: 2 });
   const afterCorrection = scope({ correctionVersion: 3 });

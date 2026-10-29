@@ -109,6 +109,25 @@ test("quiz generation exposes a distinct primary action", () => {
   assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
 });
 
+test("a skipped review stays closed after the session and offers an explicit opt-in", () => {
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "owner-a",
+    session: { id: "trip-a", topic: "biology", goal: "Review cells" },
+    draft: { count: 3, requestedCount: 3, questions: [], answers: {}, reviewSkipped: true },
+    canUseAI: true,
+    needsLogin: false,
+    onGenerate: async () => [],
+    onSaveDraft: () => {},
+    onGrade: async () => ({}),
+    onLogin: () => {},
+    onStartReview: () => {},
+  }));
+
+  assert.match(markup, /Đã bỏ qua câu hỏi ôn tập/u);
+  assert.match(markup, /Bật ôn tập/u);
+  assert.doesNotMatch(markup, /Tạo câu hỏi bằng AI/u);
+});
+
 test("corrected summary notice separates effective metrics from the recorded end time", () => {
   const markup = renderToStaticMarkup(React.createElement(SessionCorrectionNotice, {
     correctionFlags: {

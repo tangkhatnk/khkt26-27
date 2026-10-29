@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QuizRequestGuard, isQuizCount, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
+import { QuizRequestGuard, isQuizCount, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
 
 const question = {
   id: "123e4567-e89b-42d3-a456-426614174000",
@@ -46,6 +46,14 @@ test("quiz panel adopts the current saved draft and selected count without retai
     draft: { correctionVersion: 0, count: 3, questions: [], answers: {} },
     countInput: "3",
   });
+});
+
+test("a skipped review survives storage and disables focus-time prefetch while legacy drafts stay enabled", () => {
+  const skipped = { correctionVersion: 0, count: 3, requestedCount: 3, questions: [], answers: {}, reviewSkipped: true };
+  assert.equal(isValidQuizDraft(JSON.parse(JSON.stringify(skipped))), true);
+  assert.equal(shouldPrefetchQuizReview(skipped), false);
+  assert.equal(shouldPrefetchQuizReview({ count: 3, questions: [], answers: {} }), true);
+  assert.equal(isValidQuizDraft({ ...skipped, reviewSkipped: "yes" }), false);
 });
 
 test("a draft from an older correction version keeps the selected count but drops stale questions and answers", () => {

@@ -12,6 +12,8 @@ export type QuizQuestion = {
 export type QuizDraft = {
   /** Version of the server-corrected session projection used to prepare these questions. */
   correctionVersion?: number;
+  /** The learner chose to skip quiz preparation before starting this session. */
+  reviewSkipped?: boolean;
   /** The number of questions in the saved generation (or the selected count before generation). */
   count: number;
   /** Next generation preference; it may differ from count while saved questions are being reviewed. */
@@ -52,7 +54,8 @@ export function isValidQuizDraft(value: unknown): value is QuizDraft {
       !record(value.answers)) return false;
   const questions: unknown[] = value.questions;
   const answers = value.answers;
-  if ((value.correctionVersion !== undefined && !isCorrectionVersion(value.correctionVersion)) ||
+  if ((value.reviewSkipped !== undefined && typeof value.reviewSkipped !== "boolean") ||
+      (value.correctionVersion !== undefined && !isCorrectionVersion(value.correctionVersion)) ||
       (value.requestedCount !== undefined && !isQuizCount(value.requestedCount)) ||
       questions.length > 30 || (questions.length > 0 && questions.length !== value.count) ||
       !questions.every(isQuestion)) return false;
@@ -63,6 +66,11 @@ export function isValidQuizDraft(value: unknown): value is QuizDraft {
     const question = validatedQuestions.find((item) => item.id === id);
     return !!question && isIndex(selected, question.options.length);
   });
+}
+
+/** Legacy drafts remain eligible; only an explicit saved skip disables preparation. */
+export function shouldPrefetchQuizReview(draft: Pick<QuizDraft, "reviewSkipped"> | undefined): boolean {
+  return draft?.reviewSkipped !== true;
 }
 
 export function isValidQuizDraftMap(value: unknown): value is Record<string, QuizDraft> {

@@ -93,7 +93,7 @@ import {
   type Saved,
   type SessionHistoryEntry,
 } from "./storage";
-import { isQuizCount, isValidQuizDraft, quizPanelDraftState, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
+import { isQuizCount, isValidQuizDraft, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
 import { analyzeSession, hasSessionCorrections, knowledgeGaps, reviewPlan } from "./learning";
 import {
   localDayKey,
@@ -253,6 +253,7 @@ function AdventureWorkspace() {
     breakMinutes: 5,
   });
   const [quizCount, setQuizCount] = useState("3");
+  const [skipQuizReview, setSkipQuizReview] = useState(false);
   const [quizPrefetch] = useState(() => new QuizPrefetchCoordinator<QuizQuestion[]>());
   const [quizPrefetchUi, setQuizPrefetchUi] = useState<QuizPrefetchUiState | null>(null);
   const quizRequestGeneration = useRef(0);
@@ -1038,6 +1039,10 @@ function AdventureWorkspace() {
     }
     if ((currentSession.correctionVersion ?? 0) !== scope.correctionVersion) return;
     const draftPreference = value.quizDrafts?.[scope.sessionId];
+    if (!shouldPrefetchQuizReview(draftPreference)) {
+      quizPrefetch.cancelSession(scope.ownerId, scope.sessionId);
+      return;
+    }
     if ((draftPreference?.requestedCount ?? draftPreference?.count ?? 3) !== scope.count) return;
     const latest = buildQuizScope(currentSession ?? session, scope.count);
     if (quizPrefetchScopeKey(latest.scope) !== quizPrefetchScopeKey(scope)) return;
@@ -1134,6 +1139,11 @@ function AdventureWorkspace() {
       return;
     }
     const existingDraft = current.current.quizDrafts?.[trip.id];
+    if (!shouldPrefetchQuizReview(existingDraft)) {
+      quizPrefetch.cancelSession(ownerRef.current, trip.id);
+      setQuizPrefetchUi((previous) => previous?.sessionId === trip.id ? null : previous);
+      return;
+    }
     if (existingDraft?.questions.length) return;
 
     const scope = activeQuizPrefetch.scope;
@@ -1291,7 +1301,7 @@ function AdventureWorkspace() {
       startTarget > 14400 ||
       !Number.isInteger(startTarget) ||
       !startBreaksValid ||
-      !isQuizCount(Number(quizCount))
+      (!skipQuizReview && !isQuizCount(Number(quizCount)))
     )
       return;
     const hasReadyPreparation = isStudyExercisePreparationReadyForSession(draftTripId);
@@ -1331,7 +1341,10 @@ function AdventureWorkspace() {
           reconnect: 0,
         };
         const selectedQuizCount = isQuizCount(Number(quizCount)) ? Number(quizCount) : 3;
-        const initialQuizDraft = quizDraftFromQuestions([], selectedQuizCount);
+        const initialQuizDraft = {
+          ...quizDraftFromQuestions([], selectedQuizCount),
+          ...(skipQuizReview ? { reviewSkipped: true } : {}),
+        };
         if (commit({
           ...current.current,
           ...(input.snapshot ? { snapshot: input.snapshot } : {}),
@@ -1339,6 +1352,7 @@ function AdventureWorkspace() {
           quizDrafts: updateQuizDrafts(current.current.quizDrafts, trip.id, initialQuizDraft),
         })) {
           setNow(at);
+          setSkipQuizReview(false);
           setQuizPrefetchUi(null);
           const nextDraftTripId = rotateDraftSessionId(
             draftSessionIdsRef.current,
@@ -2243,14 +2257,25 @@ function AdventureWorkspace() {
                           max={30}
                           step={1}
                           value={quizCount}
-                          aria-invalid={!isQuizCount(Number(quizCount))}
+                          aria-invalid={!skipQuizReview && !isQuizCount(Number(quizCount))}
                           onChange={(event) => setQuizCount(event.target.value)}
                           aria-describedby="departure-quiz-hint"
                         />
                       </label>
+                      <label className="departure-quiz-skip">
+                        <input
+                          type="checkbox"
+                          checked={skipQuizReview}
+                          disabled={busy}
+                          onChange={(event) => setSkipQuizReview(event.target.checked)}
+                        />
+                        Bỏ qua câu hỏi ôn tập cho chuyến này
+                      </label>
                       <small id="departure-quiz-hint" className="departure-quiz-hint">
-                        {isQuizCount(Number(quizCount))
-                          ? "Khi đăng nhập, nguồn đã kiểm tra được gửi cho AI để chuẩn bị câu hỏi trong lúc bạn tập trung. Bạn có thể đổi số lượng ở phần thành quả."
+                        {skipQuizReview
+                          ? "Ứng dụng sẽ không tạo sẵn câu hỏi trong lúc học. Bạn vẫn có thể bật ôn tập ở phần thành quả."
+                          : isQuizCount(Number(quizCount))
+                            ? "Khi đăng nhập, nguồn đã kiểm tra được gửi cho AI để chuẩn bị câu hỏi trong lúc bạn tập trung. Bạn có thể đổi số lượng ở phần thành quả."
                           : "Chọn số câu hỏi là số nguyên từ 1 đến 30."}
                       </small>
                       <h3 className="departure-companion-title">Bạn đồng hành</h3>
@@ -2293,7 +2318,7 @@ function AdventureWorkspace() {
                           !Number.isInteger(minutes) ||
                           minutes < 1 ||
                           minutes > 240 || !validBreaks ||
-                          !isQuizCount(Number(quizCount)) ||
+                          (!skipQuizReview && !isQuizCount(Number(quizCount))) ||
                           !exclusive
                         }
                         onClick={() => start()}

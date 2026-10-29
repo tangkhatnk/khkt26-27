@@ -1304,6 +1304,37 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   width: fit-content;
   max-width: 100%;
 }
+.departure-quiz-skip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.departure-quiz-skip input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.quiz-review-skipped {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 12px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.quiz-review-skipped p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
 .adventure .quiz-count-label input:not([type="radio"]):not([type="checkbox"]) {
   flex-shrink: 0;
   width: 90px;
