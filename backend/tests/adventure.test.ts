@@ -240,6 +240,30 @@ describe("adventure progress", () => {
     expect(JSON.stringify(publicGroup)).not.toContain("Study");
     expect(snapshot(w, "v", now).sessions).toHaveLength(0);
   });
+  it("projects synchronized metadata without leaking legacy or peer session identifiers", () => {
+    const w = emptyWorld();
+    person(w, "u").groupId = "g";
+    person(w, "v").groupId = "g";
+    w.groups.g = {
+      id: "g", name: "Shared", owner: "u", members: ["u", "v"], timezone: "UTC", archived: false,
+      journey: journey(2), daily: {},
+      trip: {
+        mode: "synchronized", status: "departed", target: 120, startedAt: now - 1000, endsAt: now + 1000,
+        goal: "legacy private goal", topic: "legacy private topic",
+        participants: {
+          u: { status: "bound", sessionId: "u-session" },
+          v: { status: "bound", sessionId: "v-session" },
+        },
+      },
+    };
+
+    const owner = snapshot(w, "u", now);
+    const member = snapshot(w, "v", now);
+    expect(owner.group?.trip).toMatchObject({ mode: "synchronized", target: 120, startedAt: now - 1000, endsAt: now + 1000, ownSessionId: "u-session" });
+    expect(JSON.stringify(owner.group?.trip)).not.toMatch(/legacy private|v-session|goal|topic/u);
+    expect(member.group?.trip?.ownSessionId).toBe("v-session");
+    expect(JSON.stringify(member.group?.trip)).not.toContain("u-session");
+  });
   it("splits contribution at local midnight, including DST days", () => {
     const start = Date.parse("2026-10-07T16:59:00Z"),
       end = start + 120000;

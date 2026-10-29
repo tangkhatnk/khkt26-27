@@ -229,6 +229,8 @@ function validSaved(v: unknown): v is Saved {
         Number(a.target) <= 0 || ![a.id, a.owner, a.goal, a.topic, a.document].every((s) => typeof s === "string") ||
         !["focus", "away", "reconnecting", "paused", "pending"].includes(String(a.state)) ||
         (a.deviceCategory !== undefined && !isDeviceCategory(a.deviceCategory)) ||
+        (a.syncClock !== undefined && typeof a.syncClock !== "boolean") ||
+        (a.clockOffsetMs !== undefined && (!Number.isSafeInteger(a.clockOffsetMs) || Math.abs(Number(a.clockOffsetMs)) > 24 * 60 * 60 * 1000)) ||
         (a.distractions !== undefined && !count(a.distractions)) ||
         (a.breakPlan !== undefined && !isValidBreakPlan(a.breakPlan,a.target)) ||
         (a.awayCounted !== undefined && typeof a.awayCounted !== "boolean") ||

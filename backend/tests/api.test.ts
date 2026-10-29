@@ -204,6 +204,218 @@ it("previews the exact public trip code without saving or exposing another accou
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip-code", headers: { authorization: "Bearer invalid" }, payload: { id } })).statusCode).toBe(401);
 });
 
+it("creates a synchronized trip with a locked shared schedule and an explicit not-ready owner", async () => {
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/v1/adventure/trips/synchronized",
+    headers,
+    payload: {
+      name: "Morning review",
+      timezone: "UTC",
+      target: 600,
+      breakPlan: { count: 1, seconds: 60 },
+    },
+  });
+
+  expect(created.statusCode, created.body).toBe(200);
+  const group = created.json().group;
+  expect(group.trip).toMatchObject({
+    mode: "synchronized",
+    status: "waiting",
+    target: 600,
+    breakPlan: { count: 1, seconds: 60 },
+  });
+  expect(group.members[0]).toMatchObject({ id: userId, tripStatus: "not-ready" });
+
+  const state = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+  expect(state[0].state.groups[group.id]?.trip).toMatchObject({
+    status: "waiting",
+    participants: { [userId]: { status: "not-ready" } },
+  });
+  expect(state[0].state.groups[group.id]?.trip).not.toHaveProperty("goal");
+  expect(state[0].state.groups[group.id]?.trip).not.toHaveProperty("topic");
+});
+
+it("makes readiness idempotent, reserves session IDs globally, and requires at least two ready members", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/v1/adventure/trips/synchronized", headers, payload: { name: "Solo lobby", timezone: "UTC", target: 60 } });
+  expect(created.statusCode).toBe(200);
+  const groupId = created.json().group.id as string;
+  const sessionId = randomUUID();
+  const sameReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId } });
+  expect(sameReady.statusCode).toBe(200);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId } })).statusCode).toBe(200);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId: randomUUID() } })).statusCode).toBe(409);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId, sessionId } })).statusCode).toBe(409);
+  const unready = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: false } });
+  expect(unready.statusCode).toBe(200);
+  expect(unready.json().group.trip.ownSessionId).toBeUndefined();
+  expect(unready.json().group.members[0].tripStatus).toBe("not-ready");
+
+  const invite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: stranger, payload: { token: invite.json().token } });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId } });
+  const collidingReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId, ready: true, sessionId } });
+  expect(collidingReady.statusCode).toBe(409);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId, sessionId } })).statusCode).toBe(409);
+});
+
+it("starts one synchronized session for the ready roster and exposes only each member's own binding", async () => {
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/v1/adventure/trips/synchronized",
+    headers,
+    payload: { name: "Shared clock", timezone: "UTC", target: 120, breakPlan: { count: 1, seconds: 60 } },
+  });
+  expect(created.statusCode, created.body).toBe(200);
+  const tripId = created.json().group.id as string;
+  const ownerSessionId = randomUUID();
+  const memberSessionId = randomUUID();
+  const invite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: stranger, payload: { token: invite.json().token } })).statusCode).toBe(200);
+  const unusedInvite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
+  expect(unusedInvite.statusCode).toBe(200);
+
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } })).statusCode).toBe(409);
+  const ownerReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId: tripId, ready: true, sessionId: ownerSessionId } });
+  expect(ownerReady.statusCode).toBe(200);
+  expect(ownerReady.json().group.members[0]).toMatchObject({ id: userId, tripStatus: "ready" });
+  expect(ownerReady.json().group.trip.ownSessionId).toBe(ownerSessionId);
+  expect(JSON.stringify(ownerReady.json().group)).not.toContain(memberSessionId);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } })).statusCode).toBe(409);
+
+  const memberReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId: tripId, ready: true, sessionId: memberSessionId } });
+  expect(memberReady.statusCode).toBe(200);
+  expect(memberReady.json().group.trip.ownSessionId).toBe(memberSessionId);
+  expect(JSON.stringify(memberReady.json().group)).not.toContain(ownerSessionId);
+
+  const commonStart = Date.now();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(commonStart);
+    const launches = await Promise.all([
+      app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } }),
+      app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } }),
+    ]);
+    expect(launches.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(launches[0].json().tripStart).toEqual({ sessionId: ownerSessionId, startedAt: commonStart, endsAt: commonStart + 180_000 });
+    expect(launches[1].json().tripStart).toEqual(launches[0].json().tripStart);
+    expect(JSON.stringify(launches[0].json().group)).not.toContain(memberSessionId);
+    const ownerSnapshot = await app.inject({ method: "GET", url: "/api/v1/adventure", headers });
+    const memberSnapshot = await app.inject({ method: "GET", url: "/api/v1/adventure", headers: stranger });
+    expect(ownerSnapshot.json()).toMatchObject({ serverNow: commonStart });
+    expect(ownerSnapshot.json().group.trip).toMatchObject({ mode: "synchronized", status: "departed", startedAt: commonStart, endsAt: commonStart + 180_000, target: 120, breakPlan: { count: 1, seconds: 60 }, ownSessionId: ownerSessionId });
+    expect(JSON.stringify(ownerSnapshot.json().group)).not.toContain(memberSessionId);
+    expect(memberSnapshot.json().group.trip.ownSessionId).toBe(memberSessionId);
+    expect(JSON.stringify(memberSnapshot.json().group)).not.toContain(ownerSessionId);
+    expect(JSON.stringify(ownerSnapshot.json().group.trip)).not.toMatch(/goal|topic/u);
+
+    vi.setSystemTime(commonStart + 30_000);
+    const lateSnapshot = await app.inject({ method: "GET", url: "/api/v1/adventure", headers });
+    expect(lateSnapshot.json()).toMatchObject({ serverNow: commonStart + 30_000 });
+    expect(lateSnapshot.json().group.trip).toMatchObject({ startedAt: commonStart, endsAt: commonStart + 180_000 });
+    const retry = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().tripStart).toEqual(launches[0].json().tripStart);
+    const lateUser = await db.user.create({ data: { email: `late-sync-${randomUUID()}@example.com`, name: "Late" } });
+    const lateHeaders = { authorization: `Bearer ${(await issueTokens(db, lateUser)).access_token}` };
+    expect((await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: lateHeaders, payload: { token: unusedInvite.json().token } })).statusCode).toBe(400);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("settles a reserved synchronized session after shared closure without requiring active membership", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/v1/adventure/trips/synchronized", headers, payload: { name: "Late sync", timezone: "UTC", target: 60 } });
+  expect(created.statusCode).toBe(200);
+  const tripId = created.json().group.id as string;
+  const ownerSessionId = randomUUID();
+  const memberSessionId = randomUUID();
+  const invite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: stranger, payload: { token: invite.json().token } });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId: tripId, ready: true, sessionId: ownerSessionId } });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId: tripId, ready: true, sessionId: memberSessionId } });
+
+  const startedAt = Date.now();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(startedAt);
+    const started = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } });
+    expect(started.statusCode).toBe(200);
+    const endsAt = startedAt + 60_000;
+    vi.setSystemTime(endsAt + 15_000);
+    await app.inject({ method: "GET", url: "/api/v1/adventure", headers });
+    const closed = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+    expect(closed[0].state.groups[tripId]).toMatchObject({ archived: true, trip: { mode: "synchronized", status: "closed", startedAt, endsAt, participants: { [userId]: { status: "bound", sessionId: ownerSessionId } } } });
+    expect(closed[0].state.people[userId]?.groupId).toBeNull();
+
+    const nextTrip = await app.inject({ method: "POST", url: "/api/v1/adventure/trips/synchronized", headers, payload: { name: "Next trip", timezone: "UTC", target: 120 } });
+    expect(nextTrip.statusCode).toBe(200);
+    const nextTripId = nextTrip.json().group.id as string;
+    const nextSessionId = randomUUID();
+    const nextReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId: nextTripId, ready: true, sessionId: nextSessionId } });
+    expect(nextReady.statusCode).toBe(200);
+
+    const payload = {
+      id: ownerSessionId,
+      groupId: tripId,
+      goal: "Private review",
+      topic: "biology",
+      started: startedAt,
+      ended: endsAt,
+      target: 60,
+      segments: [{ start: startedAt, end: startedAt + 30_000, kind: "focus" as const }],
+    };
+    const saved = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(saved.json().sessions[0]).toMatchObject({ id: ownerSessionId, seconds: 30 });
+    expect(saved.json().person.groupId).toBe(nextTripId);
+    const duplicate = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers, payload });
+    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.json().person).toMatchObject({ seconds: 30, groupId: nextTripId });
+    const state = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+    expect(state[0].state.groups[tripId]?.trip?.participants[userId]).toMatchObject({ status: "completed", sessionId: ownerSessionId });
+    expect(state[0].state.groups[tripId]?.trip?.participants[otherUserId]).toMatchObject({ status: "bound", sessionId: memberSessionId });
+    expect(state[0].state.groups[nextTripId]?.trip?.participants[userId]).toMatchObject({ status: "ready", sessionId: nextSessionId });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("lets a bound synchronized member leave while retaining their reserved settlement", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/v1/adventure/trips/synchronized", headers, payload: { name: "Leave and sync", timezone: "UTC", target: 60 } });
+  const tripId = created.json().group.id as string;
+  const ownerSessionId = randomUUID();
+  const memberSessionId = randomUUID();
+  const invite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: stranger, payload: { token: invite.json().token } });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId: tripId, ready: true, sessionId: ownerSessionId } });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId: tripId, ready: true, sessionId: memberSessionId } });
+  const startedAt = Date.now();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(startedAt);
+    const launched = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId: tripId, sessionId: ownerSessionId } });
+    expect(launched.statusCode).toBe(200);
+    vi.setSystemTime(startedAt + 10_000);
+    const left = await app.inject({ method: "POST", url: "/api/v1/adventure/leave", headers: stranger });
+    expect(left.statusCode, left.body).toBe(200);
+    expect(left.json().person.groupId).toBeNull();
+    const detached = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+    expect(detached[0].state.groups[tripId]?.trip?.participants[otherUserId]).toMatchObject({ status: "bound", sessionId: memberSessionId });
+
+    const saved = await app.inject({ method: "POST", url: "/api/v1/adventure/sessions", headers: stranger, payload: {
+      id: memberSessionId, groupId: tripId, goal: "Private member goal", topic: "biology",
+      started: startedAt, ended: startedAt + 10_000, target: 60,
+      segments: [{ start: startedAt, end: startedAt + 10_000, kind: "focus" }],
+    } });
+    expect(saved.statusCode, saved.body).toBe(200);
+    const settled = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+    expect(settled[0].state.groups[tripId]?.trip?.participants[otherUserId]).toMatchObject({ status: "completed", sessionId: memberSessionId });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("binds one canonical session to each member of a single shared trip", async () => {
   const plan = { name: "Morning review", timezone: "Asia/Ho_Chi_Minh", goal: "Review cell structure", topic: "biology", target: 60 };
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trips", headers, payload: { name: plan.name, timezone: plan.timezone } })).statusCode).toBe(400);
@@ -491,6 +703,36 @@ it("revokes a waiting trip's links when ownership transfers", async () => {
   const lateHeaders = { authorization: `Bearer ${(await issueTokens(db, lateUser)).access_token}` };
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: lateHeaders, payload: { token: oldInvite.json().token } })).statusCode).toBe(400);
   expect((await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: lateHeaders, payload: { token: nextInvite.json().token } })).statusCode).toBe(200);
+});
+
+it("preserves synchronized readiness and reserved IDs when trip ownership transfers", async () => {
+  const created = await app.inject({ method: "POST", url: "/api/v1/adventure/trips/synchronized", headers, payload: { name: "Transfer lobby", timezone: "UTC", target: 60 } });
+  const groupId = created.json().group.id as string;
+  const invite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: stranger, payload: { token: invite.json().token } });
+  const newOwnerSessionId = randomUUID();
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId, ready: true, sessionId: newOwnerSessionId } });
+
+  const transferred = await app.inject({ method: "POST", url: "/api/v1/adventure/transfer", headers, payload: { userId: otherUserId } });
+  expect(transferred.statusCode).toBe(200);
+  expect(transferred.json().group).toMatchObject({
+    owner: otherUserId,
+    trip: { status: "waiting", mode: "synchronized" },
+    members: [
+      { id: userId, tripStatus: "not-ready" },
+      { id: otherUserId, tripStatus: "ready" },
+    ],
+  });
+  expect(transferred.json().group.trip.ownSessionId).toBeUndefined();
+  expect(JSON.stringify(transferred.json().group)).not.toContain(newOwnerSessionId);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId, sessionId: randomUUID() } })).statusCode).toBe(403);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { groupId, sessionId: newOwnerSessionId } })).statusCode).toBe(409);
+
+  const oldOwnerSessionId = randomUUID();
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId: oldOwnerSessionId } })).statusCode).toBe(200);
+  const launched = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers: stranger, payload: { groupId, sessionId: newOwnerSessionId } });
+  expect(launched.statusCode, launched.body).toBe(200);
+  expect(launched.json().tripStart.sessionId).toBe(newOwnerSessionId);
 });
 
 it("authenticates AI file reading, validates the upload and forwards caller cancellation", async () => {

@@ -11,6 +11,7 @@ import {
   type DeviceCategory,
   type Segment,
 } from "../../backend/src/adventure/domain.ts";
+import { serverTimeFromClientTime } from "./serverClock.ts";
 
 export type ActiveTrip = {
   id: string;
@@ -24,6 +25,10 @@ export type ActiveTrip = {
   /** Fixed automatic rest schedule; absent on trips created by older versions. */
   breakPlan?: BreakPlan;
   groupId: string | null;
+  /** Present only for sessions driven by a server-synchronized trip clock. */
+  syncClock?: boolean;
+  /** Server minus device clock offset sampled from an ordinary snapshot. */
+  clockOffsetMs?: number;
   started: number;
   lastAt: number;
   segments: Segment[];
@@ -41,6 +46,22 @@ export type ActiveTrip = {
 /** Compare the current wall clock with the active trip's last accepted timestamp. */
 export function isDeviceClockBehind(lastAt: number, readClock: () => number = Date.now): boolean {
   return readClock() < lastAt;
+}
+
+export function tripClockNow(s: Pick<ActiveTrip, "syncClock" | "clockOffsetMs">, clientNow: number): number {
+  return s.syncClock ? serverTimeFromClientTime(clientNow, s.clockOffsetMs ?? 0) : clientNow;
+}
+
+/** Scheduled rests are deterministic; reconnecting mid-rest may safely reconstruct elapsed rest. */
+export function scheduledBreakSegmentsThrough(
+  started: number,
+  target: number,
+  plan: BreakPlan | undefined,
+  observedAt: number,
+): Segment[] {
+  return breakWindows(started, target, plan)
+    .map((window) => ({ start: window.start, end: Math.min(window.end, observedAt), kind: "break" as const }))
+    .filter((segment) => segment.end > segment.start);
 }
 
 export function focused(s: ActiveTrip): number {
