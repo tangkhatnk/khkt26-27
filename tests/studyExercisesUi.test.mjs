@@ -12,6 +12,8 @@ let helpers;
 let components;
 let client;
 let api;
+let StudyExerciseTextImportController;
+let emptyTextImport;
 
 before(async () => {
   vite = await createServer({
@@ -26,6 +28,8 @@ before(async () => {
   components = await vite.ssrLoadModule("/src/adventure/StudyExercisePreparation.tsx");
   client = await vite.ssrLoadModule("/src/services/studyExercisesApi.ts");
   api = await vite.ssrLoadModule("/src/services/api.ts");
+  ({ StudyExerciseTextImportController, EMPTY_STUDY_EXERCISE_TEXT_IMPORT: emptyTextImport } =
+    await vite.ssrLoadModule("/src/adventure/studyExerciseTextImport.ts"));
 });
 
 after(async () => {
@@ -59,6 +63,19 @@ const solutions = {
   ],
 };
 
+function findElement(node, predicate) {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!React.isValidElement(node)) return null;
+  if (predicate(node)) return node;
+  return findElement(node.props.children, predicate);
+}
+
 test("preparation inputs preserve exact problem text and require authentication and confirmation", () => {
   const exact = "  Tính x.\n\nGiải thích mã `x += 1`.  ";
   const input = helpers.createStudyExercisePreparationInput({
@@ -84,6 +101,210 @@ test("preparation inputs preserve exact problem text and require authentication 
     requestId: "request-a", plannedSessionId: "session-a", mode: "provided", text: exact,
     count: 3, authenticated: true, confirmed: false,
   }), null);
+});
+
+test("exercise text imports support explicit replacement and append within the 20k limit", () => {
+  assert.equal(helpers.applyStudyExerciseTextImport("Old exercise", "Extracted exercise", "replace"), "Extracted exercise");
+  assert.equal(helpers.applyStudyExerciseTextImport("Old exercise", "Extracted exercise", "append"), "Old exercise\nExtracted exercise");
+  assert.equal(helpers.applyStudyExerciseTextImport("Old exercise\n", "Extracted exercise", "append"), "Old exercise\nExtracted exercise");
+  assert.equal(helpers.applyStudyExerciseTextImport("x".repeat(19_999), "y", "append"), null);
+  assert.equal(helpers.applyStudyExerciseTextImport("Old exercise", " ", "replace"), null);
+  assert.equal(helpers.applyStudyExerciseTextImport("Old exercise", "y".repeat(20_001), "replace"), null);
+});
+
+test("cancel aborts extraction and ignores its late file result", async () => {
+  let finishExtraction;
+  let signal;
+  let extractionOptions;
+  let currentState;
+  const controller = new StudyExerciseTextImportController(state => { currentState = state; }, (_file, options) => {
+    signal = options.signal;
+    extractionOptions = options;
+    return new Promise(resolve => { finishExtraction = resolve; });
+  });
+  const pending = controller.start({ name: "exercise.pdf" }, { plannedSessionId: "session-a", mode: "provided" });
+
+  assert.equal(currentState.extracting, true);
+  assert.equal(extractionOptions.maxTextChars, 20_000);
+  controller.cancel("Đã hủy trích xuất.");
+  assert.equal(signal.aborted, true);
+  finishExtraction({ name: "exercise.pdf", text: "STALE OCR TEXT", status: "extracted", message: "Đã trích xuất." });
+  await pending;
+
+  assert.equal(currentState.text, "");
+  assert.equal(currentState.message, "Đã hủy trích xuất.");
+  controller.dispose();
+});
+
+test("unmount disposal aborts extraction without publishing late results", async () => {
+  let finishExtraction;
+  let signal;
+  const states = [];
+  const controller = new StudyExerciseTextImportController(state => { states.push(state); }, (_file, options) => {
+    signal = options.signal;
+    return new Promise(resolve => { finishExtraction = resolve; });
+  });
+  const pending = controller.start({ name: "exercise.pdf" }, { plannedSessionId: "session-a", mode: "provided" });
+  const renderedStatesBeforeUnmount = states.length;
+
+  controller.dispose();
+  assert.equal(signal.aborted, true);
+  finishExtraction({ name: "exercise.pdf", text: "AFTER UNMOUNT", status: "extracted", message: "Đã trích xuất." });
+  await pending;
+
+  assert.equal(states.length, renderedStatesBeforeUnmount);
+});
+
+test("mode and planned-session changes abort stale extraction results", async () => {
+  const requests = [];
+  let currentState;
+  const controller = new StudyExerciseTextImportController(state => { currentState = state; }, (_file, options) =>
+    new Promise(resolve => requests.push({ resolve, signal: options.signal })));
+  const modePending = controller.start({ name: "exercise-a.pdf" }, { plannedSessionId: "session-a", mode: "provided" });
+
+  controller.setContext({ plannedSessionId: "session-a", mode: "generated" });
+  assert.equal(requests[0].signal.aborted, true);
+  requests[0].resolve({ name: "exercise-a.pdf", text: "STALE MODE TEXT", status: "extracted", message: "Đã trích xuất." });
+  await modePending;
+  assert.equal(currentState.text, "");
+
+  const sessionPending = controller.start({ name: "exercise-b.png" }, { plannedSessionId: "session-a", mode: "provided" });
+  controller.setContext({ plannedSessionId: "session-b", mode: "provided" });
+  assert.equal(requests[1].signal.aborted, true);
+  requests[1].resolve({ name: "exercise-b.png", text: "STALE SESSION TEXT", status: "extracted", message: "Đã trích xuất." });
+  await sessionPending;
+  assert.equal(currentState.text, "");
+  controller.dispose();
+});
+
+test("a newly rendered session context rejects late extraction before effects abort it", async () => {
+  let context = { plannedSessionId: "session-a", mode: "provided" };
+  let finishExtraction;
+  let currentState;
+  let signal;
+  const controller = new StudyExerciseTextImportController(
+    state => { currentState = state; },
+    (_file, options) => {
+      signal = options.signal;
+      return new Promise(resolve => { finishExtraction = resolve; });
+    },
+    () => context,
+  );
+  const pending = controller.start({ name: "exercise.pdf" }, context);
+
+  context = { plannedSessionId: "session-b", mode: "provided" };
+  finishExtraction({ name: "exercise.pdf", text: "STALE SESSION TEXT", status: "extracted", message: "Đã trích xuất." });
+  await pending;
+  assert.equal(currentState.text, "");
+  assert.equal(currentState.extracting, true);
+
+  controller.setContext(context);
+  assert.equal(signal.aborted, true);
+  assert.equal(currentState.extracting, false);
+  controller.dispose();
+});
+
+test("reviewed extraction edits are what explicit append or replace actions apply", async () => {
+  const controller = new StudyExerciseTextImportController(() => {}, async file => ({
+    name: file.name, text: "OCR output to review", status: "extracted", message: "Đã trích xuất nội dung từ tệp.",
+  }));
+
+  await controller.start({ name: "exercise.png" }, { plannedSessionId: "session-a", mode: "provided" });
+  controller.editText("");
+  controller.editText("Learner-reviewed prompt");
+
+  assert.equal(controller.apply("Existing prompt", "replace"), "Learner-reviewed prompt");
+  assert.equal(controller.apply("Existing prompt", "append"), "Existing prompt\nLearner-reviewed prompt");
+  controller.dispose();
+});
+
+test("file import controls send file, cancel, edit and apply interactions to the production controller", async () => {
+  let state = { ...emptyTextImport };
+  let resolveExtraction;
+  let pendingRequest;
+  let extractionSignal;
+  const applied = [];
+  const controller = new StudyExerciseTextImportController(next => { state = next; }, (file, options) => {
+    extractionSignal = options.signal;
+    return new Promise(resolve => {
+      resolveExtraction = () => resolve({
+        name: file.name,
+        text: "OCR draft",
+        status: "extracted",
+        message: "Đã trích xuất nội dung từ tệp.",
+      });
+    });
+  });
+  const renderPanel = () => components.StudyExerciseTextImportPanel({
+    state,
+    disabled: false,
+    onFileSelected: file => { pendingRequest = controller.start(file, { plannedSessionId: "session-a", mode: "provided" }); },
+    onCancel: () => controller.cancel("Đã hủy trích xuất."),
+    onEdit: text => controller.editText(text),
+    onApply: action => applied.push(controller.apply("Existing prompt", action)),
+  });
+
+  const fileInput = findElement(renderPanel(), element => element.props.id === "study-exercise-file");
+  const file = { name: "exercise.png" };
+  const event = { currentTarget: { files: [file], value: "exercise.png" } };
+  fileInput.props.onChange(event);
+  assert.equal(event.currentTarget.value, "");
+  assert.equal(state.extracting, true);
+  resolveExtraction();
+  await pendingRequest;
+  assert.equal(state.text, "OCR draft");
+
+  const edit = findElement(renderPanel(), element => element.props.id === "study-exercise-extracted-text");
+  edit.props.onChange({ target: { value: "Learner-reviewed prompt" } });
+  const replace = findElement(renderPanel(), element => element.type === "button" &&
+    element.props.children === "Thay đề bằng nội dung đã trích xuất");
+  const append = findElement(renderPanel(), element => element.type === "button" &&
+    element.props.children === "Nối vào cuối đề");
+  replace.props.onClick();
+  append.props.onClick();
+  assert.deepEqual(applied, ["Learner-reviewed prompt", "Existing prompt\nLearner-reviewed prompt"]);
+
+  let cancelState = { ...emptyTextImport };
+  const cancelController = new StudyExerciseTextImportController(next => { cancelState = next; }, (_file, options) => {
+    extractionSignal = options.signal;
+    return new Promise(() => {});
+  });
+  const originalStart = cancelController.start.bind(cancelController);
+  const cancelPanel = () => components.StudyExerciseTextImportPanel({
+    state: cancelState,
+    disabled: false,
+    onFileSelected: file => {
+      void originalStart(file, { plannedSessionId: "session-a", mode: "provided" });
+    },
+    onCancel: () => cancelController.cancel("Đã hủy trích xuất."),
+    onEdit() {},
+    onApply() {},
+  });
+  const cancelInput = findElement(cancelPanel(), element => element.props.id === "study-exercise-file");
+  cancelInput.props.onChange({ currentTarget: { files: [{ name: "slow.pdf" }], value: "slow.pdf" } });
+  assert.equal(cancelState.extracting, true);
+  findElement(cancelPanel(), element => element.type === "button" && element.props.children === "Hủy đọc tệp").props.onClick();
+  assert.equal(extractionSignal.aborted, true);
+  controller.dispose();
+  cancelController.dispose();
+});
+
+test("exercise preparation offers local file and image reading without replacing the prompt silently", () => {
+  const markup = renderToStaticMarkup(React.createElement(components.StudyExercisePreparation, {
+    plannedSessionId: "session-a",
+    authenticated: true,
+    sources: [source()],
+    preparation: null,
+    onPrepare: async () => preparation,
+    onPreparationChange() {},
+    onInvalidate: async () => undefined,
+  }));
+  assert.match(markup, /type="file"/u);
+  assert.match(markup, /\.pdf.*\.png.*\.jpg/iu);
+  assert.match(markup, /đọc ngay trên thiết bị|đọc cục bộ/iu);
+  assert.match(markup, /thay thế hoặc nối vào đề/u);
+  assert.match(markup, /id="study-exercise-provided-text"/u);
+  assert.doesNotMatch(markup, /Nội dung nguồn đã được xem lại\.\\nGiữ nguyên dấu và xuống dòng\.<\/textarea>/u);
 });
 
 test("generated preparation requires the exact reviewed source and a bounded open-ended count", () => {

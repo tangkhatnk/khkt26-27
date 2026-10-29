@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { MaterialSource } from "./materialSources.ts";
 import { StudyGuideArticle, StudyGuideInlineText } from "./StudyGuideRenderer.ts";
 import {
+  EMPTY_STUDY_EXERCISE_TEXT_IMPORT,
+  StudyExerciseTextImportController,
+} from "./studyExerciseTextImport.ts";
+import type { StudyExerciseTextImportState } from "./studyExerciseTextImport.ts";
+import {
+  applyStudyExerciseTextImport,
   canSubmitStudyExercisePreparation,
   canRevealStudyExerciseSolutions,
   createStudyExercisePreparationInput,
@@ -10,6 +16,7 @@ import {
   isCurrentStudyExerciseSourceFingerprint,
   isCurrentStudyExerciseSourceScope,
   isReviewedStudyExerciseSource,
+  STUDY_EXERCISE_TEXT_LIMIT,
 } from "./studyExercises.ts";
 import type {
   StudyExerciseConfirmationScope,
@@ -62,7 +69,7 @@ export function StudyExerciseProblemEditor({
 }) {
   return <>
     <label htmlFor="study-exercise-provided-text">Đề bài hoặc phần cần giải
-      <textarea id="study-exercise-provided-text" rows={8}
+      <textarea id="study-exercise-provided-text" rows={6}
         value={value} disabled={disabled}
         onChange={event => onChange(event.target.value)}
         aria-describedby="study-exercise-provided-help" />
@@ -72,6 +79,59 @@ export function StudyExerciseProblemEditor({
       <summary>Xem đúng nội dung sẽ gửi</summary><pre>{value}</pre>
     </details>}
   </>;
+}
+
+export function StudyExerciseTextImportPanel({
+  state,
+  disabled,
+  onFileSelected,
+  onCancel,
+  onEdit,
+  onApply,
+}: {
+  state: StudyExerciseTextImportState;
+  disabled: boolean;
+  onFileSelected: (file: File) => void;
+  onCancel: () => void;
+  onEdit: (text: string) => void;
+  onApply: (action: "replace" | "append") => void;
+}) {
+  return <div className="study-exercises__file-import">
+    <div>
+      <h4>Nhập đề từ tệp hoặc ảnh</h4>
+      <p>Tệp được đọc ngay trên thiết bị. Sau khi đọc, bạn xem lại rồi chọn thay thế hoặc nối vào đề. Chỉ nội dung bạn xác nhận mới được gửi cho AI.</p>
+    </div>
+    <label htmlFor="study-exercise-file">Tệp đề bài hoặc ảnh
+      <input id="study-exercise-file" type="file"
+        accept=".txt,.text,.md,.markdown,.json,.csv,.tsv,.xml,.tex,.yaml,.yml,.toml,.ini,.log,.sql,.js,.jsx,.ts,.tsx,.css,.py,.java,.c,.h,.cpp,.sh,.properties,.conf,.rst,.svg,.docx,.pptx,.xlsx,.pdf,.rtf,.odt,.ods,.odp,.epub,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp,application/pdf,image/png,image/jpeg,image/webp,image/bmp"
+        disabled={disabled}
+        onChange={event => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) onFileSelected(file);
+        }} />
+    </label>
+    {state.extracting && <div className="study-exercises__extracting">
+      <p role="status">Đang đọc {state.fileName} trên thiết bị{state.progress > 0 ? ` · ${state.progress}%` : "…"}</p>
+      <button type="button" onClick={onCancel}>Hủy đọc tệp</button>
+    </div>}
+    {state.message && !state.error && !state.extracting && <p className="material-hint" role="status">{state.fileName}: {state.message}</p>}
+    {state.error && <p className="study-exercises__error" role="alert">{state.error}</p>}
+    {state.text && <>
+      <label htmlFor="study-exercise-extracted-text">Kiểm tra và sửa nội dung đã trích xuất
+        <textarea id="study-exercise-extracted-text" rows={5} maxLength={STUDY_EXERCISE_TEXT_LIMIT}
+          value={state.text} disabled={disabled || state.extracting}
+          onChange={event => onEdit(event.target.value)} />
+      </label>
+      <p className="study-exercises__length">{state.text.length.toLocaleString("vi-VN")} / 20.000 ký tự</p>
+      <div className="study-exercises__import-actions">
+        <button type="button" disabled={disabled || state.extracting || !state.text.trim()}
+          onClick={() => onApply("replace")}>Thay đề bằng nội dung đã trích xuất</button>
+        <button type="button" disabled={disabled || state.extracting || !state.text.trim()}
+          onClick={() => onApply("append")}>Nối vào cuối đề</button>
+      </div>
+    </>}
+  </div>;
 }
 
 export function StudyExercisePreparation({
@@ -86,6 +146,7 @@ export function StudyExercisePreparation({
 }: StudyExercisePreparationProps) {
   const [mode, setMode] = useState<"provided" | "generated">("provided");
   const [providedText, setProvidedText] = useState("");
+  const [textImport, setTextImport] = useState(EMPTY_STUDY_EXERCISE_TEXT_IMPORT);
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const [count, setCount] = useState(3);
   const [confirmationScope, setConfirmationScope] = useState<StudyExerciseConfirmationScope | null>(null);
@@ -97,12 +158,21 @@ export function StudyExercisePreparation({
   const [invalidating, setInvalidating] = useState(false);
   const [skipped, setSkipped] = useState(false);
   const [error, setError] = useState("");
+  const textImportContextRef = useRef({ plannedSessionId, mode });
+  textImportContextRef.current = { plannedSessionId, mode };
   const controllerRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const requestIdRef = useRef<string | null>(null);
   const pendingRef = useRef(false);
   const requestSourceScopeRef = useRef<StudyExerciseSourceScope | null>(null);
   const invalidatedPreparationRef = useRef<string | null>(null);
+  const textImportControllerRef = useRef<StudyExerciseTextImportController | null>(null);
+  if (!textImportControllerRef.current)
+    textImportControllerRef.current = new StudyExerciseTextImportController(
+      setTextImport,
+      undefined,
+      () => textImportContextRef.current,
+    );
 
   useEffect(() => {
     setEditing(preparation?.id == null);
@@ -111,11 +181,16 @@ export function StudyExercisePreparation({
     setError("");
   }, [plannedSessionId, preparation?.id]);
 
+  useEffect(() => {
+    textImportControllerRef.current?.setContext({ plannedSessionId, mode });
+  }, [plannedSessionId, mode]);
+
   useEffect(() => () => {
     // Ticket-to-focus unmounts this editor while generation may still finish.
     // The parent validates request scope and retries the start bind on result;
     // explicit cancel remains the only UI action that aborts and tombstones it.
     generationRef.current += 1;
+    textImportControllerRef.current?.dispose();
   }, []);
 
   const selectedSource = sources.find(source => source.id === selectedSourceId);
@@ -292,12 +367,50 @@ export function StudyExercisePreparation({
     setConfirmationScope(null);
   };
 
+  const cancelTextImport = () => textImportControllerRef.current?.cancel("Đã hủy trích xuất.");
+
+  const extractExerciseText = (file: File) => {
+    void textImportControllerRef.current?.start(file, { plannedSessionId, mode: "provided" });
+  };
+
+  const changeMode = (nextMode: "provided" | "generated") => {
+    if (nextMode === mode) return;
+    textImportControllerRef.current?.setContext({ plannedSessionId, mode: nextMode });
+    setMode(nextMode);
+    setConfirmationScope(null);
+    setError("");
+  };
+
+  const applyProvidedTextImport = (imported: string, action: "replace" | "append") => {
+    const nextText = applyStudyExerciseTextImport(providedText, imported, action);
+    setConfirmationScope(null);
+    if (nextText === null) {
+      setError(action === "append"
+        ? "Nội dung sau khi nối sẽ vượt giới hạn 20.000 ký tự."
+        : "Nội dung này vượt giới hạn 20.000 ký tự hoặc chưa có chữ để dùng.");
+      return;
+    }
+    setProvidedText(nextText);
+    setError("");
+  };
+
+  const applyExtractedText = (action: "replace" | "append") => {
+    const nextText = textImportControllerRef.current?.apply(providedText, action) ?? null;
+    setConfirmationScope(null);
+    if (nextText === null) {
+      setError(action === "append"
+        ? "Nội dung sau khi nối sẽ vượt giới hạn 20.000 ký tự."
+        : "Nội dung này vượt giới hạn 20.000 ký tự hoặc chưa có chữ để dùng.");
+      return;
+    }
+    setProvidedText(nextText);
+    setError("");
+  };
+
   const changeSource = (sourceId: string) => {
     setSelectedSourceId(sourceId);
     setConfirmationScope(null);
     setError("");
-    const source = sources.find(item => item.id === sourceId);
-    if (mode === "provided" && source?.reviewed) setProvidedText(source.text);
   };
 
   const prepare = async () => {
@@ -411,10 +524,10 @@ export function StudyExercisePreparation({
     <fieldset className="study-exercises__modes" disabled={disabled || pending || invalidating}>
       <legend>Chọn cách chuẩn bị</legend>
       <label><input type="radio" name="study-exercise-mode" value="provided" checked={mode === "provided"}
-        onChange={() => { setMode("provided"); setConfirmationScope(null); setError(""); }} />
+        onChange={() => changeMode("provided")} />
         Tôi sẽ nhập đề</label>
       <label><input type="radio" name="study-exercise-mode" value="generated" checked={mode === "generated"}
-        onChange={() => { setMode("generated"); setConfirmationScope(null); setError(""); }} />
+        onChange={() => changeMode("generated")} />
         Tạo đề từ tài liệu đã xem lại</label>
     </fieldset>
 
@@ -424,10 +537,32 @@ export function StudyExercisePreparation({
         <select value={selectedSourceId} disabled={disabled || pending || invalidating} onChange={event => changeSource(event.target.value)}>
           <option value="">Không chọn tài liệu</option>
           {sources.map(source => <option key={source.id} value={source.id} disabled={!source.reviewed}>
-            {source.name}{source.reviewed ? " · đã xác nhận" : " · cần kiểm tra"}
+            {source.name}{!source.reviewed ? " · cần kiểm tra" : source.text.length > STUDY_EXERCISE_TEXT_LIMIT ? " · vượt giới hạn" : " · đã xác nhận"}
           </option>)}
         </select>
       </label>}
+      {selectedSource && <div className="study-exercises__source-import">
+        <label htmlFor="study-exercise-source-preview">{selectedSource.reviewed ? "Xem lại nội dung nguồn đã xác nhận" : "Nội dung nguồn cần kiểm tra"}
+          <textarea id="study-exercise-source-preview" rows={5} value={selectedSource.text} readOnly aria-readonly="true" />
+        </label>
+        {!selectedSource.reviewed && <p className="material-hint" role="status">Hãy xem lại và xác nhận nguồn trong phần Tài liệu trước khi chép vào đề.</p>}
+        {selectedSource.text.length > STUDY_EXERCISE_TEXT_LIMIT &&
+          <p className="study-exercises__error" role="alert">Nguồn vượt 20.000 ký tự. Hãy chọn một phần ngắn hơn trong tài liệu.</p>}
+        <div className="study-exercises__import-actions">
+          <button type="button" disabled={disabled || pending || invalidating || !isReviewedStudyExerciseSource(selectedSource)}
+            onClick={() => applyProvidedTextImport(selectedSource.text, "replace")}>Thay đề bằng nội dung này</button>
+          <button type="button" disabled={disabled || pending || invalidating || !isReviewedStudyExerciseSource(selectedSource)}
+            onClick={() => applyProvidedTextImport(selectedSource.text, "append")}>Nối vào cuối đề</button>
+        </div>
+      </div>}
+      <StudyExerciseTextImportPanel
+        state={textImport}
+        disabled={disabled || pending || invalidating}
+        onFileSelected={extractExerciseText}
+        onCancel={cancelTextImport}
+        onEdit={text => textImportControllerRef.current?.editText(text)}
+        onApply={applyExtractedText}
+      />
       <StudyExerciseProblemEditor
         value={providedText}
         disabled={disabled || pending || invalidating}
@@ -447,7 +582,7 @@ export function StudyExercisePreparation({
       {sourceNeedsReview && <p className="material-hint" role="status">Hãy kiểm tra và xác nhận nội dung trong phần Tài liệu trước khi dùng nguồn này.</p>}
       {sourceTooLong && <p className="study-exercises__error" role="alert">Nguồn vượt 20.000 ký tự. Hãy chọn phần cần học.</p>}
       {selectedSource && selectedSource.reviewed && <label htmlFor="study-exercise-source-preview">Xem lại đúng nội dung sẽ gửi
-        <textarea id="study-exercise-source-preview" rows={8} value={selectedSource.text} readOnly aria-readonly="true" />
+        <textarea id="study-exercise-source-preview" rows={5} value={selectedSource.text} readOnly aria-readonly="true" />
       </label>}
       <label className="study-exercises__count" htmlFor="study-exercise-count">Số bài tập dạng mở
         <select id="study-exercise-count" value={count} disabled={disabled || pending || invalidating}

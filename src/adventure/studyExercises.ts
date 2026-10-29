@@ -28,6 +28,14 @@ export type StudyExerciseSourceScope = {
   textFingerprint: string;
 };
 
+export type StudyExerciseTextImportScope = {
+  generation: number;
+  plannedSessionId: string;
+  mode: StudyExerciseMode;
+};
+
+export type StudyExerciseTextImportAction = "replace" | "append";
+
 export type StudyExerciseConfirmationScope =
   | { mode: "provided"; exactText: string }
   | ({ mode: "generated" } & StudyExerciseSourceScope);
@@ -92,6 +100,27 @@ export function isCurrentStudyExerciseScope(
     expected.sourceId === current.sourceId &&
     expected.sourceFingerprint === current.sourceFingerprint &&
     expected.requestGeneration === current.requestGeneration;
+}
+
+export function isCurrentStudyExerciseTextImport(
+  expected: StudyExerciseTextImportScope,
+  current: StudyExerciseTextImportScope,
+): boolean {
+  return expected.generation === current.generation &&
+    expected.plannedSessionId === current.plannedSessionId &&
+    expected.mode === current.mode;
+}
+
+export function applyStudyExerciseTextImport(
+  currentText: string,
+  importedText: string,
+  action: StudyExerciseTextImportAction,
+): string | null {
+  if (!importedText.trim() || importedText.length > STUDY_EXERCISE_TEXT_LIMIT) return null;
+  const nextText = action === "replace"
+    ? importedText
+    : `${currentText}${currentText && !currentText.endsWith("\n") ? "\n" : ""}${importedText}`;
+  return nextText.length <= STUDY_EXERCISE_TEXT_LIMIT ? nextText : null;
 }
 
 export function isReviewedStudyExerciseSource(source: MaterialSource | undefined): source is MaterialSource {

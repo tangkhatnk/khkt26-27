@@ -71,6 +71,62 @@
   font: inherit;
 }
 
+.study-exercises input[type="file"] {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line, #c8d2c6);
+  border-radius: 9px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.study-exercises__file-import,
+.study-exercises__source-import {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line, #d7e0d5);
+  border-radius: 11px;
+  background: var(--surface-raised, #f5f7f2);
+}
+
+.study-exercises__file-import h4 {
+  margin: 0 0 4px;
+  font-size: .98rem;
+}
+
+.study-exercises__file-import p {
+  margin: 0;
+  color: var(--text-muted, #647466);
+  line-height: 1.5;
+}
+
+.study-exercises__file-import .study-exercises__error {
+  color: var(--danger, #a33b2f);
+}
+
+.study-exercises__extracting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.study-exercises__import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.study-exercises__import-actions button,
+.study-exercises__extracting button {
+  min-height: 38px;
+}
+
 .study-exercises textarea {
   min-height: 110px;
   resize: vertical;
@@ -80,6 +136,7 @@
 
 .study-exercises select:focus-visible,
 .study-exercises textarea:focus-visible,
+.study-exercises input[type="file"]:focus-visible,
 .study-exercises button:focus-visible,
 .study-exercises__preview summary:focus-visible {
   outline: 3px solid var(--focus-ring, #7398bd);
@@ -139,7 +196,8 @@
 
 .study-exercises button:disabled,
 .study-exercises select:disabled,
-.study-exercises textarea:disabled {
+.study-exercises textarea:disabled,
+.study-exercises input[type="file"]:disabled {
   cursor: not-allowed;
   opacity: .62;
 }
@@ -210,8 +268,11 @@ html[data-theme="dark"] .study-exercises {
 
 html[data-theme="dark"] .study-exercises select,
 html[data-theme="dark"] .study-exercises textarea,
+html[data-theme="dark"] .study-exercises input[type="file"],
 html[data-theme="dark"] .study-exercises__actions button,
-html[data-theme="dark"] .study-exercises > button {
+html[data-theme="dark"] .study-exercises > button,
+html[data-theme="dark"] .study-exercises__import-actions button,
+html[data-theme="dark"] .study-exercises__extracting button {
   border-color: var(--line);
   background: var(--surface-raised);
   color: var(--text);
@@ -247,6 +308,10 @@ html[data-theme="dark"] .study-exercises__error {
   }
 
   .study-exercises__actions button {
+    flex: 1 1 100%;
+  }
+
+  .study-exercises__import-actions button {
     flex: 1 1 100%;
   }
 
