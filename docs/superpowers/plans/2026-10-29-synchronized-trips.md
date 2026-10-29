@@ -11,7 +11,7 @@ Scope: issue [#71](https://github.com/tangkhatnk/khkt26-27/issues/71), building 
 ## 2. API, persistence, and privacy
 
 - Add route/service regressions for authentication, owner controls, ready transitions, single common departure time, post-start rejection, closure, and legacy-group explicit leave.
-- Expose only shared trip metadata in roster snapshots. Keep goals, source text, answers, and solutions owner-private.
+- Expose only shared trip metadata in roster snapshots; omit per-member goals, topics, and materials. Keep answers/solutions owner-scoped and preserve the existing session-history projection, publication controls, and warnings without changing public-history goal summaries.
 - Preserve each member's existing focus/distraction/break/device-clock rules and session binding. Ensure late uploads settle only against the bound member session and remain idempotent.
 
 ## 3. Lobby and active trip UI
