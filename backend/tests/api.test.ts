@@ -102,6 +102,7 @@ beforeAll(async () => {
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261025120000_admin_session_corrections/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261026100000_public_material_summary_shares/migration.sql", import.meta.url), "utf8"));
   await pg.exec(readFileSync(new URL("../prisma/migrations/20261028120000_study_exercise_sets/migration.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../prisma/migrations/20261030120000_typed_study_exercise_counts/migration.sql", import.meta.url), "utf8"));
   await server.start();
   db = new PrismaClient({
     datasources: {

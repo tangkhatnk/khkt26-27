@@ -166,6 +166,7 @@
 
 .study-exercises select:focus-visible,
 .study-exercises textarea:focus-visible,
+.study-exercises input[type="number"]:focus-visible,
 .study-exercises input[type="file"]:focus-visible,
 .study-exercises button:focus-visible,
 .study-exercises__preview summary:focus-visible {
@@ -173,13 +174,61 @@
   outline-offset: 2px;
 }
 
-.study-exercises__source-select select,
-.study-exercises__count select {
+.study-exercises__source-select select {
   max-width: 100%;
 }
 
-.study-exercises__count select {
-  width: 92px;
+.study-exercises__count-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.study-exercises__count-fields legend {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.study-exercises__count-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.study-exercises__count-grid input[type="number"] {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line, #c8d2c6);
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-exercises__count-grid input:disabled {
+  cursor: not-allowed;
+  opacity: .7;
+}
+
+.study-exercises__count-fields > .material-hint {
+  margin: 6px 0 0;
+}
+
+.study-exercises__count-total {
+  margin: 3px 0 0;
+  color: var(--text-muted, #647466);
+  font-size: .9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.study-exercises__question-type {
+  margin: 0 0 4px;
+  color: var(--text-muted, #647466);
+  font-size: .85rem;
+  font-weight: 700;
 }
 
 .study-exercises__length {
@@ -298,6 +347,7 @@ html[data-theme="dark"] .study-exercises {
 
 html[data-theme="dark"] .study-exercises select,
 html[data-theme="dark"] .study-exercises textarea,
+html[data-theme="dark"] .study-exercises__count-grid input[type="number"],
 html[data-theme="dark"] .study-exercises input[type="file"],
 html[data-theme="dark"] .study-exercises__actions button,
 html[data-theme="dark"] .study-exercises > button,
@@ -330,6 +380,10 @@ html[data-theme="dark"] .study-exercises__error {
 
   .study-exercises__modes {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .study-exercises__count-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .study-exercises__actions {

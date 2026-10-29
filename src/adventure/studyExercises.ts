@@ -1,6 +1,7 @@
 import type { MaterialSource } from "./materialSources.ts";
 import type {
   StudyExerciseMode,
+  StudyExerciseCounts,
   StudyExercisePreparationInput,
 } from "../services/studyExercisesApi.ts";
 
@@ -128,12 +129,24 @@ export function isReviewedStudyExerciseSource(source: MaterialSource | undefined
     source.text.length <= STUDY_EXERCISE_TEXT_LIMIT;
 }
 
+export function isValidStudyExerciseCounts(value: unknown): value is StudyExerciseCounts {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const counts = value as Record<string, unknown>;
+  const keys = ["multipleChoice", "trueFalse", "shortAnswer", "essay"];
+  if (Object.keys(counts).length !== keys.length || Object.keys(counts).some(key => !keys.includes(key)) ||
+      keys.some(key => !Number.isInteger(counts[key]) || (counts[key] as number) < 0 || (counts[key] as number) > 5))
+    return false;
+  const total = keys.reduce((sum, key) => sum + (counts[key] as number), 0);
+  return total >= 1 && total <= 20;
+}
+
 export function createStudyExercisePreparationInput(input: {
   requestId: string;
   plannedSessionId: string;
   mode: StudyExerciseMode;
   text: string;
-  count: number;
+  count?: number;
+  counts?: StudyExerciseCounts;
   authenticated: boolean;
   confirmed: boolean;
   selectedSource?: MaterialSource;
@@ -142,12 +155,17 @@ export function createStudyExercisePreparationInput(input: {
   if (!input.authenticated || !input.confirmed || !requestId || !plannedSessionId ||
       text.trim().length === 0 || text.length > STUDY_EXERCISE_TEXT_LIMIT)
     return null;
-  if (mode === "generated" && (!isReviewedStudyExerciseSource(input.selectedSource) ||
-      input.selectedSource.text !== text || !Number.isInteger(input.count) || input.count < 1 || input.count > 5))
-    return null;
+  if (mode === "generated") {
+    if (!isReviewedStudyExerciseSource(input.selectedSource) || input.selectedSource.text !== text) return null;
+    if (input.counts !== undefined && !isValidStudyExerciseCounts(input.counts)) return null;
+    if (input.counts === undefined &&
+        (!Number.isInteger(input.count) || input.count! < 1 || input.count! > 5)) return null;
+  }
   return mode === "provided"
     ? { requestId, plannedSessionId, mode, text }
-    : { requestId, plannedSessionId, mode, text, count: input.count };
+    : input.counts !== undefined
+      ? { requestId, plannedSessionId, mode, text, counts: input.counts }
+      : { requestId, plannedSessionId, mode, text, count: input.count! };
 }
 
 export function canRevealStudyExerciseSolutions(

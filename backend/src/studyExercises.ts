@@ -14,9 +14,12 @@ import {
   studyExercisePreparationRequestSchema,
   studyExercisePreparationResponseSchema,
   studyExerciseQuestionSchema,
+  studyExerciseCountsSchema,
   studyExerciseSolutionResponseSchema,
+  type StudyExerciseCounts,
   type StudyExerciseQuestion,
   type StudyExerciseProviderQuestion,
+  type StudyExercisePreparationInput,
   type StudyExercisePreparationResponse,
   type StudyExerciseSolutionResponse,
 } from "./studyExerciseSchemas.js";
@@ -130,17 +133,23 @@ function solutionDto(value: unknown): StudyExerciseSolutionResponse {
 function generatedQuestions(
   providerQuestions: StudyExerciseProviderQuestion[],
   sourceText: string,
-  count: number,
+  expectedComposition: number | StudyExerciseCounts,
 ) {
-  const grounded = parseGroundedStudyExercises(
-    { exercises: providerQuestions },
-    sourceText,
-    count,
-  );
+  let grounded: StudyExerciseProviderQuestion[];
+  try {
+    grounded = parseGroundedStudyExercises(
+      { exercises: providerQuestions },
+      sourceText,
+      expectedComposition,
+    );
+  } catch {
+    throw new ApiError(502, "invalid-ai-output", "Gemini trả bài tập chưa bám sát nội dung đã xác nhận.");
+  }
   const questions = grounded.map((exercise) => studyExerciseQuestionSchema.parse({
     id: randomUUID(),
     prompt: exercise.prompt,
     ...(exercise.choices === undefined ? {} : { choices: exercise.choices }),
+    ...(exercise.type === undefined ? {} : { type: exercise.type }),
   }));
   return {
     questions,
@@ -149,6 +158,17 @@ function generatedQuestions(
       excerpt: exercise.evidenceExcerpt,
     })),
   };
+}
+
+function sameComposition(row: ExerciseSetRow, input: StudyExercisePreparationInput) {
+  if (input.mode !== "generated")
+    return row.requested_count === null && row.requested_counts == null;
+  if ("count" in input)
+    return row.requested_count === input.count && row.requested_counts == null;
+  if (row.requested_count !== null || row.requested_counts == null) return false;
+  const stored = studyExerciseCountsSchema.safeParse(row.requested_counts);
+  return stored.success && Object.keys(input.counts).every((key) =>
+    stored.data[key as keyof StudyExerciseCounts] === input.counts[key as keyof StudyExerciseCounts]);
 }
 
 function signalForRequest(request: FastifyRequest) {
@@ -262,9 +282,8 @@ export function studyExerciseRoutes(
       if (priorRequest) {
         if (priorRequest.user_id !== request.userId || priorRequest.planned_session_id !== input.plannedSessionId)
           conflict("Yêu cầu tạo bộ bài tập không hợp lệ.");
-        const expectedCount = input.mode === "generated" ? input.count : null;
         if (priorRequest.mode !== input.mode || priorRequest.source_fingerprint !== sourceFingerprint ||
-            priorRequest.requested_count !== expectedCount)
+            !sameComposition(priorRequest, input))
           conflict("Mã yêu cầu đã được dùng cho nội dung khác.");
         if (priorRequest.bound_at === null && priorRequest.expires_at !== null &&
             priorRequest.expires_at.getTime() <= now.getTime()) {
@@ -301,7 +320,8 @@ export function studyExerciseRoutes(
           user_id: request.userId,
           planned_session_id: input.plannedSessionId,
           mode: input.mode,
-          requested_count: input.mode === "generated" ? input.count : null,
+          requested_count: input.mode === "generated" && "count" in input ? input.count : null,
+          ...(input.mode === "generated" && "counts" in input ? { requested_counts: input.counts } : {}),
           status: input.mode === "provided" ? "ready" : "preparing",
           source_text: input.text,
           source_fingerprint: sourceFingerprint,
@@ -327,10 +347,11 @@ export function studyExerciseRoutes(
     try {
       const providerQuestions = await providers.generateQuestions(
         input.text,
-        input.count,
+        "counts" in input ? input.counts : input.count,
         requestSignal.signal,
       );
-      const prepared = generatedQuestions(providerQuestions, input.text, input.count);
+      const expectedComposition = "counts" in input ? input.counts : input.count;
+      const prepared = generatedQuestions(providerQuestions, input.text, expectedComposition);
       const finalized = await db.$transaction(async (tx) => {
         const world = await lockWorldAndRequireActiveAccount(tx, request.userId);
         const current = await lockExerciseSet(tx, setId, request.userId);

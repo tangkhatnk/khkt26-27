@@ -24,9 +24,11 @@ import type {
   StudyExerciseSourceScope,
 } from "./studyExercises.ts";
 import type {
+  StudyExerciseCounts,
   StudyExercisePreparationInput,
   StudyExercisePreparationResponse,
   StudyExerciseSolutionResponse,
+  StudyExerciseType,
 } from "../services/studyExercisesApi.ts";
 import "./studyExercises.css";
 
@@ -55,7 +57,51 @@ type PreparedStudyExerciseSourceScope = StudyExerciseSourceScope & { preparation
 export function studyExerciseConfirmationCopy(mode: "provided" | "generated") {
   return mode === "provided"
     ? "Tôi xác nhận gửi nguyên văn đề bài này cho AI để nhận lời giải sau khi phiên học hoàn tất."
-    : "Tôi xác nhận gửi nguồn đã xem lại cho AI để tạo câu hỏi mở; lời giải chỉ có sau khi phiên học hoàn tất.";
+    : "Tôi xác nhận gửi nguồn đã xem lại cho AI để tạo bài tập theo dạng đã chọn; lời giải chỉ có sau khi phiên học hoàn tất.";
+}
+
+const STUDY_EXERCISE_COUNT_FIELDS: Array<{
+  key: keyof StudyExerciseCounts;
+  id: string;
+  label: string;
+  type: StudyExerciseType;
+}> = [
+  { key: "multipleChoice", id: "multiple-choice", label: "Trắc nghiệm", type: "multiple-choice" },
+  { key: "trueFalse", id: "true-false", label: "Đúng hoặc sai", type: "true-false" },
+  { key: "shortAnswer", id: "short-answer", label: "Trả lời ngắn", type: "short-answer" },
+  { key: "essay", id: "essay", label: "Tự luận", type: "essay" },
+];
+
+const STUDY_EXERCISE_TYPE_LABELS: Record<StudyExerciseType, string> = {
+  "multiple-choice": "Trắc nghiệm",
+  "true-false": "Đúng hoặc sai",
+  "short-answer": "Trả lời ngắn",
+  essay: "Tự luận",
+};
+
+export function StudyExerciseCountFields({
+  counts,
+  disabled,
+  onChange,
+}: {
+  counts: StudyExerciseCounts;
+  disabled: boolean;
+  onChange: (counts: StudyExerciseCounts) => void;
+}) {
+  const total = counts.multipleChoice + counts.trueFalse + counts.shortAnswer + counts.essay;
+  return <fieldset className="study-exercises__count-fields" aria-describedby="study-exercise-count-help">
+    <legend>Số bài tập theo dạng</legend>
+    <div className="study-exercises__count-grid">
+      {STUDY_EXERCISE_COUNT_FIELDS.map(({ key, id, label }) => <label key={key} htmlFor={`study-exercise-count-${id}`}>
+        {label}
+        <input id={`study-exercise-count-${id}`} type="number" min={0} max={5} step={1}
+          value={counts[key]} disabled={disabled}
+          onChange={event => onChange({ ...counts, [key]: Number(event.currentTarget.value) })} />
+      </label>)}
+    </div>
+    <p id="study-exercise-count-help" className="material-hint">Mỗi dạng từ 0 đến 5 bài; tổng từ 1 đến 20.</p>
+    <p className="study-exercises__count-total" aria-live="polite">Tổng: {total} / 20 bài</p>
+  </fieldset>;
 }
 
 export function StudyExerciseProblemEditor({
@@ -148,7 +194,9 @@ export function StudyExercisePreparation({
   const [providedText, setProvidedText] = useState("");
   const [textImport, setTextImport] = useState(EMPTY_STUDY_EXERCISE_TEXT_IMPORT);
   const [selectedSourceId, setSelectedSourceId] = useState("");
-  const [count, setCount] = useState(3);
+  const [counts, setCounts] = useState<StudyExerciseCounts>(() => ({
+    multipleChoice: 0, trueFalse: 0, shortAnswer: 3, essay: 0,
+  }));
   const [confirmationScope, setConfirmationScope] = useState<StudyExerciseConfirmationScope | null>(null);
   const [fingerprintedSource, setFingerprintedSource] = useState<StudyExerciseSourceFingerprint | null>(null);
   const [preparedSourceScope, setPreparedSourceScope] = useState<PreparedStudyExerciseSourceScope | null>(null);
@@ -294,7 +342,7 @@ export function StudyExercisePreparation({
     plannedSessionId,
     mode,
     text,
-    count,
+    counts,
     authenticated,
     confirmed: confirmationIsCurrent,
     ...(mode === "generated" ? { selectedSource } : {}),
@@ -518,7 +566,7 @@ export function StudyExercisePreparation({
   return <section className="study-exercises" aria-labelledby="study-exercises-title">
     <div className="study-exercises__heading">
       <div><h3 id="study-exercises-title">Giải bài tập bằng AI</h3>
-        <p className="material-hint">Dán đề bài để nhận lời giải sau phiên học, hoặc chọn nguồn đã xem lại để AI tạo câu hỏi mở. Chỉ nội dung bạn xác nhận mới được gửi.</p></div>
+        <p className="material-hint">Dán đề bài để nhận lời giải sau phiên học, hoặc chọn nguồn đã xem lại để tạo các dạng bài đã chọn. Chỉ nội dung bạn xác nhận mới được gửi.</p></div>
     </div>
 
     <fieldset className="study-exercises__modes" disabled={disabled || pending || invalidating}>
@@ -586,13 +634,8 @@ export function StudyExercisePreparation({
       {selectedSource && selectedSource.reviewed && <label htmlFor="study-exercise-source-preview">Xem lại đúng nội dung sẽ gửi
         <textarea id="study-exercise-source-preview" rows={5} value={selectedSource.text} readOnly aria-readonly="true" />
       </label>}
-      <label className="study-exercises__count" htmlFor="study-exercise-count">Số bài tập dạng mở
-        <select id="study-exercise-count" value={count} disabled={disabled || pending || invalidating}
-          onChange={event => { setCount(Number(event.target.value)); setConfirmationScope(null); }}>
-          {[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>{value}</option>)}
-        </select>
-      </label>
-      <p className="material-hint">Lựa chọn chỉ xuất hiện nếu thực sự hữu ích; bài tập không bắt buộc là trắc nghiệm.</p>
+      <StudyExerciseCountFields counts={counts} disabled={disabled || pending || invalidating}
+        onChange={next => { setCounts(next); setConfirmationScope(null); }} />
     </>}
 
     {isTooLong && <p className="study-exercises__error" role="alert">
@@ -654,6 +697,7 @@ export function StudyExerciseQuestionViewer({
       {preparation.exercises.map((exercise, index) => {
         const solution = reveal ? solutions.exercises.find(item => item.id === exercise.id) : undefined;
         return <li key={exercise.id}>
+          {exercise.type && <p className="study-exercises__question-type">{STUDY_EXERCISE_TYPE_LABELS[exercise.type]}</p>}
           <StudyGuideArticle title={`Bài ${index + 1}`} text={exercise.prompt} aiGenerated={preparation.mode === "generated"} />
           {exercise.choices && <ul className="study-exercises__choices" aria-label={`Lựa chọn cho bài ${index + 1}`}>
             {exercise.choices.map((choice, choiceIndex) => <li key={`${exercise.id}-${choiceIndex}`}>

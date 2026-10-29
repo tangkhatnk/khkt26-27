@@ -1,10 +1,18 @@
 import { request } from "./api";
 
 export type StudyExerciseMode = "provided" | "generated";
+export type StudyExerciseType = "multiple-choice" | "true-false" | "short-answer" | "essay";
+export type StudyExerciseCounts = {
+  multipleChoice: number;
+  trueFalse: number;
+  shortAnswer: number;
+  essay: number;
+};
 export type StudyExerciseQuestion = {
   id: string;
   prompt: string;
   choices?: string[];
+  type?: StudyExerciseType;
 };
 export type StudyExercisePreparationResponse = {
   id: string;
@@ -22,7 +30,8 @@ export type StudyExerciseSolution = {
 export type StudyExerciseSolutionResponse = { exercises: StudyExerciseSolution[] };
 export type StudyExercisePreparationInput =
   | { requestId: string; plannedSessionId: string; mode: "provided"; text: string }
-  | { requestId: string; plannedSessionId: string; mode: "generated"; text: string; count: number };
+  | { requestId: string; plannedSessionId: string; mode: "generated"; text: string; count: number }
+  | { requestId: string; plannedSessionId: string; mode: "generated"; text: string; counts: StudyExerciseCounts };
 
 export function prepareStudyExercises(
   input: StudyExercisePreparationInput,

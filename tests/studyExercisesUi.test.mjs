@@ -51,7 +51,7 @@ const preparation = {
   plannedSessionId: "session-a",
   mode: "generated",
   exercises: [
-    { id: "question-a", prompt: "Tính $x$ từ phương trình $x + 2 = 5$." },
+    { id: "question-a", type: "multiple-choice", prompt: "Tính $x$ từ phương trình $x + 2 = 5$." },
     { id: "question-b", prompt: "Giải thích cách kiểm tra nghiệm." },
   ],
 };
@@ -325,6 +325,50 @@ test("generated preparation requires the exact reviewed source and a bounded ope
   assert.equal(helpers.createStudyExercisePreparationInput({ ...base, selectedSource: source({ text: "😀".repeat(10_001) }), text: "😀".repeat(10_001) }), null);
 });
 
+test("generated preparation sends independently validated exercise-type counts", () => {
+  const reviewed = source();
+  const counts = { multipleChoice: 2, trueFalse: 0, shortAnswer: 1, essay: 3 };
+  const input = helpers.createStudyExercisePreparationInput({
+    requestId: "request-a", plannedSessionId: "session-a", mode: "generated", text: reviewed.text,
+    counts, authenticated: true, confirmed: true, selectedSource: reviewed,
+  });
+  assert.deepEqual(input, {
+    requestId: "request-a", plannedSessionId: "session-a", mode: "generated", text: reviewed.text, counts,
+  });
+  for (const invalidCounts of [
+    { multipleChoice: 0, trueFalse: 0, shortAnswer: 0, essay: 0 },
+    { multipleChoice: 6, trueFalse: 0, shortAnswer: 0, essay: 0 },
+    { multipleChoice: 1.5, trueFalse: 0, shortAnswer: 0, essay: 0 },
+    { multipleChoice: -1, trueFalse: 1, shortAnswer: 0, essay: 0 },
+  ]) {
+    assert.equal(helpers.createStudyExercisePreparationInput({
+      requestId: "request-a", plannedSessionId: "session-a", mode: "generated", text: reviewed.text,
+      counts: invalidCounts, authenticated: true, confirmed: true, selectedSource: reviewed,
+    }), null);
+  }
+});
+
+test("typed count fields expose four bounded inputs and lock while preparation is busy", () => {
+  const counts = { multipleChoice: 2, trueFalse: 1, shortAnswer: 0, essay: 3 };
+  const updates = [];
+  const tree = components.StudyExerciseCountFields({
+    counts,
+    disabled: true,
+    onChange: next => updates.push(next),
+  });
+  const markup = renderToStaticMarkup(tree);
+  assert.match(markup, /Trắc nghiệm/u);
+  assert.match(markup, /Đúng hoặc sai/u);
+  assert.match(markup, /Trả lời ngắn/u);
+  assert.match(markup, /Tự luận/u);
+  assert.equal((markup.match(/type="number"/gu) ?? []).length, 4);
+  assert.equal((markup.match(/disabled=""/gu) ?? []).length, 4);
+  assert.equal((markup.match(/max="5"/gu) ?? []).length, 4);
+  const shortAnswer = findElement(tree, element => element.props.id === "study-exercise-count-short-answer");
+  shortAnswer.props.onChange({ currentTarget: { value: "2" } });
+  assert.deepEqual(updates[0], { ...counts, shortAnswer: 2 });
+});
+
 test("generated source scope becomes stale when selected material props change across rerenders", async () => {
   const selected = source();
   const fingerprint = await helpers.fingerprintStudyExerciseSourceText(selected.text);
@@ -416,6 +460,7 @@ test("solution presentation remains hidden during focus and until summary releas
   ));
   const focus = markup("focus", "ready");
   assert.match(focus, /Tính/u);
+  assert.match(focus, /Trắc nghiệm/u);
   assert.doesNotMatch(focus, /ANSWER_SECRET|EXPLANATION_SECRET/u);
   const lockedSummary = markup("summary", "locked");
   assert.match(lockedSummary, /chỉ mở sau khi phiên đã được lưu/u);

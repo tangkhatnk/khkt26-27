@@ -21,6 +21,7 @@ type ExerciseSetRow = {
   planned_session_id: string;
   mode: string;
   requested_count: number | null;
+  requested_counts: unknown | null;
   status: string;
   source_text: string;
   source_fingerprint: string;
@@ -81,6 +82,7 @@ function fakeDatabase(ownerId: string, world: World) {
           updated_at: now,
           solution: null,
           requested_count: null,
+          requested_counts: null,
           generation_token: null,
           generation_lease_expires_at: null,
           solution_generation_token: null,
@@ -225,11 +227,26 @@ beforeEach(async () => {
   await app.ready();
   vi.mocked(generateStudyExerciseQuestions).mockReset();
   vi.mocked(generateStudyExerciseSolutions).mockReset();
-  vi.mocked(generateStudyExerciseQuestions).mockImplementation(async (_source, count) =>
-    Array.from({ length: count }, (_, index) => ({
+  vi.mocked(generateStudyExerciseQuestions).mockImplementation(async (_source, requested) => {
+    const counts = typeof requested === "number"
+      ? { multipleChoice: 0, trueFalse: 0, shortAnswer: requested, essay: 0 }
+      : requested;
+    const types = [
+      ...Array.from({ length: counts.multipleChoice }, () => "multiple-choice" as const),
+      ...Array.from({ length: counts.trueFalse }, () => "true-false" as const),
+      ...Array.from({ length: counts.shortAnswer }, () => "short-answer" as const),
+      ...Array.from({ length: counts.essay }, () => "essay" as const),
+    ];
+    return types.map((type, index) => ({
       prompt: `Explain photosynthesis step ${index + 1}.`,
+      ...(typeof requested === "number" ? {} : {
+        type,
+        ...(type === "multiple-choice" ? { choices: ["A", "B", "C", "D"] } : {}),
+        ...(type === "true-false" ? { choices: ["Đúng", "Sai"] } : {}),
+      }),
       evidenceExcerpt: "Photosynthesis converts light energy into chemical energy.",
-    })));
+    }));
+  });
   vi.mocked(generateStudyExerciseSolutions).mockImplementation(async (_source, exercises) =>
     exercises.map(exercise => ({
       id: exercise.id,
@@ -277,7 +294,7 @@ describe("study exercise preparation", () => {
       exercises: [{ id: expect.any(String), prompt: payload.text }],
     });
     expect(response.headers["cache-control"]).toContain("no-store");
-    expect(JSON.stringify(dto)).not.toMatch(/source_text|evidence|solution|explanation|answer|key/u);
+    expect(JSON.stringify(dto)).not.toMatch(/"(?:source_text|evidence|solution|explanation|answer|key)"\s*:/u);
     const row = database.rows.get(dto.id)!;
     expect(row.source_text).toBe(payload.text);
     expect(row.status).toBe("ready");
@@ -327,6 +344,160 @@ describe("study exercise preparation", () => {
     expect(oldRead.statusCode).toBe(404);
   });
 
+  it("persists the exact typed composition and rejects same-total retries with a different mix", async () => {
+    const plannedSessionId = randomUUID();
+    const requestId = randomUUID();
+    const source = "A stack follows last-in, first-out order and pop removes the newest item.";
+    const counts = { multipleChoice: 2, trueFalse: 2, shortAnswer: 1, essay: 1 };
+    const exercises = [
+      {
+        type: "multiple-choice" as const,
+        prompt: "Which operation removes the newest item from a stack?",
+        choices: ["push", "pop", "peek", "clear"],
+        evidenceExcerpt: "pop removes the newest item",
+      },
+      {
+        type: "multiple-choice" as const,
+        prompt: "Which stack operation removes the newest item?",
+        choices: ["push", "pop", "peek", "clear"],
+        evidenceExcerpt: "pop removes the newest item",
+      },
+      {
+        type: "true-false" as const,
+        prompt: "Is a stack last-in, first-out?",
+        choices: ["Đúng", "Sai"],
+        evidenceExcerpt: "A stack follows last-in, first-out order",
+      },
+      {
+        type: "true-false" as const,
+        prompt: "Does the stack follow last-in, first-out order?",
+        choices: ["Đúng", "Sai"],
+        evidenceExcerpt: "A stack follows last-in, first-out order",
+      },
+      {
+        type: "short-answer" as const,
+        prompt: "Explain how last-in, first-out order determines which item leaves first.",
+        evidenceExcerpt: "A stack follows last-in, first-out order",
+      },
+      {
+        type: "essay" as const,
+        prompt: "Compare the newest-item removal described for the stack.",
+        evidenceExcerpt: "pop removes the newest item",
+      },
+    ];
+    vi.mocked(generateStudyExerciseQuestions).mockResolvedValueOnce(exercises);
+    const payload = { requestId, plannedSessionId, mode: "generated", text: source, counts };
+    const first = await request("POST", "/api/v1/study-exercises", authorization, payload);
+
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.json().exercises.map((exercise: { type?: string }) => exercise.type)).toEqual([
+      "multiple-choice", "multiple-choice", "true-false", "true-false", "short-answer", "essay",
+    ]);
+    expect(JSON.stringify(first.json())).not.toMatch(/"(?:evidenceExcerpt|answer|key|explanation)"\s*:/u);
+    expect(database.rows.get(requestId)?.requested_counts).toEqual(counts);
+    expect(database.rows.get(requestId)?.requested_count).toBeNull();
+
+    const replay = await request("POST", "/api/v1/study-exercises", authorization, payload);
+    const changedMix = await request("POST", "/api/v1/study-exercises", authorization, {
+      ...payload,
+      counts: { multipleChoice: 1, trueFalse: 3, shortAnswer: 0, essay: 1 },
+    });
+
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(first.json());
+    expect(changedMix.statusCode).toBe(409);
+    expect(vi.mocked(generateStudyExerciseQuestions)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(generateStudyExerciseQuestions)).toHaveBeenCalledWith(source, counts, expect.any(AbortSignal));
+  });
+
+  it("persists, rehydrates, and gates a full twenty-question typed set", async () => {
+    const plannedSessionId = randomUUID();
+    const source = "Photosynthesis converts light energy into chemical energy.";
+    const counts = { multipleChoice: 5, trueFalse: 5, shortAnswer: 5, essay: 5 };
+    const created = await request("POST", "/api/v1/study-exercises", authorization, {
+      requestId: randomUUID(), plannedSessionId, mode: "generated", text: source, counts,
+    });
+
+    expect(created.statusCode, created.body).toBe(200);
+    expect(created.json().exercises).toHaveLength(20);
+    expect(database.rows.get(created.json().id)?.requested_counts).toEqual(counts);
+    const rehydrated = await request("GET", `/api/v1/study-exercises/session/${plannedSessionId}`);
+    expect(rehydrated.statusCode).toBe(200);
+    expect(rehydrated.json()).toEqual(created.json());
+    expect(rehydrated.json().exercises).toHaveLength(20);
+
+    const bound = await request("POST", `/api/v1/study-exercises/session/${plannedSessionId}/bind`);
+    expect(bound.statusCode).toBe(200);
+    const earlySession = completedSession(plannedSessionId, ownerId, 30);
+    earlySession.target = 60;
+    database.world.sessions[plannedSessionId] = earlySession;
+    const locked = await request("POST", `/api/v1/study-exercises/${created.json().id}/solution`);
+    expect(locked.statusCode).toBe(409);
+    expect(generateStudyExerciseSolutions).not.toHaveBeenCalled();
+
+    database.world.sessions[plannedSessionId] = completedSession(plannedSessionId, ownerId);
+    const solved = await request("POST", `/api/v1/study-exercises/${created.json().id}/solution`);
+    expect(solved.statusCode, solved.body).toBe(200);
+    expect(solved.json().exercises).toHaveLength(20);
+    expect(generateStudyExerciseSolutions).toHaveBeenCalledWith(
+      source,
+      created.json().exercises,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("rejects choices on typed short-answer exercises without persisting them", async () => {
+    const requestId = randomUUID();
+    const plannedSessionId = randomUUID();
+    const source = "Photosynthesis converts light energy into chemical energy.";
+    vi.mocked(generateStudyExerciseQuestions).mockResolvedValueOnce([{
+      type: "short-answer",
+      prompt: "Explain how photosynthesis transforms energy.",
+      choices: ["light", "chemical"],
+      evidenceExcerpt: source,
+    }]);
+
+    const response = await request("POST", "/api/v1/study-exercises", authorization, {
+      requestId,
+      plannedSessionId,
+      mode: "generated",
+      text: source,
+      counts: { multipleChoice: 0, trueFalse: 0, shortAnswer: 1, essay: 0 },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(database.rows.get(requestId)?.status).toBe("failed");
+    expect(database.rows.get(requestId)?.exercises).toEqual([]);
+  });
+
+  it("replays old scalar rows by count and conflicts with a typed retry when the type is unknown", async () => {
+    const plannedSessionId = randomUUID();
+    const requestId = randomUUID();
+    const source = "Photosynthesis converts light energy into chemical energy.";
+    const legacyPayload = {
+      requestId, plannedSessionId, mode: "generated", text: source, count: 2,
+    };
+    const created = await request("POST", "/api/v1/study-exercises", authorization, legacyPayload);
+    const oldRow = database.rows.get(requestId)!;
+    oldRow.requested_counts = null;
+
+    const typedReplay = await request("POST", "/api/v1/study-exercises", authorization, {
+      requestId,
+      plannedSessionId,
+      mode: "generated",
+      text: source,
+      counts: { multipleChoice: 0, trueFalse: 0, shortAnswer: 2, essay: 0 },
+    });
+    const scalarReplay = await request("POST", "/api/v1/study-exercises", authorization, legacyPayload);
+
+    expect(created.statusCode).toBe(200);
+    expect(oldRow.requested_counts).toBeNull();
+    expect(typedReplay.statusCode).toBe(409);
+    expect(scalarReplay.statusCode).toBe(200);
+    expect(scalarReplay.json()).toEqual(created.json());
+    expect(vi.mocked(generateStudyExerciseQuestions)).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects an unknown owner and does not reveal a set to another account", async () => {
     const plannedSessionId = randomUUID();
     const created = await prepareProvided(plannedSessionId);
@@ -349,7 +520,7 @@ describe("study exercise preparation", () => {
     expect(ownerRead.statusCode).toBe(200);
     expect(ownerRead.json()).toEqual(created.json());
     expect(strangerRead.statusCode).toBe(404);
-    expect(JSON.stringify(ownerRead.json())).not.toMatch(/source_text|evidence|solution|explanation|answer|key/u);
+    expect(JSON.stringify(ownerRead.json())).not.toMatch(/"(?:source_text|evidence|solution|explanation|answer|key)"\s*:/u);
   });
 
   it("lets a learner cancel a set and removes its private snapshot", async () => {
@@ -405,7 +576,7 @@ describe("study exercise preparation", () => {
     const plannedSessionId = randomUUID();
     const requestId = randomUUID();
     const source = "Photosynthesis converts light energy into chemical energy.";
-    let release!: (value: Array<{ prompt: string; evidenceExcerpt: string }>) => void;
+    let release!: (value: Array<{ type: "short-answer"; prompt: string; evidenceExcerpt: string }>) => void;
     vi.mocked(generateStudyExerciseQuestions).mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
     const pending = request("POST", "/api/v1/study-exercises", authorization, {
       requestId,
@@ -417,6 +588,7 @@ describe("study exercise preparation", () => {
     await vi.waitFor(() => expect(generateStudyExerciseQuestions).toHaveBeenCalledTimes(1));
     const cancelled = await request("DELETE", `/api/v1/study-exercises/session/${plannedSessionId}/requests/${requestId}`);
     release([{
+      type: "short-answer",
       prompt: "Explain how photosynthesis stores light energy as chemical energy.",
       evidenceExcerpt: source,
     }]);
@@ -490,7 +662,7 @@ describe("session-gated study exercise solutions", () => {
       mode: "generated",
       sourceFingerprint: generated.json().sourceFingerprint,
     });
-    expect(JSON.stringify(afterReload.json())).not.toMatch(/source_text|evidence|solution|explanation|answer|key/u);
+    expect(JSON.stringify(afterReload.json())).not.toMatch(/"(?:source_text|evidence|solution|explanation|answer|key)"\s*:/u);
 
     const solution = await request("POST", `/api/v1/study-exercises/${afterReload.json().id}/solution`);
     expect(solution.statusCode, solution.body).toBe(200);
