@@ -211,7 +211,7 @@ export async function buildApp(deps?: {
         detail:
           status >= 500 && !(err instanceof ApiError)
             ? "Service temporarily unavailable"
-            : status === 409
+            : status === 409 && !(err instanceof ApiError && err.exposeMessage)
               ? "Dữ liệu đã thay đổi hoặc tồn tại. Hãy tải lại rồi thử lại."
               : error.message,
         instance: req.url.split("?")[0],
