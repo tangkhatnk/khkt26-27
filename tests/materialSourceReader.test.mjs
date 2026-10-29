@@ -59,6 +59,27 @@ test('renders read-only text with safe paragraph and chemistry notation', () => 
   assert.doesNotMatch(html, /material-reader__toolbar/);
 });
 
+test('renders vector norms and fractions inside table cells without splitting math or escaped pipes', () => {
+  const text = [
+    '| Vector | Norm |',
+    '| --- | --- |',
+    '| a | $|\\vec{a}| = \\sqrt{a_1^2+a_2^2}$ |',
+    '| fraction | \\(\\frac{3}{4}\\) |',
+    '| label\\|text | plain |',
+  ].join('\n');
+  const html = renderToStaticMarkup(createElement(MaterialSourceReader, {
+    title: 'Toán', text,
+  }));
+
+  assert.equal((html.match(/<th\b/gu) ?? []).length, 2);
+  assert.equal((html.match(/<td\b/gu) ?? []).length, 6);
+  assert.match(html, /<td>label\|text<\/td>/u);
+  assert.match(html, /class="katex"/u);
+  assert.match(html, /<mover\b/u);
+  assert.match(html, /<msqrt>/u);
+  assert.match(html, /<mfrac>/u);
+});
+
 test('formats old AI guides for display without changing their saved source or editor value', () => {
   const backslash = String.fromCharCode(92);
   const escapedBreak = `${backslash}n`;

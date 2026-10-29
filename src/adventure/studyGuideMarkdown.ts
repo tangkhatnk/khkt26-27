@@ -343,7 +343,49 @@ function isTableDelimiter(line: string) {
 }
 
 function tableCells(line: string) {
-  return line.trim().replace(/^\||\|$/gu, "").split("|").map(cell => cell.trim().replace(/\\\|/gu, "|"));
+  const cells: string[] = [];
+  let cell = "";
+  let mathDelimiter: "$" | "\\)" | undefined;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === "\\") {
+      if (line[index + 1] === "|") {
+        cell += mathDelimiter ? "\\|" : "|";
+        index += 1;
+        continue;
+      }
+      if (mathDelimiter === "\\)" && line.startsWith("\\)", index)) {
+        cell += "\\)";
+        index += 1;
+        mathDelimiter = undefined;
+        continue;
+      }
+      if (!mathDelimiter && line.startsWith("\\(", index)) {
+        cell += "\\(";
+        index += 1;
+        mathDelimiter = "\\)";
+        continue;
+      }
+      cell += character;
+      continue;
+    }
+    if (character === "$" && line[index - 1] !== "\\") {
+      if (mathDelimiter === "$" && line[index + 1] !== "$") mathDelimiter = undefined;
+      else if (!mathDelimiter && line[index + 1] !== "$" && line[index - 1] !== "$") mathDelimiter = "$";
+      cell += character;
+      continue;
+    }
+    if (character === "|" && !mathDelimiter) {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    cell += character;
+  }
+  cells.push(cell.trim());
+  if (line.trim().startsWith("|")) cells.shift();
+  if (line.trim().endsWith("|")) cells.pop();
+  return cells;
 }
 
 function isListItem(line: string) {
