@@ -79,9 +79,12 @@ export class ApiError extends Error {
   }
 }
 export function apiRequestTimeoutMs(path: string): number {
-  if (path === "/materials/read") return 115000;
-  if (["/quizzes/generate", "/quiz/generate", "/materials/generate", "/study-exercises"].includes(path) ||
-      /^\/study-exercises\/[^/]+\/solution$/u.test(path)) return 100000;
+  const pathWithoutGuestPrefix = path.startsWith("/ai/guest/")
+    ? path.slice("/ai/guest".length)
+    : path;
+  if (pathWithoutGuestPrefix === "/materials/read") return 115000;
+  if (["/quizzes/generate", "/quiz/generate", "/materials/generate", "/materials/summarize", "/study-exercises"].includes(pathWithoutGuestPrefix) ||
+      /^\/study-exercises\/[^/]+\/solution$/u.test(pathWithoutGuestPrefix)) return 100000;
   return 30000;
 }
 async function fetchWithTimeout(path: string, init: RequestInit) {

@@ -18,6 +18,9 @@ import {
   isReviewedStudyExerciseSource,
   STUDY_EXERCISE_TEXT_LIMIT,
 } from "./studyExercises.ts";
+import {
+  studyExerciseRequestId,
+} from "../services/studyExercisesApi.ts";
 import type {
   StudyExerciseConfirmationScope,
   StudyExerciseSourceFingerprint,
@@ -321,14 +324,15 @@ export function StudyExercisePreparation({
 
   useEffect(() => {
     if (!preparedSourceChanged || !preparation || invalidatedPreparationRef.current === preparation.id) return;
-    const stalePreparationId = preparation.id;
-    invalidatedPreparationRef.current = stalePreparationId;
-    setInvalidatedPreparationId(stalePreparationId);
+    const stalePreparationId = studyExerciseRequestId(preparation);
+    const preparationId = preparation.id;
+    invalidatedPreparationRef.current = preparationId;
+    setInvalidatedPreparationId(preparationId);
     setPreparedSourceScope(null);
     setConfirmationScope(null);
     setEditing(true);
     onPreparationChange(null, null);
-    if (requestIdRef.current === stalePreparationId) requestIdRef.current = null;
+    if (requestIdRef.current === stalePreparationId || requestIdRef.current === preparationId) requestIdRef.current = null;
     setInvalidating(true);
     setError("Nguồn tài liệu đã thay đổi hoặc cần xem lại. Hãy xác nhận nguồn mới trước khi tạo đề.");
     void onInvalidate(plannedSessionId, stalePreparationId).catch(reason => {
@@ -372,7 +376,7 @@ export function StudyExercisePreparation({
 
   const editPreparedSet = async () => {
     if (!preparation) return;
-    if (!await invalidateRequest(preparation.id)) return;
+    if (!await invalidateRequest(studyExerciseRequestId(preparation))) return;
     setEditing(true);
     setSkipped(false);
     setConfirmationScope(null);
@@ -393,7 +397,7 @@ export function StudyExercisePreparation({
   };
 
   const cancelPreparedSet = async () => {
-    const requestId = activePreparation?.id ?? requestIdRef.current;
+    const requestId = activePreparation ? studyExerciseRequestId(activePreparation) : requestIdRef.current;
     if (!requestId) {
       setSkipped(true);
       setEditing(false);
@@ -481,8 +485,9 @@ export function StudyExercisePreparation({
       const result = await onPrepare(body, controller.signal, requestSourceScope);
       if (controller.signal.aborted || generation !== generationRef.current) return;
       if (requestSourceScope && (result.mode !== "generated" || result.sourceFingerprint !== requestSourceScope.textFingerprint)) {
-        await onInvalidate(plannedSessionId, result.id);
-        if (requestIdRef.current === result.id) requestIdRef.current = null;
+        const resultRequestId = studyExerciseRequestId(result);
+        await onInvalidate(plannedSessionId, resultRequestId);
+        if (requestIdRef.current === resultRequestId) requestIdRef.current = null;
         setError("Phiên bản nguồn không khớp với đề vừa tạo. Hãy xác nhận lại tài liệu.");
         return;
       }
@@ -492,13 +497,14 @@ export function StudyExercisePreparation({
         currentSource.fingerprintedSource,
         currentSource.selectedSource,
       )) {
-        await onInvalidate(plannedSessionId, result.id);
-        if (requestIdRef.current === result.id) requestIdRef.current = null;
+        const resultRequestId = studyExerciseRequestId(result);
+        await onInvalidate(plannedSessionId, resultRequestId);
+        if (requestIdRef.current === resultRequestId) requestIdRef.current = null;
         setError("Nguồn tài liệu đã thay đổi. Bộ bài tập cũ đã bị hủy; hãy xác nhận lại.");
         return;
       }
       pendingRef.current = false;
-      requestIdRef.current = result.id;
+      requestIdRef.current = studyExerciseRequestId(result);
       setPreparedSourceScope(requestSourceScope ? { ...requestSourceScope, preparationId: result.id } : null);
       setInvalidatedPreparationId(null);
       invalidatedPreparationRef.current = null;

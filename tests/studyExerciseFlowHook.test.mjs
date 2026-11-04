@@ -31,6 +31,7 @@ const hookRuntimePlugin = {
 let vite;
 let flow;
 let api;
+let guestAiApi;
 
 before(async () => {
   vite = await createServer({
@@ -45,6 +46,7 @@ before(async () => {
   });
   flow = await vite.ssrLoadModule("/src/adventure/useStudyExerciseFlow.ts");
   api = await vite.ssrLoadModule("/src/services/api.ts");
+  guestAiApi = await vite.ssrLoadModule("/src/services/guestAiApi.ts");
 });
 
 after(async () => {
@@ -64,10 +66,13 @@ beforeEach(async () => {
     setItem: (key, value) => values.set(key, value),
     removeItem: key => values.delete(key),
   };
+  globalThis.window.sessionStorage = globalThis.sessionStorage;
+  guestAiApi.clearGuestAiCredential();
   await api.acceptTokens({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: 3600 });
 });
 
 afterEach(async () => {
+  guestAiApi.clearGuestAiCredential();
   await api.clearTokens();
   if (previousGlobals.fetch === undefined) delete globalThis.fetch;
   else globalThis.fetch = previousGlobals.fetch;
@@ -159,6 +164,7 @@ function studyExerciseOptions(overrides = {}) {
     exclusive: true,
     view: latestView,
     plannedSessionId: "session-a",
+    guestExerciseSessions: [],
     sources: [],
     activeSession: { id: "session-a", owner: "owner-a", sources: [] },
     summarySession: null,
@@ -271,4 +277,102 @@ test("a delayed focus lookup survives a checkpoint clone and hydrates its server
     await new Promise(resolveState => setImmediate(resolveState));
     runtime.unmount();
   }
+});
+
+test("a source callback from the previous owner cannot dispatch against the new session", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ path: new URL(String(url), "http://localhost").pathname, method: init.method ?? "GET" });
+    return jsonResponse({ detail: "No set" }, 404);
+  };
+
+  const runtime = createHookRuntime();
+  const firstOptions = studyExerciseOptions({
+    ownerId: "guest",
+    authenticated: true,
+    plannedSessionId: "session-a",
+    view: "ticket",
+    activeSession: null,
+  });
+  runtime.render(() => flow.useStudyExerciseFlow(firstOptions));
+
+  const nextOptions = studyExerciseOptions({
+    ownerId: "owner-b",
+    authenticated: true,
+    plannedSessionId: "session-b",
+    view: "ticket",
+    activeSession: null,
+    isRouteScopeCurrent: (_ownerId, sessionId, view) => sessionId === "session-b" && view === "ticket",
+  });
+  const result = runtime.render(() => flow.useStudyExerciseFlow(nextOptions));
+  result.noteSourceChange("session-a", "source-a");
+  await new Promise(resolveState => setImmediate(resolveState));
+
+  assert.deepEqual(requests, []);
+  runtime.unmount();
+});
+
+test("a missing guest exercise set on a saved session explains how to prepare for the next session", async () => {
+  const guestStorage = globalThis.window.sessionStorage ?? globalThis.sessionStorage;
+  globalThis.window.sessionStorage = guestStorage;
+  guestStorage.setItem("viendu:guest-ai-credential:v1", JSON.stringify({
+    token: "opaque-guest-token",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }));
+  globalThis.fetch = async () => jsonResponse({ detail: "No set" }, 404);
+
+  const runtime = createHookRuntime();
+  const options = studyExerciseOptions({
+    ownerId: "guest",
+    authenticated: true,
+    plannedSessionId: "session-a",
+    guestExerciseSessions: ["session-a"],
+    view: "summary",
+    summarySession: { id: "session-a", effectiveMetrics: { completed: true } },
+    isRouteScopeCurrent: (ownerId, sessionId, view) => ownerId === "guest" && sessionId === "session-a" && view === "summary",
+  });
+  runtime.render(() => flow.useStudyExerciseFlow(options));
+  await new Promise(resolveState => setImmediate(resolveState));
+  const result = runtime.render(() => flow.useStudyExerciseFlow(options));
+
+  assert.match(result.summaryAvailabilityMessage, /mở vé.*chuẩn bị lại.*buổi học tiếp theo/iu);
+  runtime.unmount();
+});
+
+test("an expired GuestAI credential gives a next-session recovery path without retrying", async () => {
+  const guestStorage = globalThis.window.sessionStorage;
+  guestStorage.setItem("viendu:guest-ai-credential:v1", JSON.stringify({
+    token: "expired-guest-token",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }));
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({
+      path: new URL(String(url), "http://localhost").pathname,
+      authorization: new Headers(init.headers).get("authorization"),
+    });
+    return jsonResponse({ detail: "Guest credential expired" }, 401);
+  };
+
+  const runtime = createHookRuntime();
+  const options = studyExerciseOptions({
+    ownerId: "guest",
+    authenticated: true,
+    plannedSessionId: "session-a",
+    guestExerciseSessions: ["session-a"],
+    view: "summary",
+    summarySession: { id: "session-a", effectiveMetrics: { completed: true } },
+    isRouteScopeCurrent: (ownerId, sessionId, view) => ownerId === "guest" && sessionId === "session-a" && view === "summary",
+  });
+  runtime.render(() => flow.useStudyExerciseFlow(options));
+  await new Promise(resolveState => setImmediate(resolveState));
+  const result = runtime.render(() => flow.useStudyExerciseFlow(options));
+
+  assert.match(result.summaryAvailabilityMessage, /Phiên AI riêng tư đã hết hạn.*kết quả đã lưu.*mở vé/iu);
+  assert.deepEqual(calls, [{
+    path: "/api/v1/ai/guest/study-exercises/session/session-a",
+    authorization: "GuestAI expired-guest-token",
+  }]);
+  assert.equal(guestStorage.getItem("viendu:guest-ai-credential:v1"), null);
+  runtime.unmount();
 });

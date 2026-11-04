@@ -107,6 +107,35 @@ test("old saved data without quiz fields and score-only quiz records remain read
   assert.equal(read.pending[0].quiz?.feedback, undefined);
 });
 
+test("guest server clock anchors survive reload and reject offsets outside the supported range", () => {
+  rows.clear();
+  const saved = emptySaved();
+  saved.active = {
+    id: "guest-session-a",
+    owner: "guest",
+    goal: "Review cell division",
+    topic: "biology",
+    document: "",
+    target: 120,
+    breakPlan: { count: 1, seconds: 60 },
+    groupId: null,
+    started: 1000,
+    lastAt: 1000,
+    serverAnchorOffsetMs: -240_000,
+    segments: [],
+    state: "focus",
+    reconnect: 0,
+  };
+  writeSaved("guest", saved);
+
+  assert.equal(readSaved("guest").active?.serverAnchorOffsetMs, -240_000);
+
+  const invalid = readSaved("guest");
+  invalid.active.serverAnchorOffsetMs = 24 * 60 * 60 * 1000 + 1;
+  writeSaved("guest", invalid);
+  assert.throws(() => readSaved("guest"), /Dữ liệu đã lưu không hợp lệ/u);
+});
+
 test("owner-local material summary cache is backward-compatible, source-bound, and bounded", () => {
   rows.clear();
   const oldSaved = emptySaved();

@@ -1,12 +1,18 @@
 import type { QuizAssessment } from "../../backend/src/adventure/quizAssessment";
 
-export type QuizQuestion = {
+export type QuizQuestionBase = {
   id: string;
   question: string;
   options: string[];
-  correctAnswerIndex: number;
-  explanation: string;
   knowledgePoint?: string;
+};
+export type QuizQuestion = QuizQuestionBase & { correctAnswerIndex: number; explanation: string };
+export type GuestQuizQuestion = QuizQuestionBase;
+export type GuestQuizGrade = {
+  quizId: string;
+  score: number;
+  total: number;
+  questions: { id: string; selected: number; correct: boolean; correctAnswerIndex: number; explanation: string }[];
 };
 
 export type QuizDraft = {
@@ -18,8 +24,12 @@ export type QuizDraft = {
   count: number;
   /** Next generation preference; it may differ from count while saved questions are being reviewed. */
   requestedCount?: number;
-  questions: QuizQuestion[];
+  questions: (QuizQuestion | GuestQuizQuestion)[];
   answers: Record<string, number>;
+  /** Private Redis deck identifier; guest grading is never copied to Session.quiz. */
+  guestQuizId?: string;
+  /** Private guest result retained in this device's owner-scoped draft. */
+  guestGrade?: QuizAssessment;
 };
 
 export function isQuizCount(value: unknown): value is number {
@@ -39,7 +49,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const isIndex = (value: unknown, length: number) =>
   Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) < length;
 
-function isQuestion(value: unknown): value is QuizQuestion {
+function isQuestionBase(value: unknown): value is GuestQuizQuestion {
   if (!record(value)) return false;
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
   if (typeof value.id !== "string" || !uuid.test(value.id) ||
@@ -47,10 +57,52 @@ function isQuestion(value: unknown): value is QuizQuestion {
       !Array.isArray(value.options) || value.options.length !== 4 ||
       !value.options.every((option) => typeof option === "string" && !!option.trim()) ||
       new Set(value.options.map((option) => String(option).trim().toLocaleLowerCase())).size !== 4 ||
-      !isIndex(value.correctAnswerIndex, value.options.length) ||
-      typeof value.explanation !== "string" || !value.explanation.trim() ||
       (value.knowledgePoint !== undefined && typeof value.knowledgePoint !== "string")) return false;
   return true;
+}
+
+function isQuestion(value: unknown): value is QuizQuestion {
+  if (!isQuestionBase(value)) return false;
+  const question = value as Record<string, unknown>;
+  return isIndex(question.correctAnswerIndex, value.options.length) &&
+    typeof question.explanation === "string" && !!question.explanation.trim();
+}
+
+function isGuestQuestion(value: unknown): value is GuestQuizQuestion {
+  if (!isQuestionBase(value)) return false;
+  const question = value as Record<string, unknown>;
+  return question.correctAnswerIndex === undefined && question.explanation === undefined;
+}
+
+export function isValidGuestQuizDeck(value: unknown): value is {
+  id: string;
+  plannedSessionId: string;
+  questions: GuestQuizQuestion[];
+} {
+  return record(value) && typeof value.id === "string" && value.id.length > 0 &&
+    typeof value.plannedSessionId === "string" && value.plannedSessionId.length > 0 &&
+    Array.isArray(value.questions) && value.questions.length > 0 &&
+    value.questions.every(isGuestQuestion) &&
+    new Set(value.questions.map((question) => (question as GuestQuizQuestion).id)).size === value.questions.length;
+}
+
+export function isValidGuestQuizGrade(value: unknown, deck: readonly GuestQuizQuestion[]): value is GuestQuizGrade {
+  if (!record(value) || typeof value.quizId !== "string" || value.quizId.length === 0 ||
+      !Number.isSafeInteger(value.score) || !Number.isSafeInteger(value.total) ||
+      Number(value.total) !== deck.length || Number(value.score) < 0 || Number(value.score) > Number(value.total) ||
+      !Array.isArray(value.questions) || value.questions.length !== deck.length) return false;
+  const ids = new Set<string>();
+  let correctCount = 0;
+  for (const item of value.questions) {
+    if (!record(item) || typeof item.id !== "string" || ids.has(item.id) ||
+        !deck.some((question) => question.id === item.id) ||
+        !isIndex(item.selected, 4) || !isIndex(item.correctAnswerIndex, 4) ||
+        typeof item.correct !== "boolean" || item.correct !== (item.selected === item.correctAnswerIndex) ||
+        typeof item.explanation !== "string" || !item.explanation.trim()) return false;
+    ids.add(item.id);
+    if (item.correct) correctCount++;
+  }
+  return Number(value.score) === correctCount;
 }
 
 export function isValidQuizDraft(value: unknown): value is QuizDraft {
@@ -58,12 +110,15 @@ export function isValidQuizDraft(value: unknown): value is QuizDraft {
       !record(value.answers)) return false;
   const questions: unknown[] = value.questions;
   const answers = value.answers;
+  const guestDeck = value.guestQuizId !== undefined;
   if ((value.reviewSkipped !== undefined && typeof value.reviewSkipped !== "boolean") ||
       (value.correctionVersion !== undefined && !isCorrectionVersion(value.correctionVersion)) ||
       (value.requestedCount !== undefined && !isQuizCount(value.requestedCount)) ||
+      (guestDeck && (typeof value.guestQuizId !== "string" || !value.guestQuizId)) ||
+      (value.guestGrade !== undefined && (!guestDeck || !isValidQuizAssessment(value.guestGrade))) ||
       questions.length > 30 || (questions.length > 0 && questions.length !== value.count) ||
-      !questions.every(isQuestion)) return false;
-  const validatedQuestions = questions as QuizQuestion[];
+      !questions.every(guestDeck ? isGuestQuestion : isQuestion)) return false;
+  const validatedQuestions = questions as (QuizQuestion | GuestQuizQuestion)[];
   const ids = new Set(validatedQuestions.map((question) => question.id));
   if (ids.size !== validatedQuestions.length) return false;
   return Object.entries(answers).every(([id, selected]) => {

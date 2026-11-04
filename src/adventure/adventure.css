@@ -953,9 +953,42 @@ body,
   margin: 12px;
 }
 .focus-phase-label { text-align: center; color: #355e4a; font-size: 13px; font-weight: 700; margin: 0 20px 8px; }
-.summary-arrival { max-width: 1000px; margin: 0 auto 24px; }
 .focus-next { text-align: center; color: #355e4a; font-size: 13px; margin: 10px 20px; line-height: 1.6; }
 .focus-plan-total { text-align: center; margin: 12px 24px 16px; padding: 10px 14px; color: #355342; background: #e2eadd; border-radius: 10px; font-size: 12px; line-height: 1.6; }
+.study-companion {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: 700px;
+  margin: 22px auto;
+  padding: 14px 20px;
+  border: 1px solid #dce3d6;
+  border-radius: 16px;
+  background: #f7f8f3;
+}
+.study-companion--focus { margin: 22px 24px; }
+.study-companion--summary { max-width: 1000px; margin: 0 auto 24px; }
+.study-companion__buddy { flex: 0 0 auto; }
+.study-companion__buddy .learning-buddy { width: 70px; height: 70px; }
+.study-companion__content { flex: 1; min-width: 0; }
+.study-companion__status { margin: 0 0 7px; color: #355e4a; font-size: 16px; font-weight: 700; }
+.study-companion__progress-label { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.study-companion__progress-label strong { font-variant-numeric: tabular-nums; }
+.study-companion__progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: #e4e9de;
+  accent-color: #688f71;
+}
+.study-companion__progress::-webkit-progress-bar { border-radius: 999px; background: #e4e9de; }
+.study-companion__progress::-webkit-progress-value { border-radius: 999px; background: #688f71; }
+.study-companion__progress::-moz-progress-bar { border-radius: 999px; background: #688f71; }
+.study-companion__detail { margin: 0; color: #637367; font-size: 13px; line-height: 1.5; }
 .focus-controls {
   padding: 24px;
   display: flex;
@@ -1638,6 +1671,16 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   .focus-controls {
     padding: 20px;
   }
+  .study-companion {
+    gap: 12px;
+    padding: 12px;
+  }
+  .study-companion--focus { margin: 16px 12px; }
+  .study-companion--summary { margin-bottom: 18px; }
+  .study-companion__buddy .learning-buddy { width: 56px; height: 56px; }
+  .study-companion__status { font-size: 14px; }
+  .study-companion__detail,
+  .study-companion__progress-label { font-size: 12px; }
   .timer-label {
     font-size: 8px;
   }

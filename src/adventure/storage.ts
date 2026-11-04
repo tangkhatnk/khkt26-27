@@ -41,6 +41,8 @@ export type Saved = {
   sources?: Record<string, MaterialSource[]>;
   materials?: Record<string, NonNullable<ActiveTrip["materials"]>>;
   guestPublished?: string[];
+  /** Guest sessions whose private exercise deck was bound before focus began. */
+  guestExerciseSessions?: string[];
   /** Owner-local tombstone memory, including authenticated 410 responses for guest trips. */
   removedSessionIds?: string[];
   quizDrafts?: Record<string, QuizDraft>;
@@ -118,6 +120,7 @@ export const emptySaved = (): Saved => ({
   materials: {},
   sources: {},
   guestPublished: [],
+  guestExerciseSessions: [],
   quizDrafts: {},
   learningPath: createLearningPathProgress(),
 });
@@ -243,6 +246,7 @@ function validSaved(v: unknown): v is Saved {
       (v.guestPublished !== undefined && (!Array.isArray(v.guestPublished) ||
         !v.guestPublished.every((id) => typeof id === "string" && id.length > 0) ||
         new Set(v.guestPublished).size !== v.guestPublished.length)) ||
+      (v.guestExerciseSessions !== undefined && !validRemovedSessionIds(v.guestExerciseSessions)) ||
       (v.removedSessionIds !== undefined && !validRemovedSessionIds(v.removedSessionIds)) ||
       (v.quizDrafts !== undefined && !isValidQuizDraftMap(v.quizDrafts)) ||
       (v.materialSummaries !== undefined && !validMaterialSummaries(v.materialSummaries)) ||
@@ -263,6 +267,7 @@ function validSaved(v: unknown): v is Saved {
         (a.deviceCategory !== undefined && !isDeviceCategory(a.deviceCategory)) ||
         (a.syncClock !== undefined && typeof a.syncClock !== "boolean") ||
         (a.clockOffsetMs !== undefined && (!Number.isSafeInteger(a.clockOffsetMs) || Math.abs(Number(a.clockOffsetMs)) > 24 * 60 * 60 * 1000)) ||
+        (a.serverAnchorOffsetMs !== undefined && (!Number.isSafeInteger(a.serverAnchorOffsetMs) || Math.abs(Number(a.serverAnchorOffsetMs)) > 24 * 60 * 60 * 1000)) ||
         (a.distractions !== undefined && !count(a.distractions)) ||
         (a.breakPlan !== undefined && !isValidBreakPlan(a.breakPlan,a.target)) ||
         (a.awayCounted !== undefined && typeof a.awayCounted !== "boolean") ||
@@ -308,6 +313,7 @@ export function suppressRemovedSessions(saved: Saved, sessionIds: readonly strin
     local: { ...saved.local, sessions: localSessions },
     snapshot,
     removedSessionIds,
+    guestExerciseSessions: saved.guestExerciseSessions?.filter((id) => !removed.has(id)),
     quizDrafts,
     ...(materialSummaries === undefined ? {} : { materialSummaries }),
     ...(saved.summarySessionId && removed.has(saved.summarySessionId) ? { summarySessionId: undefined } : {}),

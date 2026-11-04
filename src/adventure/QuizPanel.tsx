@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "../../backend/src/adventure/domain";
 import type { SessionHistoryEntry } from "./storage";
+import { hasGuestAiCredential } from "../services/guestAiApi.ts";
 import { knowledgeGaps } from "./learning";
 import { StudyGuideInlineText } from "./StudyGuideRenderer";
 import { quizPrefetchNotice } from "./quizPrefetchPresentation";
@@ -11,11 +12,15 @@ import {
   quizPanelDraftState,
   shouldPrefetchQuizReview,
   type QuizDraft,
+  type GuestQuizQuestion,
   type QuizQuestion,
 } from "./quizDrafts";
 
 type Answer = { id: string; selected: number };
 type Assessment = NonNullable<Session["quiz"]>;
+type GeneratedQuizDeck =
+  | { questions: QuizQuestion[]; guestQuizId?: undefined }
+  | { questions: GuestQuizQuestion[]; guestQuizId: string };
 
 type Props = {
   ownerId: string;
@@ -24,10 +29,11 @@ type Props = {
   prefetchStatus?: "pending" | "ready" | "failed";
   prefetchError?: string;
   canUseAI: boolean;
+  isGuest: boolean;
   needsLogin: boolean;
-  onGenerate: (count: number) => Promise<QuizQuestion[]>;
+  onGenerate: (count: number) => Promise<GeneratedQuizDeck>;
   onSaveDraft: (draft: QuizDraft) => void;
-  onGrade: (answers: Answer[]) => Promise<Session>;
+  onGrade: (answers: Answer[]) => Promise<Session | { guestGrade: Assessment }>;
   onLogin: () => void;
   onStartReview: () => void;
 };
@@ -39,6 +45,7 @@ export function QuizPanel({
   prefetchStatus,
   prefetchError,
   canUseAI,
+  isGuest,
   needsLogin,
   onGenerate,
   onSaveDraft,
@@ -54,11 +61,13 @@ export function QuizPanel({
   const [grading, setGrading] = useState(false);
   const [error, setError] = useState("");
   const [gradedQuiz, setGradedQuiz] = useState<Assessment | null>(null);
+  const [guestCredentialAvailable, setGuestCredentialAvailable] = useState(() => !isGuest || hasGuestAiCredential());
   const requests = useRef(new QuizRequestGuard());
   const incomingDraft = useRef(initialDraft);
   const lastSavedDraft = useRef<QuizDraft | null>(null);
-  const assessment = gradedQuiz ?? session.quiz;
+  const assessment = gradedQuiz ?? draft.guestGrade ?? session.quiz;
   const questions = draft.questions;
+  const staleGuestDeck = isGuest && !!draft.guestQuizId && !draft.guestGrade && !guestCredentialAvailable;
   const prefetchNotice = quizPrefetchNotice(prefetchStatus, prefetchError, generating, Boolean(error), questions.length);
 
   useEffect(() => () => requests.current.invalidate(), [ownerId, session.id]);
@@ -75,9 +84,10 @@ export function QuizPanel({
     const next = quizPanelDraftState(initialDraft, correctionVersion);
     setDraft(next.draft);
     setCountInput(next.countInput);
+    setGuestCredentialAvailable(!isGuest || hasGuestAiCredential());
     setGenerating(false);
     setError("");
-  }, [initialDraft, correctionVersion]);
+  }, [initialDraft, correctionVersion, isGuest]);
 
   function saveDraft(next: QuizDraft) {
     setDraft(next);
@@ -95,12 +105,20 @@ export function QuizPanel({
     try {
       const result = await onGenerate(count);
       if (!requests.current.isCurrent(request, ownerId, session.id)) return;
-      if (result.length !== count) {
+      if (result.questions.length !== count) {
         throw new Error("AI chưa tạo đủ số câu hỏi đã chọn. Bạn có thể thử lại.");
       }
-      const next: QuizDraft = { correctionVersion, count: result.length, requestedCount: count, questions: result, answers: {} };
+      const next: QuizDraft = {
+        correctionVersion,
+        count: result.questions.length,
+        requestedCount: count,
+        questions: result.questions,
+        answers: {},
+        ...(result.guestQuizId ? { guestQuizId: result.guestQuizId } : {}),
+      };
       if (!isValidQuizDraft(next)) throw new Error("AI trả về câu hỏi chưa hợp lệ. Hãy thử lại.");
       saveDraft(next);
+      if (result.guestQuizId) setGuestCredentialAvailable(hasGuestAiCredential());
     } catch (cause) {
       if (requests.current.isCurrent(request, ownerId, session.id))
         setError(cause instanceof Error ? cause.message : "Chưa tạo được quiz. Hãy thử lại.");
@@ -126,11 +144,34 @@ export function QuizPanel({
         selected: draft.answers[question.id],
       })));
       if (!requests.current.isCurrent(request, ownerId, session.id)) return;
+      if ("guestGrade" in result) {
+        const next = { ...draft, guestGrade: result.guestGrade };
+        if (!isValidQuizDraft(next)) throw new Error("Máy chủ trả về kết quả riêng tư chưa hợp lệ.");
+        saveDraft(next);
+        setGradedQuiz(result.guestGrade);
+        return;
+      }
       if (!result.quiz) throw new Error("Máy chủ chưa trả kết quả chấm. Câu trả lời vẫn được giữ lại.");
       setGradedQuiz(result.quiz);
     } catch (cause) {
-      if (requests.current.isCurrent(request, ownerId, session.id))
+      if (requests.current.isCurrent(request, ownerId, session.id)) {
+        const status = typeof cause === "object" && cause !== null && "status" in cause
+          ? Number(cause.status)
+          : 0;
+        if (isGuest && draft.guestQuizId && (status === 401 || status === 404)) {
+          saveDraft({
+            ...draft,
+            guestQuizId: undefined,
+            guestGrade: undefined,
+            questions: [],
+            answers: {},
+          });
+          setGuestCredentialAvailable(hasGuestAiCredential());
+          setError("Bộ câu hỏi riêng tư đã hết hạn. Hãy tạo lại câu hỏi để tiếp tục.");
+          return;
+        }
         setError(cause instanceof Error ? cause.message : "Chưa chấm được quiz. Câu trả lời vẫn được giữ lại.");
+      }
     } finally {
       if (requests.current.isCurrent(request, ownerId, session.id)) setGrading(false);
     }
@@ -146,7 +187,7 @@ export function QuizPanel({
     <section className="quiz-panel" aria-labelledby="quiz-panel-title">
       <div className="quiz-panel-heading">
         <div>
-          <span className="eyebrow">ÔN TẬP THEO CHUYẾN</span>
+          <span className="eyebrow">ÔN TẬP PHIÊN HỌC</span>
           <h2 id="quiz-panel-title">Câu hỏi học tập</h2>
         </div>
       </div>
@@ -160,7 +201,7 @@ export function QuizPanel({
       )}
       {hasCorrectedTopic && !hasCorrectedQuizResult && assessment && (
         <p className="quiz-corrected-result" role="status">
-          Chủ đề chuyến đã được hiệu chỉnh; điểm và phản hồi dưới đây vẫn là kết quả chấm ban đầu.
+          Chủ đề phiên học đã được hiệu chỉnh; điểm và phản hồi dưới đây vẫn là kết quả chấm ban đầu.
         </p>
       )}
       {assessment ? (
@@ -204,14 +245,17 @@ export function QuizPanel({
           ) : (
             <p>Kết quả được lưu trên máy chủ. Chi tiết câu hỏi của lượt cũ không có trong bản lưu.</p>
           )}
-          <button className="primary" onClick={onStartReview}>Bắt đầu chuyến ôn tập →</button>
+          <button className="primary" onClick={onStartReview}>Bắt đầu phiên ôn tập →</button>
         </div>
       ) : (
         <>
-          <p>Câu hỏi dùng nguồn tài liệu đã kiểm tra. Khi không có tệp, AI dùng chủ đề, mục tiêu và ghi chú của chuyến.</p>
+          <p>{isGuest
+            ? "Câu hỏi dùng chủ đề, mục tiêu và nguồn bạn đã xác nhận. Bộ câu hỏi và kết quả riêng tư không đi vào lịch sử công khai."
+            : "Câu hỏi dùng nguồn tài liệu đã kiểm tra. Khi không có tệp, AI dùng chủ đề, mục tiêu và ghi chú của phiên học."}</p>
+          {staleGuestDeck && <p className="quiz-prefetch-status" role="status">Bộ câu hỏi này không còn gắn với phiên AI riêng tư hiện tại. Hãy tạo lại bộ câu hỏi trước khi trả lời.</p>}
           {draft.reviewSkipped ? (
             <div className="quiz-review-skipped" role="status">
-              <p>Đã bỏ qua câu hỏi ôn tập cho chuyến này. Phần học và lịch sử chuyến đã được lưu.</p>
+              <p>Đã bỏ qua câu hỏi ôn tập cho phiên này. Phần học và lịch sử phiên học đã được lưu.</p>
               <button type="button" onClick={() => saveDraft({ ...draft, correctionVersion, reviewSkipped: false })}>
                 Bật ôn tập
               </button>
@@ -248,14 +292,16 @@ export function QuizPanel({
             </>
           ) : (
             <div className="choice-row">
-              <p>{needsLogin ? "Đăng nhập lại để tạo quiz AI." : "Quiz AI cần tài khoản đã đăng nhập."}</p>
-              <button onClick={onLogin}>Đăng nhập</button>
+              <p>{isGuest
+                ? "Kết nối mạng để tạo câu hỏi AI riêng tư. Các bài học có sẵn vẫn dùng được khi ngoại tuyến."
+                : needsLogin ? "Đăng nhập lại để tạo quiz AI." : "Quiz AI cần tài khoản đã đăng nhập."}</p>
+              {!isGuest && <button onClick={onLogin}>Đăng nhập</button>}
             </div>
           )}
           {questions.length > 0 && (
             <div className="quiz">
               {questions.map((question, index) => (
-                <fieldset key={question.id} disabled={grading}>
+                <fieldset key={question.id} disabled={grading || staleGuestDeck}>
                   <legend>{index + 1}. <StudyGuideInlineText text={question.question} /></legend>
                   {question.options.map((option, optionIndex) => (
                     <label className="answer" key={`${question.id}:${optionIndex}`}>
@@ -270,9 +316,9 @@ export function QuizPanel({
                   ))}
                 </fieldset>
               ))}
-              <button className="primary" disabled={grading || generating || questions.some((question) => !Number.isSafeInteger(draft.answers[question.id]))} onClick={() => void grade()}>
+              {!staleGuestDeck && <button className="primary" disabled={grading || generating || questions.some((question) => !Number.isSafeInteger(draft.answers[question.id]))} onClick={() => void grade()}>
                 {grading ? "Đang chấm…" : "Nộp câu trả lời"}
-              </button>
+              </button>}
             </div>
           )}
         </>

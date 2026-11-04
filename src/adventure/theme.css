@@ -115,6 +115,7 @@ html[data-theme="dark"] .adventure .sidebar button.account:focus-visible {
 html[data-theme="dark"] .adventure .panel,
 html[data-theme="dark"] .adventure .ticket-card,
 html[data-theme="dark"] .adventure .focus-card,
+html[data-theme="dark"] .adventure .study-companion,
 html[data-theme="dark"] .adventure .stat,
 html[data-theme="dark"] .adventure .session-row,
 html[data-theme="dark"] .adventure .member,
@@ -124,6 +125,11 @@ html[data-theme="dark"] .adventure .experiment-run-card {
   border-color: var(--line);
   color: var(--text);
 }
+
+html[data-theme="dark"] .adventure .study-companion__status { color: #d0e6d1; }
+html[data-theme="dark"] .adventure .study-companion__detail { color: var(--text-muted); }
+html[data-theme="dark"] .adventure .study-companion__progress,
+html[data-theme="dark"] .adventure .study-companion__progress::-webkit-progress-bar { background: #33443a; }
 
 html[data-theme="dark"] .adventure .hero-card {
   background: #24372b;

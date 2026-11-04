@@ -9,7 +9,7 @@ import "./learningPath.css";
 type LessonStatus = "available" | "current" | "completed" | "locked";
 type LessonState = { lesson: CuratedLesson; status: LessonStatus };
 
-function Buddy({ compact = false }: { compact?: boolean }) {
+export function LearningBuddy({ compact = false }: { compact?: boolean }) {
   return (
     <svg
       className={compact ? "learning-buddy learning-buddy--small" : "learning-buddy"}
@@ -155,7 +155,7 @@ export function LearningPathHome({
             {guideOpen ? "Đang mở hướng dẫn" : "Xem hướng dẫn"}
           </button>
         </div>
-        <div className="learning-path-hero__buddy"><Buddy /></div>
+        <div className="learning-path-hero__buddy"><LearningBuddy /></div>
         <div className="learning-path-hero__meta">
           <span className="learning-path-meta-date">{todayLabel}</span>
           <label htmlFor="learning-course">Lớp và môn học</label>
@@ -302,7 +302,7 @@ export function LearningPathRetryNotice({
 }) {
   return (
     <section className="learning-retry-notice" aria-labelledby="learning-retry-title">
-      <Buddy compact />
+      <LearningBuddy compact />
       <div>
         <span className="learning-path-kicker">CHẶNG HỌC DỪNG SỚM</span>
         <h2 id="learning-retry-title">{lessonTitle} chưa hoàn thành</h2>
@@ -357,7 +357,7 @@ export function LearningPathLessonDetail({
           <p>{lesson.summary}</p>
           <div className="learning-lesson-tags"><span><CourseIcon subjectId={course.subjectId} />{course.title}</span><span>{lesson.minutes} phút nội dung</span>{replay && <span>Ôn lại bài đã học</span>}</div>
         </div>
-        <div className="learning-lesson-hero__buddy"><Buddy /></div>
+        <div className="learning-lesson-hero__buddy"><LearningBuddy /></div>
       </header>
 
       {(difficulty.kind === "step-up" || difficulty.kind === "worked-review") && (
