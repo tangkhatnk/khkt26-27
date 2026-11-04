@@ -51,6 +51,7 @@ const REQUEST_PARAMS = z.object({ plannedSessionId: z.uuid(), requestId: z.uuid(
 const ID_PARAMS = z.object({ id: z.uuid() }).strict();
 const QUIZ_ID_PARAMS = z.object({ quizId: z.uuid() }).strict();
 const emptyBodySchema = z.object({}).strict();
+const bindGuestExerciseBodySchema = z.object({ exerciseId: z.uuid() }).strict();
 const guestQuizRequestSchema = z.object({
   plannedSessionId: z.uuid(),
   topic: geminiRequestSchema.shape.topic,
@@ -512,10 +513,24 @@ export function guestAiWorkflowRoutes(
     bodyLimit: 1024,
   }, async (request, reply) => {
     reply.header("Cache-Control", "no-store");
-    emptyBodySchema.parse(request.body ?? {});
+    const { exerciseId } = bindGuestExerciseBodySchema.parse(request.body);
     const { plannedSessionId } = SESSION_PARAMS.parse(request.params);
-    await assertGuestAiSessionPending(db, plannedSessionId);
-    return bindGuestAiExercises(redis, request.guestAiPrincipal!, plannedSessionId);
+    const principalId = request.guestAiPrincipal!;
+    const record = await readPrivateRecord(
+      redis, privateKey("exercise", principalId, exerciseId), guestExerciseRecordSchema,
+    );
+    requirePrincipal(record.principalId, principalId);
+    if (record.plannedSessionId !== plannedSessionId) missing("Không tìm thấy bộ bài tập AI khách.");
+
+    const gate = await readGuestAiGate(redis, plannedSessionId);
+    if (!gate || gate.principalId !== principalId || gate.exercise?.id !== exerciseId)
+      missing("Không tìm thấy bộ bài tập AI khách.");
+    if (gate.exercise.status === "bound" && gate.started)
+      await assertGuestAiSessionAvailable(db, plannedSessionId);
+    else
+      await assertGuestAiSessionPending(db, plannedSessionId);
+
+    return bindGuestAiExercises(redis, principalId, plannedSessionId, exerciseId);
   });
 
   app.delete("/api/v1/ai/guest/study-exercises/session/:plannedSessionId/requests/:requestId", authenticated, async (request, reply) => {

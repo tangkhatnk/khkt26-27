@@ -149,19 +149,32 @@ const bindScript = `
 local owner = redis.call('HGET', KEYS[1], 'principalId')
 if not owner then return 1 end
 if owner ~= ARGV[1] then return 2 end
-if redis.call('HGET', KEYS[1], 'started') == '1' or redis.call('EXISTS', KEYS[2]) == 1 then return 3 end
-if redis.call('HGET', KEYS[1], 'exerciseStatus') ~= 'prepared' then return 4 end
+local status = redis.call('HGET', KEYS[1], 'exerciseStatus')
+if redis.call('HGET', KEYS[1], 'exerciseId') ~= ARGV[2] then return 1 end
+local started = redis.call('HGET', KEYS[1], 'started') == '1'
+local hasStart = redis.call('EXISTS', KEYS[2]) == 1
+if status == 'bound' then
+  if (started and hasStart) or (not started and not hasStart) then return 0 end
+  return 3
+end
+if status ~= 'prepared' then return 4 end
+if started or hasStart then return 3 end
 redis.call('HSET', KEYS[1], 'exerciseStatus', 'bound')
-redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
 return 0
 `;
 
-export async function bindGuestAiExercises(redis: Redis, principalId: string, sessionId: string) {
+export async function bindGuestAiExercises(
+  redis: Redis,
+  principalId: string,
+  sessionId: string,
+  exerciseId: string,
+) {
   let status: number;
   try {
     status = Number(await redis.eval(
       bindScript, 2, gateKey(sessionId), sessionKey(sessionId), principalId,
-      GUEST_AI_PRIVATE_TTL_SECONDS,
+      exerciseId, GUEST_AI_PRIVATE_TTL_SECONDS,
     ));
   } catch {
     throw new ApiError(503, "service-unavailable", "Guest AI session storage is unavailable.");
@@ -169,7 +182,7 @@ export async function bindGuestAiExercises(redis: Redis, principalId: string, se
   if (status === 2) missing("Không tìm thấy bộ bài tập AI khách.");
   if (status === 3) throw new ApiError(409, "conflict", "Phiên học đã bắt đầu hoặc đã kết thúc.");
   if (status !== 0) missing("Không tìm thấy bộ bài tập AI khách.");
-  return { ok: true as const };
+  return { ok: true as const, exerciseId };
 }
 
 const cancelScript = `

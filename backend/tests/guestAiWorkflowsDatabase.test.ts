@@ -89,7 +89,12 @@ describe("guest AI completion over PGlite", () => {
     });
     expect(prepared.statusCode).toBe(201);
     const exerciseId = (prepared.json() as { id: string }).id;
-    await app.inject({ method: "POST", url: `/api/v1/ai/guest/study-exercises/session/${sessionId}/bind`, headers: { authorization: `GuestAI ${token}` }, payload: {} });
+    const bound = await app.inject({
+      method: "POST", url: `/api/v1/ai/guest/study-exercises/session/${sessionId}/bind`,
+      headers: { authorization: `GuestAI ${token}` }, payload: { exerciseId },
+    });
+    expect(bound.statusCode).toBe(200);
+    expect(bound.json()).toEqual({ ok: true, exerciseId });
     const started = await app.inject({
       method: "POST", url: "/api/v1/ai/guest/sessions/start",
       headers: { authorization: `GuestAI ${token}` }, payload: { id: sessionId, target: 60 },
@@ -121,6 +126,13 @@ describe("guest AI completion over PGlite", () => {
       },
     });
     expect(published.statusCode).toBe(200);
+
+    const bindReplayAfterPublication = await app.inject({
+      method: "POST", url: `/api/v1/ai/guest/study-exercises/session/${sessionId}/bind`,
+      headers: { authorization: `GuestAI ${token}` }, payload: { exerciseId },
+    });
+    expect(bindReplayAfterPublication.statusCode).toBe(200);
+    expect(bindReplayAfterPublication.json()).toEqual({ ok: true, exerciseId });
 
     const grade = await app.inject({
       method: "POST", url: `/api/v1/ai/guest/quizzes/${deck.id}/grade`,

@@ -52,6 +52,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await app.close();
   redis.disconnect();
+  vi.restoreAllMocks();
 });
 
 async function issueCredential() {
@@ -296,13 +297,134 @@ describe("guest AI workflows", () => {
 
     const bound = await app.inject({
       method: "POST", url: `/api/v1/ai/guest/study-exercises/session/${plannedSessionId}/bind`,
-      headers: { authorization: `GuestAI ${token}` }, payload: {},
+      headers: { authorization: `GuestAI ${token}` }, payload: { exerciseId: prepared.json().id },
     });
     expect(bound.statusCode).toBe(200);
+    expect(bound.json()).toEqual({ ok: true, exerciseId: prepared.json().id });
     const started = await app.inject({
       method: "POST", url: "/api/v1/ai/guest/sessions/start",
       headers: { authorization: `GuestAI ${token}` }, payload: { id: plannedSessionId, target: 60 },
     });
     expect(started.statusCode).toBe(200);
+  });
+
+  it("retries the same guest exercise bind after a lost reply and rejects another set", async () => {
+    const token = await issueCredential();
+    const otherToken = await issueCredential();
+    const plannedSessionId = "00000000-0000-4000-8000-000000000060";
+    const prepared = await app.inject({
+      method: "POST", url: "/api/v1/ai/guest/study-exercises",
+      headers: { authorization: `GuestAI ${token}` },
+      payload: {
+        requestId: "00000000-0000-4000-8000-000000000061",
+        plannedSessionId, mode: "provided", text: sessionText,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+    const exerciseId = (prepared.json() as { id: string }).id;
+    const otherSessionId = "00000000-0000-4000-8000-000000000063";
+    const otherSet = await app.inject({
+      method: "POST", url: "/api/v1/ai/guest/study-exercises",
+      headers: { authorization: `GuestAI ${token}` },
+      payload: {
+        requestId: "00000000-0000-4000-8000-000000000064",
+        plannedSessionId: otherSessionId, mode: "provided", text: sessionText,
+      },
+    });
+    expect(otherSet.statusCode).toBe(201);
+    const otherExerciseId = (otherSet.json() as { id: string }).id;
+    const bindUrl = `/api/v1/ai/guest/study-exercises/session/${plannedSessionId}/bind`;
+    const bind = (authorization: string, id: string) => app.inject({
+      method: "POST", url: bindUrl,
+      headers: { authorization: `GuestAI ${authorization}` },
+      payload: { exerciseId: id },
+    });
+
+    const first = await bind(token, exerciseId);
+    expect(first.statusCode).toBe(200);
+    const originalBody = first.json();
+    // The caller receives no response, then retries the same operation.
+    const retry = await bind(token, exerciseId);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toEqual(originalBody);
+    expect(originalBody).toEqual({ ok: true, exerciseId });
+
+    expect((await bind(token, otherExerciseId)).statusCode).toBe(404);
+    expect((await bind(otherToken, exerciseId)).statusCode).toBe(404);
+  });
+
+  it("recovers the same bound exercise after a lost session-start reply without extending the gate", async () => {
+    const token = await issueCredential();
+    const plannedSessionId = "00000000-0000-4000-8000-000000000070";
+    const prepared = await app.inject({
+      method: "POST", url: "/api/v1/ai/guest/study-exercises",
+      headers: { authorization: `GuestAI ${token}` },
+      payload: {
+        requestId: "00000000-0000-4000-8000-000000000071",
+        plannedSessionId, mode: "provided", text: sessionText,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+    const exerciseId = (prepared.json() as { id: string }).id;
+    const bindUrl = `/api/v1/ai/guest/study-exercises/session/${plannedSessionId}/bind`;
+    const bind = await app.inject({
+      method: "POST", url: bindUrl,
+      headers: { authorization: `GuestAI ${token}` }, payload: { exerciseId },
+    });
+    expect(bind.statusCode).toBe(200);
+
+    let serverNow = Date.UTC(2026, 10, 5, 6);
+    vi.spyOn(Date, "now").mockImplementation(() => serverNow);
+    const startRequest = {
+      method: "POST" as const, url: "/api/v1/ai/guest/sessions/start",
+      headers: { authorization: `GuestAI ${token}` },
+      payload: { id: plannedSessionId, target: 60 },
+    };
+    const firstStart = await app.inject(startRequest);
+    expect(firstStart.statusCode).toBe(200);
+    const startBody = firstStart.json() as { startedAt: number; serverNow: number; sessionId: string };
+    expect(startBody.serverNow).toBe(serverNow);
+    // The start succeeds but its response is lost. A retry reuses the original server timestamp.
+    serverNow += 5_000;
+    const retryStart = await app.inject(startRequest);
+    expect(retryStart.statusCode).toBe(200);
+    const retryBody = retryStart.json() as typeof startBody;
+    expect(retryBody.startedAt).toBe(startBody.startedAt);
+    expect(retryBody.sessionId).toBe(startBody.sessionId);
+    expect(retryBody.serverNow).toBe(serverNow);
+    expect(retryBody.serverNow).toBeGreaterThan(startBody.serverNow);
+
+    const gateKey = `guest-ai:session-gate:${plannedSessionId}`;
+    await redis.pexpire(gateKey, 60_000);
+    const gateTtlBeforeRetry = await redis.pttl(gateKey);
+    const retryBind = await app.inject({
+      method: "POST", url: bindUrl,
+      headers: { authorization: `GuestAI ${token}` }, payload: { exerciseId },
+    });
+    expect(retryBind.statusCode).toBe(200);
+    expect(retryBind.json()).toEqual({ ok: true, exerciseId });
+    expect(await redis.pttl(gateKey)).toBeLessThanOrEqual(gateTtlBeforeRetry);
+
+    const differentSet = await app.inject({
+      method: "POST", url: bindUrl,
+      headers: { authorization: `GuestAI ${token}` },
+      payload: { exerciseId: "00000000-0000-4000-8000-000000000072" },
+    });
+    expect(differentSet.statusCode).toBe(404);
+
+    const changedPlan = await app.inject({
+      ...startRequest, payload: { id: plannedSessionId, target: 120 },
+    });
+    expect(changedPlan.statusCode).toBe(409);
+
+    const postStartPreparation = await app.inject({
+      method: "POST", url: "/api/v1/ai/guest/study-exercises",
+      headers: { authorization: `GuestAI ${token}` },
+      payload: {
+        requestId: "00000000-0000-4000-8000-000000000073",
+        plannedSessionId, mode: "provided", text: sessionText,
+      },
+    });
+    expect(postStartPreparation.statusCode).toBe(409);
   });
 });

@@ -58,6 +58,7 @@ export function guestAiRoutes(
     return {
       sessionId: record.sessionId,
       startedAt: record.startedAt,
+      serverNow: Date.now(),
       target: record.target,
       ...(record.breakPlan ? { breakPlan: record.breakPlan } : {}),
     };

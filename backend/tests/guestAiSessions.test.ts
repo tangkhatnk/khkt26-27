@@ -85,6 +85,29 @@ it("creates an immutable server-time anchor bound to one credential and session 
   }
 });
 
+it("rejects a stored start record whose embedded session ID differs from its Redis key", async () => {
+  const redis = new RedisMock();
+  const db = fakeDb(emptyWorld());
+  const principalId = randomUUID();
+  const sessionId = randomUUID();
+  try {
+    await redis.set(`guest-ai:session:${sessionId}`, JSON.stringify({
+      principalId,
+      sessionId: randomUUID(),
+      startedAt: startAt,
+      target: 120,
+      breakPlan,
+      expiresAt: startAt + 7 * 24 * 60 * 60 * 1000,
+    }), "EX", 60);
+
+    await expect(reserveGuestAiSessionStart(redis as unknown as Redis, db, principalId, {
+      id: sessionId, target: 120, breakPlan,
+    }, startAt + 1_000)).rejects.toMatchObject({ status: 404 });
+  } finally {
+    redis.disconnect();
+  }
+});
+
 it("requires a matching persisted guest session that completed actual study time after scheduled breaks", async () => {
   const redis = new RedisMock();
   const principalId = randomUUID();

@@ -104,7 +104,8 @@ function matchingStart(
   now: number,
 ) {
   if (record.expiresAt <= now) missing("Không tìm thấy phiên AI khách.");
-  if (record.principalId !== principalId) missing("Không tìm thấy phiên AI khách.");
+  if (record.principalId !== principalId || record.sessionId !== input.id)
+    missing("Không tìm thấy phiên AI khách.");
   if (record.target !== input.target || !sameBreakPlan(record.breakPlan, input.breakPlan))
     throw new ApiError(409, "conflict", "Thời lượng hoặc kế hoạch nghỉ đã thay đổi sau khi bắt đầu phiên.");
   return record;
