@@ -12,6 +12,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.check.json",
     "test": "vitest run",
+    "evaluation:qa": "tsx ../scripts/evaluation/run-ai-qa.ts",
+    "evaluation:functional": "tsx scripts/evaluation/workflow-pilot.ts",
     "test:admin-postgres": "node scripts/test-admin-postgres.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

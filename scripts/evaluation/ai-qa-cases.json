@@ -1,0 +1,176 @@
+{
+  "suiteId": "viendu-synthetic-ai-qa-v1",
+  "fixtureMode": "synthetic-authored",
+  "cases": [
+    {
+      "caseId": "tutor-vi-bio-08-01",
+      "taskFamily": "learning-tutor",
+      "locale": "vi",
+      "gradeBand": "8",
+      "subject": "biology",
+      "source": "Cây xanh hấp thụ nước qua rễ và carbon dioxide qua lá; dưới ánh sáng, quá trình quang hợp tạo glucose và thải oxygen.",
+      "objective": "Identify a named product of photosynthesis.",
+      "item": {
+        "stem": "Theo đoạn, chất đường nào được tạo ra trong quang hợp?",
+        "options": ["Glucose", "Nước", "Carbon dioxide", "Diệp lục"],
+        "answerKeyIndex": 0,
+        "explanation": "Đoạn văn nêu glucose là sản phẩm của quang hợp.",
+        "evidenceExcerpt": "quá trình quang hợp tạo glucose"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "document-en-science-07-01",
+      "taskFamily": "document-ai",
+      "locale": "en",
+      "gradeBand": "7",
+      "subject": "science",
+      "source": "A thermometer measures temperature. It does not measure mass or length. On a warm afternoon, the display may show a higher temperature than it did in the morning, but the instrument is measuring the same type of quantity in both cases.",
+      "objective": "Identify the quantity measured by a thermometer.",
+      "item": {
+        "stem": "What quantity does a thermometer measure?",
+        "options": ["Temperature", "Mass", "Length", "Volume"],
+        "answerKeyIndex": 0,
+        "explanation": "The source states directly that a thermometer measures temperature.",
+        "evidenceExcerpt": "A thermometer measures temperature."
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "question-vi-math-08-01",
+      "taskFamily": "question-generator",
+      "locale": "vi",
+      "gradeBand": "8",
+      "subject": "mathematics",
+      "source": "Diện tích hình chữ nhật bằng chiều dài nhân chiều rộng. Một hình chữ nhật dài 8 cm và rộng 5 cm có diện tích 40 cm².",
+      "objective": "Apply the rectangle area formula to the stated dimensions.",
+      "item": {
+        "stem": "Diện tích hình chữ nhật đã nêu là bao nhiêu?",
+        "options": ["13 cm²", "40 cm²", "26 cm²", "80 cm²"],
+        "answerKeyIndex": 1,
+        "explanation": "Lấy 8 cm nhân 5 cm được 40 cm².",
+        "evidenceExcerpt": "dài 8 cm và rộng 5 cm có diện tích 40 cm²"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "evaluation-en-physics-09-01",
+      "taskFamily": "evaluation-engine",
+      "locale": "en",
+      "gradeBand": "9",
+      "subject": "physics",
+      "source": "In a series circuit, the same current flows through every component. The total resistance is the sum of the resistance values of the components.",
+      "objective": "Match a claim about current in a series circuit to the source.",
+      "item": {
+        "stem": "Which statement matches the passage?",
+        "options": ["The current is the same through every component.", "The current is used up by the first component.", "Each component has a different current by definition.", "The current is unrelated to the circuit."],
+        "answerKeyIndex": 0,
+        "explanation": "The passage says the same current flows through every series component.",
+        "evidenceExcerpt": "the same current flows through every component"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "question-vi-data-07-01",
+      "taskFamily": "question-generator",
+      "locale": "vi",
+      "gradeBand": "7",
+      "subject": "mathematics",
+      "source": "Trong ví dụ hư cấu về làng Mây, nhiệt độ buổi sáng là 18 °C, buổi trưa là 24 °C và buổi tối là 20 °C.",
+      "objective": "Compare three values in a small synthetic data description.",
+      "item": {
+        "stem": "Nhiệt độ nào cao nhất trong ví dụ?",
+        "options": ["18 °C", "24 °C", "20 °C", "Cả ba bằng nhau"],
+        "answerKeyIndex": 1,
+        "explanation": "Trong ba số được nêu, 24 °C lớn nhất.",
+        "evidenceExcerpt": "buổi trưa là 24 °C"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "tutor-en-science-08-01",
+      "taskFamily": "learning-tutor",
+      "locale": "en",
+      "gradeBand": "8",
+      "subject": "science",
+      "source": "Evaporation changes liquid water into water vapor. It can happen below the boiling point, and it happens faster when the liquid is warmer or has more exposed surface area.",
+      "objective": "Explain the state change named in the source.",
+      "item": {
+        "stem": "What does evaporation change liquid water into?",
+        "options": ["Water vapor", "Ice", "Salt", "Oxygen"],
+        "answerKeyIndex": 0,
+        "explanation": "The source describes evaporation as liquid water changing into water vapor.",
+        "evidenceExcerpt": "changes liquid water into water vapor"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "evaluation-vi-writing-09-01",
+      "taskFamily": "evaluation-engine",
+      "locale": "vi",
+      "gradeBand": "9",
+      "subject": "language-arts",
+      "source": "Một câu hướng dẫn dễ làm theo thường nêu hành động trước, sau đó bổ sung điều kiện hoặc giới hạn cần thiết. Câu không nên gộp nhiều hành động không liên quan vào cùng một bước.",
+      "objective": "Identify the recommended first element of an instruction.",
+      "item": {
+        "stem": "Theo đoạn, câu hướng dẫn nên nêu điều gì trước?",
+        "options": ["Hành động", "Điều kiện cuối cùng", "Một ví dụ không liên quan", "Danh sách mọi bước khác"],
+        "answerKeyIndex": 0,
+        "explanation": "Đoạn khuyên nêu hành động trước rồi mới thêm điều kiện hoặc giới hạn.",
+        "evidenceExcerpt": "nêu hành động trước"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "document-en-math-07-01",
+      "taskFamily": "document-ai",
+      "locale": "en",
+      "gradeBand": "7",
+      "subject": "mathematics",
+      "source": "A prime number has exactly two positive divisors: 1 and the number itself. The number 2 is prime because its only positive divisors are 1 and 2. The number 1 is not prime because it has only one positive divisor.",
+      "objective": "Recall the divisor count in the stated definition.",
+      "item": {
+        "stem": "How many positive divisors does a prime number have, according to the passage?",
+        "options": ["Two", "One", "Three", "Zero"],
+        "answerKeyIndex": 0,
+        "explanation": "The definition states that a prime number has exactly two positive divisors.",
+        "evidenceExcerpt": "has exactly two positive divisors"
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "negative-schema-vi-08-01",
+      "taskFamily": "question-generator",
+      "locale": "vi",
+      "gradeBand": "8",
+      "subject": "science",
+      "source": "Ánh sáng truyền từ nguồn sáng đến bề mặt.",
+      "objective": "Schema negative control; not a quality example.",
+      "item": {
+        "stem": "Ánh sáng truyền đến đâu theo câu?",
+        "options": ["Bề mặt", "Đáy biển", "Mặt trăng"],
+        "answerKeyIndex": 0,
+        "explanation": "Đây là ca âm để xác nhận bộ kiểm tra phát hiện sai cấu trúc.",
+        "evidenceExcerpt": "đến bề mặt"
+      },
+      "expectedAutomated": { "structure": "fail", "evidenceSpan": "pass" }
+    },
+    {
+      "caseId": "negative-evidence-en-08-01",
+      "taskFamily": "evaluation-engine",
+      "locale": "en",
+      "gradeBand": "8",
+      "subject": "science",
+      "source": "The fictional sample is stored in a sealed blue container.",
+      "objective": "Evidence negative control; not a quality example.",
+      "item": {
+        "stem": "What color is the fictional container?",
+        "options": ["Blue", "Green", "White", "Black"],
+        "answerKeyIndex": 0,
+        "explanation": "The evidence excerpt intentionally does not occur in the source.",
+        "evidenceExcerpt": "The container is red."
+      },
+      "expectedAutomated": { "structure": "pass", "evidenceSpan": "fail" }
+    }
+  ]
+}
