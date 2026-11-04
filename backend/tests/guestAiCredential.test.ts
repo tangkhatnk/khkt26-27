@@ -3,18 +3,19 @@ import type { PrismaClient } from "@prisma/client";
 import type { Redis } from "ioredis";
 import RedisMock from "ioredis-mock";
 import { buildApp } from "../src/app.js";
-import type { World } from "../src/adventure/domain.js";
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 let redis: RedisMock;
 
 beforeEach(async () => {
   redis = new RedisMock();
+  const queryDb = {
+    $queryRaw: async () => [{ session: null, sessionOverride: null }],
+  };
   const db = {
     user: { findUnique: async () => null },
-    $queryRaw: async () => [{ state: {
-      people: {}, groups: {}, sessions: {}, invites: {}, sessionOverrides: {},
-    } as World }],
+    ...queryDb,
+    $transaction: async (callback: (tx: typeof queryDb) => unknown) => callback(queryDb),
   } as unknown as PrismaClient;
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();

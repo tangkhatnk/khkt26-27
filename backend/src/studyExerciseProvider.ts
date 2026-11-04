@@ -356,8 +356,8 @@ async function requestWithFallback(
   operation: GenerationOperation,
   remainingBatches: number,
   fallbackState: FallbackState,
+  primaryModel = config.GEMINI_QUESTION_MODEL.trim(),
 ) {
-  const primaryModel = config.GEMINI_MODEL.trim();
   const fallbackModel = config.GEMINI_FALLBACK_MODEL.trim();
   const currentModel = fallbackState.activeModel ?? primaryModel;
   const fallbackAvailable = !fallbackState.activeModel && Boolean(fallbackModel && fallbackModel !== primaryModel);
@@ -575,7 +575,7 @@ export async function generateStudyExerciseQuestions(
         }
 
         fallbackState.validationRepairAvailable = false;
-        const primaryModel = config.GEMINI_MODEL.trim();
+        const primaryModel = config.GEMINI_QUESTION_MODEL.trim();
         const fallbackModel = config.GEMINI_FALLBACK_MODEL.trim();
         const repairModel = fallbackState.activeModel ?? primaryModel;
         const futureFallbackAvailable = !fallbackState.activeModel &&
@@ -682,6 +682,7 @@ export async function generateStudyExerciseSolutions(
         operation,
         batches.length - index,
         fallbackState,
+        config.GEMINI_EVALUATION_MODEL.trim(),
       );
       const parsed = parseProviderJson(text, "Gemini trả lời giải không hợp lệ.");
       output.push(...normalizeSolutionBatch(parsed, batch));

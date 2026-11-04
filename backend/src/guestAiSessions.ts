@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import { ApiError, missing } from "./errors.js";
+import { commitGuestAiSessionStart, GUEST_AI_PRIVATE_TTL_SECONDS } from "./guestAiGate.js";
 import {
   isValidBreakPlan,
   projectSessionMetrics,
@@ -11,7 +12,6 @@ import {
   type SessionOverride,
 } from "./adventure/domain.js";
 
-const GUEST_AI_PRIVATE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const guestAiSessionStartSchema = z.object({
   id: z.uuid(),
   target: z.number().int().min(60).max(14400),
@@ -45,18 +45,47 @@ function sameBreakPlan(left: BreakPlan | undefined, right: BreakPlan | undefined
     (left?.seconds ?? null) === (right?.seconds ?? null);
 }
 
-async function loadSessionProjection(db: PrismaClient, sessionId: string) {
-  const rows = await db.$queryRaw<Array<{
-    session: Session | null;
-    sessionOverride: SessionOverride | null;
-  }>>`
-    SELECT
-      jsonb_extract_path(state, 'sessions', ${sessionId}) AS session,
-      jsonb_extract_path(state, 'sessionOverrides', ${sessionId}) AS "sessionOverride"
-    FROM adventure_state WHERE id = 1`;
+type GuestAiSessionDatabase = Pick<PrismaClient, "$queryRaw">;
+
+async function loadSessionProjection(db: GuestAiSessionDatabase, sessionId: string, lock = false) {
+  const rows = lock
+    ? await db.$queryRaw<Array<{
+        session: Session | null;
+        sessionOverride: SessionOverride | null;
+      }>>`
+        SELECT
+          jsonb_extract_path(state, 'sessions', ${sessionId}) AS session,
+          jsonb_extract_path(state, 'sessionOverrides', ${sessionId}) AS "sessionOverride"
+        FROM adventure_state WHERE id = 1 FOR UPDATE`
+    : await db.$queryRaw<Array<{
+        session: Session | null;
+        sessionOverride: SessionOverride | null;
+      }>>`
+        SELECT
+          jsonb_extract_path(state, 'sessions', ${sessionId}) AS session,
+          jsonb_extract_path(state, 'sessionOverrides', ${sessionId}) AS "sessionOverride"
+        FROM adventure_state WHERE id = 1`;
   if (!rows[0])
     throw new ApiError(503, "service-unavailable", "Adventure state is unavailable");
   return rows[0];
+}
+
+/** Rejects tombstoned sessions and rejects saved rows unless they are this guest's own projection. */
+export async function assertGuestAiSessionAvailable(db: PrismaClient, sessionId: string) {
+  const projection = await loadSessionProjection(db, sessionId);
+  if (projection.sessionOverride?.removedAt !== undefined)
+    throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
+  if (projection.session &&
+      (projection.session.userId !== `guest:${sessionId}` || projection.session.groupId !== null))
+    missing("Không tìm thấy phiên AI khách.");
+  return projection.session;
+}
+
+/** Keeps private preparation off sessions that have already been published. */
+export async function assertGuestAiSessionPending(db: PrismaClient, sessionId: string) {
+  const session = await assertGuestAiSessionAvailable(db, sessionId);
+  if (session)
+    throw new ApiError(409, "conflict", "Phiên học đã được lưu trước khi bật AI khách.");
 }
 
 function parseStartRecord(value: string | null): GuestAiSessionStartRecord | null {
@@ -100,12 +129,6 @@ export async function reserveGuestAiSessionStart(
   }
   if (existing) return matchingStart(existing, principalId, input, now);
 
-  const projection = await loadSessionProjection(db, input.id);
-  if (projection.sessionOverride?.removedAt !== undefined)
-    throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
-  if (projection.session)
-    throw new ApiError(409, "conflict", "Phiên học đã được lưu trước khi bật AI khách.");
-
   const record: GuestAiSessionStartRecord = {
     principalId,
     sessionId: input.id,
@@ -114,10 +137,17 @@ export async function reserveGuestAiSessionStart(
     ...(input.breakPlan ? { breakPlan: input.breakPlan } : {}),
     expiresAt: now + GUEST_AI_PRIVATE_TTL_SECONDS * 1000,
   };
-  let created: string | null;
+  let created: number;
   try {
-    created = await redis.set(key, JSON.stringify(record), "EX", GUEST_AI_PRIVATE_TTL_SECONDS, "NX");
-    if (created === "OK") return record;
+    created = await db.$transaction(async tx => {
+      const projection = await loadSessionProjection(tx, input.id, true);
+      if (projection.sessionOverride?.removedAt !== undefined)
+        throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
+      if (projection.session)
+        throw new ApiError(409, "conflict", "Phiên học đã được lưu trước khi bật AI khách.");
+      return commitGuestAiSessionStart(redis, principalId, input.id, JSON.stringify(record));
+    }, { timeout: 5000 });
+    if (created === 0) return record;
     existing = parseStartRecord(await redis.get(key));
   } catch (error) {
     if (error instanceof ApiError) throw error;
@@ -150,7 +180,9 @@ export async function requireCompletedGuestAiSession(
   if (projection.sessionOverride?.removedAt !== undefined)
     throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
   const session = projection.session;
-  if (!session || session.userId !== `guest:${sessionId}` || session.groupId !== null)
+  if (!session)
+    throw new ApiError(409, "conflict", "Lời giải chỉ mở sau khi phiên học đạt đủ mục tiêu và được lưu.");
+  if (session.userId !== `guest:${sessionId}` || session.groupId !== null)
     missing("Không tìm thấy phiên AI khách đã hoàn tất.");
 
   const deadline = record.startedAt + totalDurationSeconds(record.target, record.breakPlan) * 1000;

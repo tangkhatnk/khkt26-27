@@ -6,6 +6,7 @@ vi.mock("@google/genai", async importOriginal => {
 });
 import { config } from "../src/config.js";
 import { generateStudyGuide, STUDY_GUIDE_SYSTEM_INSTRUCTION } from "../src/studyGuide.js";
+const taskModels = config as typeof config & { GEMINI_TUTOR_MODEL: string };
 import { studyGuideProviderResponseJsonSchema } from "../src/studyGuideSchemas.js";
 import { buildQuizGenerationPayload } from "../../src/adventure/quizGeneration.ts";
 import { reviewMaterialSource } from "../../src/adventure/materialSources.ts";
@@ -22,12 +23,12 @@ const providerDraft = {
 };
 const draft = { title: providerDraft.title, text: providerDraft.body };
 const originalKey = config.GEMINI_API_KEY;
-const originalModel = config.GEMINI_MODEL;
+const originalModel = taskModels.GEMINI_TUTOR_MODEL;
 const originalFallbackModel = config.GEMINI_FALLBACK_MODEL;
 
 afterEach(() => {
   config.GEMINI_API_KEY = originalKey;
-  config.GEMINI_MODEL = originalModel;
+  taskModels.GEMINI_TUTOR_MODEL = originalModel;
   config.GEMINI_FALLBACK_MODEL = originalFallbackModel;
   vi.resetAllMocks();
   vi.useRealTimers();
@@ -36,11 +37,13 @@ afterEach(() => {
 describe("prompt-generated study guide", () => {
   it("returns a concise requested list as the editable public title and text draft", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "legacy-model";
+    taskModels.GEMINI_TUTOR_MODEL = "tutor-specific-model";
     generateContent.mockResolvedValue({ text: JSON.stringify(providerDraft) });
 
     await expect(generateStudyGuide(input)).resolves.toEqual(draft);
     const request = generateContent.mock.calls[0][0];
-    expect(request.model).toBe(config.GEMINI_MODEL);
+    expect(request.model).toBe("tutor-specific-model");
     expect(request.config.responseMimeType).toBe("application/json");
     expect(request.config.responseJsonSchema).toEqual(studyGuideProviderResponseJsonSchema);
     expect(request.config.maxOutputTokens).toBe(16_000);
@@ -174,7 +177,7 @@ describe("prompt-generated study guide", () => {
 
   it("maps provider quota errors to a safe retryable API error", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     generateContent.mockRejectedValue({ status: 429, message: "private provider details" });
 
@@ -192,7 +195,7 @@ describe("prompt-generated study guide", () => {
     { name: "upstream availability", error: { status: 503, code: "UNAVAILABLE", message: "private provider details" }, status: 503, kind: "service-unavailable" },
   ])("maps $name provider errors to safe API categories", async ({ error, status, kind }) => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "";
     generateContent.mockRejectedValue(error);
 
@@ -209,7 +212,7 @@ describe("prompt-generated study guide", () => {
 
   it("does not retry configuration errors", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     generateContent.mockRejectedValueOnce({ status: 400, message: "private provider details" });
 
@@ -222,7 +225,7 @@ describe("prompt-generated study guide", () => {
 
   it("does not retry provider authentication errors", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     generateContent.mockRejectedValueOnce({ status: 403, code: "PERMISSION_DENIED", message: "private provider details" });
 
@@ -235,7 +238,7 @@ describe("prompt-generated study guide", () => {
 
   it("does not retry when the primary times out and the fallback names the same model", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "same-model";
+    taskModels.GEMINI_TUTOR_MODEL = "same-model";
     config.GEMINI_FALLBACK_MODEL = "same-model";
     vi.useFakeTimers();
     generateContent.mockImplementationOnce(request => new Promise((_resolve, reject) => {
@@ -263,7 +266,7 @@ describe("prompt-generated study guide", () => {
 
   it("aborts a stalled primary and returns the successful fallback response", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     vi.useFakeTimers();
     let primarySignal: AbortSignal | undefined;
@@ -290,7 +293,7 @@ describe("prompt-generated study guide", () => {
 
   it("keeps the fallback within the 90-second deadline and aborts it when the deadline expires", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     vi.useFakeTimers();
     let primarySignal: AbortSignal | undefined;
@@ -318,7 +321,7 @@ describe("prompt-generated study guide", () => {
 
   it("returns 499 on caller cancellation without starting a fallback", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     const caller = new AbortController();
     let primarySignal: AbortSignal | undefined;
@@ -338,7 +341,7 @@ describe("prompt-generated study guide", () => {
 
   it("cancels the fallback when the caller aborts after the primary timeout", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_MODEL = "primary-model";
+    taskModels.GEMINI_TUTOR_MODEL = "primary-model";
     config.GEMINI_FALLBACK_MODEL = "fallback-model";
     vi.useFakeTimers();
     const caller = new AbortController();

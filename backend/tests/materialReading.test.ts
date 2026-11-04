@@ -7,6 +7,7 @@ vi.mock("@google/genai", async importOriginal => {
   return { ...original, GoogleGenAI: class { models = { generateContent }; } };
 });
 import { config } from "../src/config.js";
+const taskModels = config as typeof config & { GEMINI_QUESTION_MODEL: string };
 import { ApiError } from "../src/errors.js";
 import {
   MAX_MATERIAL_BASE64_CHARS,
@@ -16,7 +17,7 @@ import { readMaterialDocument } from "../src/materialReading.js";
 
 const originalKey = config.GEMINI_API_KEY;
 const originalModel = config.GEMINI_READING_MODEL;
-const originalQuizModel = config.GEMINI_MODEL;
+const originalQuizModel = taskModels.GEMINI_QUESTION_MODEL;
 const originalFallbackModel = config.GEMINI_FALLBACK_MODEL;
 const pdf = async (pageCount: number, useObjectStreams = false) => {
   const document = await PDFDocument.create();
@@ -30,7 +31,7 @@ const response = (pages: Array<{ pageNumber: number; text: string }>, complete =
 afterEach(() => {
   config.GEMINI_API_KEY = originalKey;
   config.GEMINI_READING_MODEL = originalModel;
-  config.GEMINI_MODEL = originalQuizModel;
+  taskModels.GEMINI_QUESTION_MODEL = originalQuizModel;
   config.GEMINI_FALLBACK_MODEL = originalFallbackModel;
   vi.resetAllMocks();
   vi.useRealTimers();
@@ -65,7 +66,7 @@ describe("Gemini material reader", () => {
   it("sends a validated PDF inline and reconstructs all pages in page order", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
     config.GEMINI_READING_MODEL = "reader-only";
-    config.GEMINI_MODEL = "quiz-only";
+    taskModels.GEMINI_QUESTION_MODEL = "quiz-only";
     const data = await pdf(2);
     generateContent.mockResolvedValue({ text: response([
       { pageNumber: 2, text: "Trang hai: từ vựng tiếng Anh." },

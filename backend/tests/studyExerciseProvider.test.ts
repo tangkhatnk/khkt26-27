@@ -7,13 +7,18 @@ vi.mock("@google/genai", async importOriginal => {
 });
 
 import { config } from "../src/config.js";
+const taskModels = config as typeof config & {
+  GEMINI_QUESTION_MODEL: string;
+  GEMINI_EVALUATION_MODEL: string;
+};
 import {
   generateStudyExerciseQuestions,
   generateStudyExerciseSolutions,
 } from "../src/studyExerciseProvider.js";
 
 const originalKey = config.GEMINI_API_KEY;
-const originalModel = config.GEMINI_MODEL;
+const originalQuestionModel = taskModels.GEMINI_QUESTION_MODEL;
+const originalEvaluationModel = taskModels.GEMINI_EVALUATION_MODEL;
 const originalFallback = config.GEMINI_FALLBACK_MODEL;
 
 function question(type: string, evidenceExcerpt: string, index: number) {
@@ -28,7 +33,8 @@ function question(type: string, evidenceExcerpt: string, index: number) {
 
 afterEach(() => {
   config.GEMINI_API_KEY = originalKey;
-  config.GEMINI_MODEL = originalModel;
+  taskModels.GEMINI_QUESTION_MODEL = originalQuestionModel;
+  taskModels.GEMINI_EVALUATION_MODEL = originalEvaluationModel;
   config.GEMINI_FALLBACK_MODEL = originalFallback;
   vi.useRealTimers();
   vi.resetAllMocks();
@@ -52,6 +58,8 @@ describe("study exercise Gemini provider", () => {
 
   it("generates grounded open-ended questions without answer fields", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "legacy-model";
+    taskModels.GEMINI_QUESTION_MODEL = "question-specific-model";
     const source = "A stack follows last-in, first-out (LIFO) order.";
     const response = {
       exercises: [{
@@ -62,6 +70,7 @@ describe("study exercise Gemini provider", () => {
     generateContent.mockResolvedValueOnce({ text: JSON.stringify(response) });
     await expect(generateStudyExerciseQuestions(source, 1)).resolves.toEqual(response.exercises);
     const request = generateContent.mock.calls[0][0];
+    expect(request.model).toBe("question-specific-model");
     expect(request.config.responseMimeType).toBe("application/json");
     expect(request.config.responseJsonSchema.properties.exercises.items.properties.answer).toBeUndefined();
     expect(request.config.responseJsonSchema.properties.exercises.items.properties.explanation).toBeUndefined();
@@ -105,7 +114,7 @@ describe("study exercise Gemini provider", () => {
 
   it("repairs one invalid typed batch on the same working model", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_FALLBACK_MODEL = originalModel;
+    config.GEMINI_FALLBACK_MODEL = originalQuestionModel;
     const source = "The base remains fixed while height changes.";
     const invalid = { exercises: [{
       type: "true-false",
@@ -128,7 +137,7 @@ describe("study exercise Gemini provider", () => {
 
     const requests = generateContent.mock.calls.map(([request]) => request);
     expect(requests).toHaveLength(2);
-    expect(requests.map(request => request.model)).toEqual([originalModel, originalModel]);
+    expect(requests.map(request => request.model)).toEqual([originalQuestionModel, originalQuestionModel]);
     expect(requests.map(request =>
       request.config.responseJsonSchema.properties.exercises.items.properties.type.enum))
       .toEqual([["true-false"], ["true-false"]]);
@@ -153,7 +162,7 @@ describe("study exercise Gemini provider", () => {
     })).resolves.toHaveLength(1);
     const requests = generateContent.mock.calls.map(([request]) => request);
     expect(requests.map(request => request.model)).toEqual([
-      originalModel, "fallback-test-model", "fallback-test-model",
+      originalQuestionModel, "fallback-test-model", "fallback-test-model",
     ]);
     expect(requests.map(request =>
       request.config.responseJsonSchema.properties.exercises.items.properties.type.enum))
@@ -162,7 +171,7 @@ describe("study exercise Gemini provider", () => {
 
   it("rejects a batch when its one validation repair is still invalid", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_FALLBACK_MODEL = originalModel;
+    config.GEMINI_FALLBACK_MODEL = originalQuestionModel;
     const source = "The base remains fixed while height changes.";
     const invalid = { exercises: [{
       type: "true-false",
@@ -181,7 +190,7 @@ describe("study exercise Gemini provider", () => {
 
   it("uses only one validation repair across all requested batches", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_FALLBACK_MODEL = originalModel;
+    config.GEMINI_FALLBACK_MODEL = originalQuestionModel;
     const source = "The base remains fixed while height changes.";
     const invalid = (type: string, choices: string[]) => ({ exercises: [{
       type,
@@ -204,12 +213,12 @@ describe("study exercise Gemini provider", () => {
     })).rejects.toMatchObject({ status: 502, kind: "invalid-ai-output" });
     expect(generateContent).toHaveBeenCalledTimes(3);
     expect(generateContent.mock.calls.map(([request]) => request.model))
-      .toEqual([originalModel, originalModel, originalModel]);
+      .toEqual([originalQuestionModel, originalQuestionModel, originalQuestionModel]);
   });
 
   it("propagates caller cancellation during the validation repair", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_FALLBACK_MODEL = originalModel;
+    config.GEMINI_FALLBACK_MODEL = originalQuestionModel;
     const source = "The base remains fixed while height changes.";
     generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [{
       type: "true-false", prompt: "Is this statement accurate?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
@@ -236,7 +245,7 @@ describe("study exercise Gemini provider", () => {
 
   it("keeps a validation repair inside the shared 85 second generation deadline", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    config.GEMINI_FALLBACK_MODEL = originalModel;
+    config.GEMINI_FALLBACK_MODEL = originalQuestionModel;
     vi.useFakeTimers();
     vi.setSystemTime(100_000);
     const startedAt = Date.now();
@@ -385,7 +394,7 @@ describe("study exercise Gemini provider", () => {
 
     expect(generateContent).toHaveBeenCalledTimes(2);
     expect(generateContent.mock.calls.map(([request]) => request.model))
-      .toEqual([originalModel, "fallback-test-model"]);
+      .toEqual([originalQuestionModel, "fallback-test-model"]);
   });
 
   it("keeps a fallback window after a local provider-attempt timeout", async () => {
@@ -409,7 +418,7 @@ describe("study exercise Gemini provider", () => {
 
     await expect(pending).resolves.toHaveLength(1);
     expect(generateContent.mock.calls.map(([request]) => request.model))
-      .toEqual([originalModel, "fallback-test-model"]);
+      .toEqual([originalQuestionModel, "fallback-test-model"]);
     expect(generateContent.mock.calls[1]![0].config.httpOptions.timeout).toBeLessThanOrEqual(
       85_000 - primaryBudget - 1_000,
     );
@@ -456,7 +465,7 @@ describe("study exercise Gemini provider", () => {
 
     expect(generated).toHaveLength(4);
     expect(requests.map(request => request.model)).toEqual([
-      originalModel,
+      originalQuestionModel,
       "fallback-test-model", "fallback-test-model", "fallback-test-model", "fallback-test-model", "fallback-test-model",
     ]);
     expect(budgets).toEqual([
@@ -492,7 +501,7 @@ describe("study exercise Gemini provider", () => {
         "A stack follows last-in, first-out order.", { multipleChoice: 0, trueFalse: 0, shortAnswer: 1, essay: 0 },
       )).resolves.toHaveLength(1);
       expect(generateContent.mock.calls.map(([request]) => request.model))
-        .toEqual([originalModel, "fallback-test-model"]);
+        .toEqual([originalQuestionModel, "fallback-test-model"]);
     }
   });
 
@@ -516,7 +525,7 @@ describe("study exercise Gemini provider", () => {
     });
     expect(generated).toHaveLength(2);
     expect(generateContent.mock.calls.map(([request]) => request.model))
-      .toEqual([originalModel, "fallback-test-model", "fallback-test-model"]);
+      .toEqual([originalQuestionModel, "fallback-test-model", "fallback-test-model"]);
   });
 
   it("does not fall back for quota, billing, permission, or missing-model failures", async () => {
@@ -558,6 +567,8 @@ describe("study exercise Gemini provider", () => {
 
   it("returns structured solutions for the supplied exercise IDs", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_MODEL = "legacy-model";
+    taskModels.GEMINI_EVALUATION_MODEL = "evaluation-specific-model";
     const exercises = [{
       id: "00000000-0000-4000-8000-000000000007",
       prompt: "Solve 2x + 4 = 10 and show the algebraic steps.",
@@ -570,6 +581,7 @@ describe("study exercise Gemini provider", () => {
     generateContent.mockResolvedValueOnce({ text: JSON.stringify(solutions) });
     await expect(generateStudyExerciseSolutions("Solve 2x + 4 = 10.", exercises))
       .resolves.toEqual(solutions.exercises);
+    expect(generateContent.mock.calls[0][0].model).toBe("evaluation-specific-model");
   });
 
   it("solves larger sets in batches of at most five", async () => {

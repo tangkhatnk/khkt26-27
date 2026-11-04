@@ -43,7 +43,7 @@ function completeSession(id: string, started = startAt, target = 120): Session {
 }
 
 function fakeDb(world: World) {
-  const db = {
+  const queryDb = {
     $queryRaw: vi.fn(async (_strings: TemplateStringsArray, ...values: unknown[]) => {
       const sessionId = String(values[0]);
       return [{
@@ -51,6 +51,10 @@ function fakeDb(world: World) {
         sessionOverride: world.sessionOverrides?.[sessionId] as SessionOverride | undefined ?? null,
       }];
     }),
+  };
+  const db = {
+    ...queryDb,
+    $transaction: vi.fn(async (callback: (tx: typeof queryDb) => unknown) => callback(queryDb)),
   };
   return db as unknown as PrismaClient;
 }

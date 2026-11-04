@@ -6,6 +6,7 @@ vi.mock("@google/genai", async importOriginal => {
 });
 import { config } from "../src/config.js";
 import { generateGeminiQuiz, quizResponseSchema } from "../src/gemini.js";
+const taskModels = config as typeof config & { GEMINI_QUESTION_MODEL: string };
 const question = { id: "q1", question: "Question?", options: ["A", "B", "C", "D"], correctAnswerIndex: 1, explanation: "Reason" };
 const exactTwoQuestionBatch = [
   { ...question, knowledgePoint: "Photosynthesis" },
@@ -100,11 +101,11 @@ const providerRepairBatch = [
   },
 ];
 const originalKey = config.GEMINI_API_KEY;
-const originalModel = config.GEMINI_MODEL;
+const originalModel = taskModels.GEMINI_QUESTION_MODEL;
 const originalFallbackModel = config.GEMINI_FALLBACK_MODEL;
 afterEach(() => {
   config.GEMINI_API_KEY = originalKey;
-  config.GEMINI_MODEL = originalModel;
+  taskModels.GEMINI_QUESTION_MODEL = originalModel;
   config.GEMINI_FALLBACK_MODEL = originalFallbackModel;
   vi.resetAllMocks();
   vi.useRealTimers();
@@ -112,11 +113,13 @@ afterEach(() => {
 describe("Gemini adapter", () => {
   it("sends untrusted study data with a fixed JSON schema and configured model", async () => {
     config.GEMINI_API_KEY = "test-only-key";
+    config.GEMINI_MODEL = "legacy-model";
+    taskModels.GEMINI_QUESTION_MODEL = "question-specific-model";
     generateContent.mockResolvedValue({ text: JSON.stringify([groundedQuestion]) });
     expect(await generateGeminiQuiz({ topic: "biology", documentText: sourceText, documentAttached: true, goal: "Review photosynthesis", count: 1 }))
       .toEqual([groundedQuestion]);
     const request = generateContent.mock.calls[0][0];
-    expect(request.model).toBe(config.GEMINI_MODEL);
+    expect(request.model).toBe("question-specific-model");
     expect(request.config.responseMimeType).toBe("application/json");
     expect(request.config.responseJsonSchema).toEqual(quizResponseSchema(true));
     expect(request.config.responseJsonSchema.items.properties.options.minItems).toBe(4);
@@ -385,7 +388,7 @@ describe("Gemini adapter", () => {
   it("uses exact 35/40 second provider budgets and leaves fifteen seconds for source repair", async () => {
     vi.useFakeTimers();
     config.GEMINI_API_KEY = "test-only-key";
-    config.GEMINI_MODEL = "gemini-primary";
+    taskModels.GEMINI_QUESTION_MODEL = "gemini-primary";
     config.GEMINI_FALLBACK_MODEL = "gemini-fallback";
     const unsupported = { ...groundedQuestion, correctAnswerIndex: 1 };
     let rejectPrimary!: (error: unknown) => void;
@@ -472,8 +475,8 @@ describe("Gemini adapter", () => {
     [{ status: 402, message: "provider details must stay private" }, 402, "provider-billing-required", "Gemini cần được cấp thêm tín dụng hoặc bật thanh toán trong Google AI Studio."],
     [{ status: 429, message: "provider details must stay private" }, 429, "provider-quota-exceeded", "Gemini đã vượt hạn mức. Hãy kiểm tra hạn mức trong Google AI Studio rồi thử lại."],
     [{ status: 503, message: "provider details must stay private" }, 503, "service-unavailable", "Gemini hiện không khả dụng. Vui lòng thử lại sau."],
-    [{ status: 404, message: "provider details must stay private" }, 502, "provider-model-unavailable", "Model Gemini đã chọn không khả dụng. Hãy đổi GEMINI_MODEL sang model hiện được hỗ trợ trong Google AI Studio."],
-    [{ status: "NOT_FOUND", message: "provider details must stay private" }, 502, "provider-model-unavailable", "Model Gemini đã chọn không khả dụng. Hãy đổi GEMINI_MODEL sang model hiện được hỗ trợ trong Google AI Studio."],
+    [{ status: 404, message: "provider details must stay private" }, 502, "provider-model-unavailable", "Model Gemini tạo câu hỏi không khả dụng. Hãy kiểm tra GEMINI_QUESTION_MODEL."],
+    [{ status: "NOT_FOUND", message: "provider details must stay private" }, 502, "provider-model-unavailable", "Model Gemini tạo câu hỏi không khả dụng. Hãy kiểm tra GEMINI_QUESTION_MODEL."],
   ])("classifies provider failures without exposing provider details", async (error, status, kind, message) => {
     config.GEMINI_API_KEY = "test-only-key";
     generateContent.mockRejectedValue(error);
@@ -481,7 +484,7 @@ describe("Gemini adapter", () => {
   });
   it.each([[503, "UNAVAILABLE"], [504, "DEADLINE_EXCEEDED"]])("falls back once within the deadline after an explicit transient response %s", async (status, providerStatus) => {
     config.GEMINI_API_KEY = "test-only-key";
-    config.GEMINI_MODEL = "gemini-primary";
+    taskModels.GEMINI_QUESTION_MODEL = "gemini-primary";
     config.GEMINI_FALLBACK_MODEL = "gemini-fallback";
     generateContent
       .mockRejectedValueOnce({ status, message: JSON.stringify({ error: { status: providerStatus } }) })
@@ -525,7 +528,7 @@ describe("Gemini adapter", () => {
   });
   it.each(["", "gemini-3.8-flash"])("does not fall back when fallback model is disabled or equals primary (%s)", async fallbackModel => {
     config.GEMINI_API_KEY = "test-only-key";
-    config.GEMINI_MODEL = "gemini-3.8-flash";
+    taskModels.GEMINI_QUESTION_MODEL = "gemini-3.8-flash";
     config.GEMINI_FALLBACK_MODEL = fallbackModel;
     generateContent.mockRejectedValue({ status: 503, message: JSON.stringify({ error: { status: "UNAVAILABLE" } }) });
 
@@ -534,7 +537,7 @@ describe("Gemini adapter", () => {
   });
   it("repairs invalid primary output on the same model instead of falling back", async () => {
     config.GEMINI_API_KEY = "test-only-key";
-    config.GEMINI_MODEL = "gemini-primary";
+    taskModels.GEMINI_QUESTION_MODEL = "gemini-primary";
     config.GEMINI_FALLBACK_MODEL = "gemini-fallback";
     generateContent
       .mockResolvedValueOnce({ text: "not json" })
@@ -596,7 +599,7 @@ describe("Gemini adapter", () => {
   it("reserves fallback repair time within the same 90-second deadline for malformed no-source output", async () => {
     vi.useFakeTimers();
     config.GEMINI_API_KEY = "test-only-key";
-    config.GEMINI_MODEL = "gemini-primary";
+    taskModels.GEMINI_QUESTION_MODEL = "gemini-primary";
     config.GEMINI_FALLBACK_MODEL = "gemini-fallback";
     let rejectPrimary!: (error: unknown) => void;
     let resolveFallback!: (response: { text: string }) => void;

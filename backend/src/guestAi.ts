@@ -5,6 +5,7 @@ import { z } from "zod";
 import { issueGuestAiCredential, verifyGuestAiCredential } from "./guestAiAuth.js";
 import { reserveGuestAiBudget } from "./guestAiBudget.js";
 import { reserveGuestAiSessionStart } from "./guestAiSessions.js";
+import { guestAiWorkflowRoutes, type GuestAiWorkflowProviders } from "./guestAiWorkflows.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -12,7 +13,12 @@ declare module "fastify" {
   }
 }
 
-export function guestAiRoutes(app: FastifyInstance, db: PrismaClient, redis: Redis) {
+export function guestAiRoutes(
+  app: FastifyInstance,
+  db: PrismaClient,
+  redis: Redis,
+  providers?: GuestAiWorkflowProviders,
+) {
   app.decorateRequest("guestAiPrincipal", null);
 
   app.post("/api/v1/ai/guest/credential", {
@@ -56,6 +62,8 @@ export function guestAiRoutes(app: FastifyInstance, db: PrismaClient, redis: Red
       ...(record.breakPlan ? { breakPlan: record.breakPlan } : {}),
     };
   });
+
+  guestAiWorkflowRoutes(app, db, redis, authenticateGuestAi, providers);
 
   return { authenticateGuestAi };
 }

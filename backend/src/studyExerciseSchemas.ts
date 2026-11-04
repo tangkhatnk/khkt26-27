@@ -110,12 +110,14 @@ const studyExerciseQuestionList = z.array(studyExerciseQuestionSchema).min(1).ma
 export const studyExercisePreparationResponseSchema = z.discriminatedUnion("mode", [
   z.object({
     id: z.uuid(),
+    requestId: z.uuid().optional(),
     plannedSessionId: z.uuid(),
     mode: z.literal("provided"),
     exercises: studyExerciseQuestionList,
   }).strict(),
   z.object({
     id: z.uuid(),
+    requestId: z.uuid().optional(),
     plannedSessionId: z.uuid(),
     mode: z.literal("generated"),
     sourceFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
