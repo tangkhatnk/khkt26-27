@@ -38,6 +38,13 @@ test('scene timing exposes study distance and fixed rest anchors while retaining
   assert.equal(beforeTrip.remainingSeconds, 180);
 });
 
+test('a synchronized no-break plan does not reuse a stale device-local break plan', () => {
+  const staleLocalPlan = { count: 1, seconds: 60 };
+  assert.equal(focus.resolveTripBreakPlan({ synchronized: true, sharedPlan: undefined, localPlan: staleLocalPlan }), undefined);
+  assert.deepEqual(focus.resolveTripBreakPlan({ synchronized: true, sharedPlan: staleLocalPlan, localPlan: undefined }), staleLocalPlan);
+  assert.deepEqual(focus.resolveTripBreakPlan({ synchronized: false, sharedPlan: undefined, localPlan: staleLocalPlan }), staleLocalPlan);
+});
+
 test('blur, visibility, pagehide, and route departure record one distraction', () => {
   const first = depart(trip(), 11000);
   const duplicate = leaveFocusView(depart(first, 12000), 13000);

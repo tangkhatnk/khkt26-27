@@ -43,6 +43,15 @@ export type ActiveTrip = {
   deviceCategory?: DeviceCategory;
 };
 
+/** A synchronized trip uses its server-owned break plan exactly, including no plan. */
+export function resolveTripBreakPlan(input: {
+  synchronized: boolean;
+  sharedPlan: BreakPlan | undefined;
+  localPlan: BreakPlan | undefined;
+}): BreakPlan | undefined {
+  return input.synchronized ? input.sharedPlan : input.sharedPlan ?? input.localPlan;
+}
+
 /** Compare the current wall clock with the active trip's last accepted timestamp. */
 export function isDeviceClockBehind(lastAt: number, readClock: () => number = Date.now): boolean {
   return readClock() < lastAt;

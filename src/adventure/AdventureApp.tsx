@@ -42,7 +42,16 @@ import {
   StudyExerciseQuestionViewer,
 } from "./StudyExercisePreparation";
 import { HomeTripForm } from "./HomeTripForm";
-import { isSynchronizedTrip, shouldAutoResumeSynchronizedTrip, synchronizedTripControls } from "./synchronizedTripUi";
+import {
+  canMarkSynchronizedTripReady,
+  isSynchronizedTrip,
+  shouldAutoResumeSynchronizedTrip,
+  shouldOfferSynchronizedTripReprepare,
+  synchronizedTripControls,
+  synchronizedTripDraftForSession,
+  synchronizedTripQuizPreferences,
+  tripDraftLocks,
+} from "./synchronizedTripUi";
 import { updateQuickTripDraft, type QuickTripDraft } from "./quickTripDraft";
 import { QuizPrefetchCoordinator, quizPrefetchScopeKey, type QuizPrefetchScope } from "./quizPrefetch";
 import { isCurrentQuizPrefetchRequest } from "./quizPrefetchPresentation";
@@ -75,6 +84,7 @@ import {
   isDeviceClockBehind,
   leaveFocusView,
   restore,
+  resolveTripBreakPlan,
   returnFromBackground,
   sessionEndAt,
   startSynchronizedSession,
@@ -134,7 +144,7 @@ const nav = [
   { id: "station", icon: "⌂", label: "Ga chính" },
   { id: "map", icon: "⌁", label: "Bản đồ hành trình" },
   { id: "carriage", icon: "▣", label: "Toa của tôi" },
-  { id: "group", icon: "♧", label: "Đoàn tàu" },
+  { id: "group", icon: "♧", label: "Chuyến đi chung" },
   { id: "journal", icon: "▤", label: "Nhật ký học tập" },
   { id: "experiments", icon: "◎", label: "Lịch sử chuyến đi" },
   { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo" },
@@ -663,9 +673,8 @@ function AdventureWorkspace() {
     ? serverTimeFromClientTime(now, serverClockOffsetMs.current!)
     : data?.serverNow ?? now;
   const selectedGroupTrip = mode === "group" ? group?.trip : undefined;
-  const privateTripDraftLocked = selectedGroupTrip
-    ? !isSynchronizedTrip(selectedGroupTrip) || synchronizedControls.privateDraftLocked
-    : false;
+  const { privateInputsLocked: privateTripDraftLocked, sharedPlanLocked: tripPlanFieldsLocked } =
+    tripDraftLocks(selectedGroupTrip, synchronizedControls.privateDraftLocked);
   const recoverableGroupTripSessionId = group?.trip?.ownSessionId
     ? recoverBoundTripSessionId({
         ownSessionId: group.trip.ownSessionId,
@@ -674,6 +683,9 @@ function AdventureWorkspace() {
         savedSessionIds: saved.snapshot?.sessions.map((session) => session.id) ?? [],
       })
     : null;
+  const synchronizedOwnTripDraft = isSynchronizedTrip(group?.trip)
+    ? synchronizedTripDraftForSession(saved.readyTripDrafts, group.trip.ownSessionId, group?.id ?? "")
+    : undefined;
   const removedIds = new Set(removedSessionIds);
   const pendingSoloSeconds = saved.pending.filter(session => !session.groupId &&
     session.userId === owner && !removedIds.has(session.id) &&
@@ -1304,24 +1316,29 @@ function AdventureWorkspace() {
     go("ticket");
   };
   async function mutation(path: string, body: unknown): Promise<Snapshot> {
-    if (needsLogin) throw new Error("Đăng nhập lại để cập nhật đoàn hoặc đồng bộ trang trí.");
+    if (needsLogin) throw new Error("Đăng nhập lại để cập nhật nhóm hoặc đồng bộ trang trí.");
     const id = ownerRef.current;
     const result = await post<Snapshot>(`/adventure/${path}`, body);
     if (ownerRef.current === id && workspaceLive.current)
       commitRemoteSnapshot(result);
     return result;
   }
-  function restoreSynchronizedDraft(sessionId: string, trip: NonNullable<Snapshot["group"]>["trip"]) {
-    if (!isSynchronizedTrip(trip)) return;
-    const draft = current.current.readyTripDrafts?.[sessionId];
-    setGoal(draft?.goal ?? quickTripDraft.current.goal);
-    setTopic(draft?.topic ?? quickTripDraft.current.topic);
+  function restoreSynchronizedDraft(sessionId: string, trip: NonNullable<Snapshot["group"]>["trip"], groupId: string): boolean {
+    if (!isSynchronizedTrip(trip)) return true;
+    const draft = synchronizedTripDraftForSession(current.current.readyTripDrafts, sessionId, groupId);
+    if (!draft) return false;
+    const quizPreferences = synchronizedTripQuizPreferences(draft);
+    setGoal(draft.goal);
+    setTopic(draft.topic);
     setDocumentText(current.current.notes[sessionId] ?? "");
     setSources(current.current.sources?.[sessionId] ?? []);
     setMaterials(current.current.materials?.[sessionId] ?? []);
+    setQuizCount(quizPreferences.quizCount);
+    setSkipQuizReview(quizPreferences.skipQuizReview);
     setMinutes(trip.target / 60);
     setBreakCount(trip.breakPlan?.count ?? 0);
-    if (trip.breakPlan) setBreakMinutes(trip.breakPlan.seconds / 60);
+    setBreakMinutes(trip.breakPlan ? trip.breakPlan.seconds / 60 : 5);
+    return true;
   }
   function prepareGroupTripTicket() {
     const trip = group?.trip;
@@ -1345,7 +1362,10 @@ function AdventureWorkspace() {
         return;
       }
       reservationId = recoveredId;
-      if (isSynchronizedTrip(trip)) restoreSynchronizedDraft(recoveredId, trip);
+      if (isSynchronizedTrip(trip) && !restoreSynchronizedDraft(recoveredId, trip, group.id)) {
+        setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
+        return;
+      }
     } else {
       if (isSynchronizedTrip(trip)) {
         if (trip.status !== "waiting" || (memberStatus !== "not-ready" && memberStatus !== "ready")) return;
@@ -1355,11 +1375,14 @@ function AdventureWorkspace() {
             setError("Không tìm thấy bản mục tiêu riêng trên thiết bị. Bỏ sẵn sàng rồi chuẩn bị lại.");
             return;
           }
-          restoreSynchronizedDraft(reservationId, trip);
+          if (!restoreSynchronizedDraft(reservationId, trip, group.id)) {
+            setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
+            return;
+          }
         } else {
           setMinutes(trip.target / 60);
           setBreakCount(trip.breakPlan?.count ?? 0);
-          if (trip.breakPlan) setBreakMinutes(trip.breakPlan.seconds / 60);
+          setBreakMinutes(trip.breakPlan ? trip.breakPlan.seconds / 60 : 5);
         }
       } else if (memberStatus !== "ready") return;
     }
@@ -1377,6 +1400,40 @@ function AdventureWorkspace() {
     setMode("group");
     go("ticket", { preserveTicketPlan: true });
   }
+  async function reprepareSynchronizedTrip() {
+    const trip = group?.trip;
+    const ownerId = ownerRef.current;
+    if (!group || !isSynchronizedTrip(trip) || !shouldOfferSynchronizedTripReprepare({
+      tripStatus: trip.status,
+      ownStatus: synchronizedControls.ownStatus,
+      localDraftReady: Boolean(synchronizedTripDraftForSession(current.current.readyTripDrafts, trip.ownSessionId, group.id)),
+    })) throw new Error("Không thể bỏ sẵn sàng cho chuyến này.");
+
+    const result = await mutation("trip/ready", { groupId: group.id, ready: false });
+    if (ownerRef.current !== ownerId || !workspaceLive.current) return;
+    if (result.group?.id !== group.id || !isSynchronizedTrip(result.group.trip) || result.group.trip.status !== "waiting")
+      throw new Error("Trạng thái chuyến đã đổi. Hãy cập nhật tiến độ rồi thử lại.");
+
+    if (trip.ownSessionId) {
+      cancelPendingStudyExerciseForStart(trip.ownSessionId);
+      invalidateStudyExercisePreparationForSession(trip.ownSessionId);
+    }
+    const sessionId = rotateDraftSessionId(draftSessionIdsRef.current, "group", group.id);
+    setDraftTripId(sessionId);
+    setGoal("");
+    setTopic("biology");
+    setDocumentText("");
+    setSources([]);
+    setMaterials([]);
+    setQuizCount("3");
+    setSkipQuizReview(false);
+    setMinutes(result.group.trip.target / 60);
+    setBreakCount(result.group.trip.breakPlan?.count ?? 0);
+    setBreakMinutes(result.group.trip.breakPlan ? result.group.trip.breakPlan.seconds / 60 : 5);
+    setMode("group");
+    go("ticket", { preserveTicketPlan: true });
+    setNotice("Đã bỏ sẵn sàng. Hãy chuẩn bị lại kế hoạch riêng trước khi sẵn sàng.");
+  }
   async function markSynchronizedTripReady() {
     const trip = group?.trip;
     if (!group || !isSynchronizedTrip(trip) || trip.status !== "waiting" || !user)
@@ -1387,16 +1444,38 @@ function AdventureWorkspace() {
       setNotice("Đã bỏ sẵn sàng. Bạn có thể chỉnh mục tiêu riêng và tài liệu.");
       return;
     }
-    if (goal.trim().length < 3) throw new Error("Hãy nhập mục tiêu học riêng dài ít nhất 3 ký tự.");
-    if (studyGuideNeedsConfirmation || materialRequest.current)
+    const readiness = {
+      goal,
+      quizCount,
+      skipQuizReview,
+      studyGuideNeedsConfirmation,
+      materialRequestPending: Boolean(materialRequest.current),
+      exerciseGenerationPending: isStudyExerciseGenerationPendingForSession(draftTripId),
+      loaded,
+      exclusive,
+      hasActiveSession: Boolean(current.current.active),
+    };
+    if (!canMarkSynchronizedTripReady(readiness)) {
+      if (goal.trim().length < 3) throw new Error("Hãy nhập mục tiêu học riêng dài ít nhất 3 ký tự.");
+      if (!canStartSessionWithQuizReview(quizCount, skipQuizReview))
+        throw new Error("Chọn số câu hỏi từ 1 đến 30 hoặc bật tùy chọn bỏ qua ôn tập quiz.");
+      if (readiness.exerciseGenerationPending)
+        throw new Error("Hãy đợi AI tạo bài tập xong hoặc hủy yêu cầu trong mục Bài tập trước khi sẵn sàng.");
+      if (!loaded || !exclusive)
+        throw new Error("Hãy đồng bộ thiết bị trước khi sẵn sàng.");
+      if (readiness.hasActiveSession)
+        throw new Error("Hãy kết thúc phiên khác trước khi sẵn sàng cho chuyến đi chung.");
       throw new Error("Hãy hoàn tất thao tác tài liệu đang mở trước khi sẵn sàng.");
+    }
     const sessionId = draftTripId;
+    const quizPreferences = synchronizedTripQuizPreferences({ quizCount, skipQuizReview });
     const privateDraft: SynchronizedTripDraft = {
       groupId: group.id,
       goal: goal.trim(),
       topic,
       target: trip.target,
       ...(trip.breakPlan ? { breakPlan: trip.breakPlan } : {}),
+      ...quizPreferences,
     };
     const readyTripDrafts = { ...(current.current.readyTripDrafts ?? {}), [sessionId]: privateDraft };
     for (const staleId of Object.keys(readyTripDrafts).slice(0, Math.max(0, Object.keys(readyTripDrafts).length - 24)))
@@ -1433,6 +1512,12 @@ function AdventureWorkspace() {
       return;
     }
     const ownTripStatus = group?.members.find((member) => member.id === user?.id)?.tripStatus;
+    if (synchronizedTrip && synchronizedTrip.ownSessionId && group &&
+        (synchronizedTrip.status === "departed" || ownTripStatus === "ready") &&
+        !synchronizedTripDraftForSession(current.current.readyTripDrafts, synchronizedTrip.ownSessionId, group.id)) {
+      setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
+      return;
+    }
     if (synchronizedTrip && synchronizedTrip.status === "waiting" && ownTripStatus !== "ready") {
       setError("Hãy chuẩn bị mục tiêu riêng rồi sẵn sàng trước khi khởi hành.");
       return;
@@ -1492,7 +1577,11 @@ function AdventureWorkspace() {
         }) => {
         const at = input.started;
         const observedAt = input.syncClock ? input.observedAt ?? input.started : input.started;
-        const breakPlan = input.breakPlan ?? (breakCount > 0 ? plannedBreaks : undefined);
+        const breakPlan = resolveTripBreakPlan({
+          synchronized,
+          sharedPlan: input.breakPlan,
+          localPlan: breakCount > 0 ? plannedBreaks : undefined,
+        });
         let trip: ActiveTrip = {
           id: input.id,
           owner,
@@ -1680,6 +1769,7 @@ function AdventureWorkspace() {
       activeSessionId: saved.active?.id ?? null,
       pendingSessionIds: saved.pending.map((session) => session.id),
       savedSessionIds: data?.sessions.map((session) => session.id) ?? [],
+      localDraftReady: Boolean(synchronizedTripDraftForSession(saved.readyTripDrafts, sessionId, group?.id ?? "")),
       inFlight: busy || tripStartInFlight.current,
     });
     if (!shouldResume || !loaded || !exclusive || !online || needsLogin || studyGuideNeedsConfirmation || materialRequest.current)
@@ -2092,18 +2182,23 @@ function AdventureWorkspace() {
         </a>
         <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
         <nav aria-label="Điều hướng chính">
-          {nav.map((n) => (
-            <button
-              key={n.id}
-              className={view === n.id ? "nav active" : "nav"}
-              aria-current={view === n.id ? "page" : undefined}
-              onClick={() => go(n.id)}
-            >
-              <span aria-hidden="true">{n.icon}</span>
-              {n.label}
-              {n.id === "station" && <i />}
-            </button>
-          ))}
+          {nav.map((n) => {
+            const label = n.id === "group" && group && !isSynchronizedTrip(group.trip)
+              ? "Đoàn tàu"
+              : n.label;
+            return (
+              <button
+                key={n.id}
+                className={view === n.id ? "nav active" : "nav"}
+                aria-current={view === n.id ? "page" : undefined}
+                onClick={() => go(n.id)}
+              >
+                <span aria-hidden="true">{n.icon}</span>
+                {label}
+                {n.id === "station" && <i />}
+              </button>
+            );
+          })}
         </nav>
         <div className="sidebar-bottom">
           <div className="little-ticket">
@@ -2245,7 +2340,9 @@ function AdventureWorkspace() {
                       <div className="hero-label">
                         <span className="pill">
                           ✦ HÀNH TRÌNH CỦA{" "}
-                          {mode === "group" && group ? "ĐOÀN" : "BẠN"}
+                          {mode === "group" && group
+                            ? isSynchronizedTrip(group.trip) ? "CHUYẾN ĐI CHUNG" : "ĐOÀN"
+                            : "BẠN"}
                         </span>
                         <span className="chapter">
                           0{(journey?.station ?? 0) + 1} / 05
@@ -2444,7 +2541,7 @@ function AdventureWorkspace() {
                           <textarea
                             value={goal}
                             maxLength={500}
-                              disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked}
+                              disabled={busy || studyGuideNeedsConfirmation || tripPlanFieldsLocked}
                             onChange={(e) => {
                               updateQuickTripDraft(quickTripDraft, { goal: e.target.value });
                               setGoal(e.target.value);
@@ -2456,7 +2553,7 @@ function AdventureWorkspace() {
                           Chủ đề
                           <select
                             value={topic}
-                              disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked}
+                              disabled={busy || studyGuideNeedsConfirmation || tripPlanFieldsLocked}
                             onChange={(e) => {
                               updateQuickTripDraft(quickTripDraft, { topic: e.target.value });
                               setTopic(e.target.value);
@@ -2480,6 +2577,7 @@ function AdventureWorkspace() {
                           breakCount={breakCount}
                           breakMinutes={breakMinutes}
                           durationLocked={Boolean(selectedGroupTrip)}
+                          breaksLocked={isSynchronizedTrip(selectedGroupTrip)}
                           onBreakCountChange={(value) => {
                             if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakCount: value });
                             setBreakCount(value);
@@ -2526,7 +2624,7 @@ function AdventureWorkspace() {
                             ? "Thời lượng và giờ nghỉ dùng chung. Mục tiêu, chủ đề và tài liệu do từng người chuẩn bị riêng; mọi phiên bắt đầu theo cùng giờ khởi hành."
                             : group.trip.status === "waiting"
                               ? "Mục tiêu chung đã sẵn sàng. Khi bạn bắt đầu, chuyến sẽ khởi hành và khóa danh sách thành viên."
-                              : "Mục tiêu, chủ đề và thời lượng đã được chủ chuyến đặt. Mỗi người tự bắt đầu phiên và học theo nhịp riêng."
+                              : "Mục tiêu, chủ đề và thời lượng đã được chủ đoàn đặt. Mỗi người tự bắt đầu phiên và học theo nhịp riêng."
                           : mode === "group"
                             ? "Mỗi phiên chung cần thuộc một chuyến đã lập với mục tiêu, chủ đề và thời lượng cụ thể."
                             : group && !group.trip
@@ -2543,7 +2641,17 @@ function AdventureWorkspace() {
                             <button disabled={busy || !online} onClick={() => void run(sync)}>Cập nhật tiến độ</button>
                           </div>}
                           {selectedGroupTrip.status === "waiting" && synchronizedControls.ownStatus === "not-ready" && (
-                            <button className="primary" disabled={busy || !exclusive || !goal.trim() || studyGuideNeedsConfirmation || materialRequest.current !== null}
+                            <button className="primary" disabled={busy || !exclusive || !canMarkSynchronizedTripReady({
+                              goal,
+                              quizCount,
+                              skipQuizReview,
+                              studyGuideNeedsConfirmation,
+                              materialRequestPending: materialRequest.current !== null,
+                              exerciseGenerationPending: isStudyExerciseGenerationPendingForSession(draftTripId),
+                              loaded,
+                              exclusive,
+                              hasActiveSession: Boolean(active),
+                            })}
                               onClick={() => void run(markSynchronizedTripReady)}>
                               Đã chuẩn bị mục tiêu và tài liệu · Sẵn sàng →
                             </button>
@@ -2561,12 +2669,22 @@ function AdventureWorkspace() {
                               {group?.owner === user?.id && !synchronizedControls.canLaunch && <p role="status">Cần ít nhất hai thành viên đã tham gia và mọi người đều sẵn sàng.</p>}
                             </>
                           )}
+                          {selectedGroupTrip.status === "waiting" && synchronizedControls.ownStatus === "ready" && !synchronizedOwnTripDraft && (
+                            <div className="info-box" role="status">
+                              <p>Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Nếu chuyến còn chờ, hãy bỏ sẵn sàng để chuẩn bị lại; nếu đã khởi hành, hãy mở chuyến trên thiết bị đã chuẩn bị.</p>
+                            </div>
+                          )}
                           {selectedGroupTrip.status === "departed" && synchronizedControls.ownStatus === "bound" && (
-                            <button className="primary" disabled={busy || !exclusive || !synchronizedControls.canResume || studyGuideNeedsConfirmation || !!active ||
+                            <button className="primary" disabled={busy || !exclusive || !synchronizedControls.canResume || !synchronizedOwnTripDraft || studyGuideNeedsConfirmation || !!active ||
                               goal.trim().length < 3 || !canStartSessionWithQuizReview(quizCount, skipQuizReview)}
                               onClick={() => start()}>
                               Bắt đầu / khôi phục phiên theo giờ chung →
                             </button>
+                          )}
+                          {selectedGroupTrip.status === "departed" && synchronizedControls.ownStatus === "bound" && !synchronizedOwnTripDraft && (
+                            <div className="info-box" role="status">
+                              <p>Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục phiên.</p>
+                            </div>
                           )}
                         </>
                       ) : (
@@ -2716,7 +2834,9 @@ function AdventureWorkspace() {
                         motionAllowed={active.state === "focus" || active.state === "reconnecting"}
                         reconnect={active.reconnect}
                       />
-                      {active.groupId && <p className="overhead-hint">Bản đồ đoàn mở thêm vùng sau khi máy chủ xác nhận phần đóng góp của phiên này.</p>}
+                      {active.groupId && <p className="overhead-hint">{active.syncClock
+                        ? "Bản đồ chuyến đi chung mở thêm vùng sau khi máy chủ xác nhận phần đóng góp của phiên này."
+                        : "Bản đồ đoàn mở thêm vùng sau khi máy chủ xác nhận phần đóng góp của phiên này."}</p>}
                       <div className="focus-controls">
                         <ThemeToggle />
                         <div className="study-fullscreen-control">
@@ -2780,7 +2900,7 @@ function AdventureWorkspace() {
                         className={mode === "group" ? "selected" : ""}
                         onClick={() => setMode("group")}
                       >
-                        Bản đồ đoàn
+                        {isSynchronizedTrip(group.trip) ? "Bản đồ chuyến đi chung" : "Bản đồ đoàn"}
                       </button>
                     </div>
                   )}
@@ -2791,7 +2911,9 @@ function AdventureWorkspace() {
                     draftSeconds={mapActive ? focused(mapActive) : 0}
                     targetSeconds={mapActive?.target}
                   />
-                  {mode === "group" && group && <p className="overhead-hint">Bản đồ đoàn dùng tiến độ đã được máy chủ xác nhận, gồm giới hạn đóng góp mỗi ngày.</p>}
+                  {mode === "group" && group && <p className="overhead-hint">{isSynchronizedTrip(group.trip)
+                    ? "Bản đồ chuyến đi chung dùng tiến độ đã được máy chủ xác nhận, gồm giới hạn đóng góp mỗi ngày."
+                    : "Bản đồ đoàn dùng tiến độ đã được máy chủ xác nhận, gồm giới hạn đóng góp mỗi ngày."}</p>}
                   {mode === "solo" && pendingSoloSeconds > 0 && <p className="overhead-hint">Vùng đã học được giữ trên thiết bị; các phiên đang chờ đồng bộ sẽ được máy chủ xác nhận khi có mạng.</p>}
                   <div className="station-list">
                     {stations.map((s, i) => (
@@ -3026,7 +3148,7 @@ function AdventureWorkspace() {
                             </div>
                             <h3>{m.name}</h3>
                             <p>
-                              {m.id === group.owner ? (group.trip ? "Chủ chuyến" : "Chủ đoàn") : "Thành viên"}
+                              {m.id === group.owner ? (isSynchronizedTrip(group.trip) ? "Chủ chuyến" : "Chủ đoàn") : "Thành viên"}
                               {m.id === user.id ? " · Bạn" : ""}
                             </p>
                             {group.trip && <small className="trip-member-status">
@@ -3044,7 +3166,7 @@ function AdventureWorkspace() {
                                   )
                                 }
                               >
-                                Chuyển quyền chủ đoàn
+                                Chuyển quyền {isSynchronizedTrip(group.trip) ? "chủ chuyến" : "chủ đoàn"}
                               </button>
                             )}
                           </article>
@@ -3052,7 +3174,7 @@ function AdventureWorkspace() {
                       </div>
                       <div className="two-columns">
                         <section className="panel">
-                          <h2>Chuyến đi chung</h2>
+                          <h2>{isSynchronizedTrip(group.trip) ? "Chuyến đi chung" : "Đoàn tàu"}</h2>
                           <p>
                             {group.members.length} / 6 người · Múi giờ {group.timezone}
                           </p>
@@ -3081,9 +3203,19 @@ function AdventureWorkspace() {
                                       Chuẩn bị mục tiêu và tài liệu riêng →
                                     </button>
                                   )}
-                                  {group.trip.status === "waiting" && synchronizedControls.ownStatus === "ready" && (
+                                  {group.trip.status === "waiting" && synchronizedControls.ownStatus === "ready" && synchronizedOwnTripDraft && (
                                     <button className="primary" disabled={busy} onClick={prepareGroupTripTicket}>
                                       Xem kế hoạch riêng và trạng thái sẵn sàng →
+                                    </button>
+                                  )}
+                                  {shouldOfferSynchronizedTripReprepare({
+                                    tripStatus: group.trip.status,
+                                    ownStatus: synchronizedControls.ownStatus,
+                                    localDraftReady: Boolean(synchronizedOwnTripDraft),
+                                  }) && (
+                                    <button className="primary" disabled={busy || needsLogin || !online}
+                                      onClick={() => void run(reprepareSynchronizedTrip)}>
+                                      Bỏ sẵn sàng và chuẩn bị lại →
                                     </button>
                                   )}
                                   {group.trip.status === "waiting" && group.owner === user.id && !synchronizedControls.canLaunch && (
@@ -3095,9 +3227,11 @@ function AdventureWorkspace() {
                                   {group.trip.status === "departed" && synchronizedControls.ownStatus === "bound" && (
                                     active?.id === group.trip.ownSessionId
                                       ? <button className="primary" onClick={() => go("focus")}>Tiếp tục phiên đang học →</button>
-                                      : recoverableGroupTripSessionId && synchronizedControls.canResume
+                                      : recoverableGroupTripSessionId && synchronizedOwnTripDraft && synchronizedControls.canResume
                                         ? <button className="primary" disabled={busy} onClick={prepareGroupTripTicket}>Bắt đầu / khôi phục phiên →</button>
-                                        : <p role="status">{saved.active
+                                        : <p role="status">{!synchronizedOwnTripDraft
+                                          ? "Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục."
+                                          : saved.active
                                           ? "Một phiên học khác đang chạy. Hãy kết thúc và đồng bộ phiên đó trước."
                                           : group.trip.ownSessionId && saved.pending.some((session) => session.id === group.trip?.ownSessionId)
                                             ? "Phiên này đã kết thúc trên thiết bị và đang chờ đồng bộ. Kết nối mạng rồi cập nhật tiến độ."
@@ -3129,7 +3263,7 @@ function AdventureWorkspace() {
                                     </button>
                                   )}
                                   {group.trip.status === "waiting" && group.owner !== user.id && (
-                                    <p role="status">Chờ chủ chuyến khởi hành. Danh sách thành viên sẽ khóa khi chủ chuyến bắt đầu phiên.</p>
+                                    <p role="status">Chờ chủ đoàn khởi hành. Danh sách thành viên sẽ khóa khi chủ đoàn bắt đầu phiên.</p>
                                   )}
                                   {group.trip.status === "departed" && group.members.find((member) => member.id === user.id)?.tripStatus === "ready" && (
                                     <button className="primary" disabled={busy} onClick={prepareGroupTripTicket}>
@@ -3166,7 +3300,7 @@ function AdventureWorkspace() {
                                 : <p>Hãy rời đoàn cũ trước khi lập một chuyến học mới.</p>}
                             </>
                           )}
-                          <h3>Nhật ký đoàn</h3>
+                          <h3>{isSynchronizedTrip(group.trip) ? "Nhật ký chuyến đi chung" : "Nhật ký đoàn"}</h3>
                           {group.journey.journal.length ? (
                             group.journey.journal.map((e, i) => (
                               <p key={i}>
@@ -3315,7 +3449,7 @@ function AdventureWorkspace() {
                             setNotice("Đã lập chuyến với thời lượng và lịch nghỉ chung. Chuẩn bị mục tiêu riêng rồi mời mọi người.");
                           })}
                         >
-                          Lập chuyến đồng bộ →
+                          Lập chuyến đi chung →
                         </button>
                       </section>
                       <section className="panel form">
@@ -3338,7 +3472,17 @@ function AdventureWorkspace() {
                               if (isSynchronizedTrip(joined.group.trip)) {
                                 const sessionId = groupDraftSessionId(draftSessionIdsRef.current, joined.group.id);
                                 setDraftTripId(sessionId);
-                                restoreSynchronizedDraft(sessionId, joined.group.trip);
+                                const memberStatus = joined.group.members.find((member) => member.id === user?.id)?.tripStatus;
+                                if (memberStatus === "ready" || memberStatus === "bound") {
+                                  const reservedId = joined.group.trip.ownSessionId;
+                                  if (!reservedId || !restoreSynchronizedDraft(reservedId, joined.group.trip, joined.group.id))
+                                    setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
+                                  else setDraftTripId(reservedId);
+                                } else {
+                                  setMinutes(joined.group.trip.target / 60);
+                                  setBreakCount(joined.group.trip.breakPlan?.count ?? 0);
+                                  setBreakMinutes(joined.group.trip.breakPlan ? joined.group.trip.breakPlan.seconds / 60 : 5);
+                                }
                               } else {
                                 setGoal("goal" in joined.group.trip ? joined.group.trip.goal ?? "" : "");
                                 setTopic("topic" in joined.group.trip ? joined.group.trip.topic ?? "biology" : "biology");
@@ -3350,7 +3494,7 @@ function AdventureWorkspace() {
                             setNotice("Bạn đã tham gia chuyến học.");
                           })}
                         >
-                          Nối toa vào đoàn
+                          Tham gia chuyến
                         </button>
                       </section>
                     </div>
@@ -3390,7 +3534,7 @@ function AdventureWorkspace() {
                               <h3>{s.goal}</h3>
                               <p>
                                 Kết thúc ghi nhận: {date(s.ended)} ·{" "}
-                                {s.groupId ? "Đóng góp cho đoàn" : "Cá nhân"} ·{" "}
+                                {s.groupId ? "Nhóm" : "Cá nhân"} ·{" "}
                                 {saved.pending.some((p) => p.id === s.id)
                                   ? "Chờ đồng bộ"
                                   : "Đã lưu"}

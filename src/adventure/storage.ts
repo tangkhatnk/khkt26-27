@@ -2,7 +2,7 @@ import { isValidBreakPlan } from "../../backend/src/adventure/domain.ts";
 import { validMaterialSources, type MaterialSource } from "./materialSources.ts";
 import type { ActiveTrip } from "./focus";
 import { isDeviceCategory } from "./device.ts";
-import { isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
+import { isQuizCount, isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
 import {
   emptyWorld,
   type BreakPlan,
@@ -24,6 +24,8 @@ export type SynchronizedTripDraft = {
   topic: string;
   target: number;
   breakPlan?: BreakPlan;
+  quizCount?: string;
+  skipQuizReview?: boolean;
 };
 export type Saved = {
   active: ActiveTrip | null;
@@ -161,7 +163,9 @@ function validReadyTripDrafts(value: unknown): value is Saved["readyTripDrafts"]
       typeof draft.goal === "string" && draft.goal.trim().length >= 3 && draft.goal.length <= 500 &&
       typeof draft.topic === "string" && draft.topic.length > 0 && draft.topic.length <= 100 &&
       Number.isSafeInteger(draft.target) && Number(draft.target) >= 60 && Number(draft.target) <= 14400 &&
-      (draft.breakPlan === undefined || isValidBreakPlan(draft.breakPlan, draft.target))));
+      (draft.breakPlan === undefined || isValidBreakPlan(draft.breakPlan, draft.target)) &&
+      (draft.quizCount === undefined || (typeof draft.quizCount === "string" && isQuizCount(Number(draft.quizCount)))) &&
+      (draft.skipQuizReview === undefined || typeof draft.skipQuizReview === "boolean")));
 }
 export function cacheMaterialSummary(
   saved: Saved,

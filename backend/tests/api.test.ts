@@ -251,13 +251,17 @@ it("makes readiness idempotent, reserves session IDs globally, and requires at l
   expect(unready.statusCode).toBe(200);
   expect(unready.json().group.trip.ownSessionId).toBeUndefined();
   expect(unready.json().group.members[0].tripStatus).toBe("not-ready");
+  const replacementSessionId = randomUUID();
+  const replacementReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId: replacementSessionId } });
+  expect(replacementReady.statusCode).toBe(200);
+  expect(replacementReady.json().group.trip.ownSessionId).toBe(replacementSessionId);
 
   const invite = await app.inject({ method: "POST", url: "/api/v1/adventure/invite", headers });
   await app.inject({ method: "POST", url: "/api/v1/adventure/join", headers: stranger, payload: { token: invite.json().token } });
-  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId } });
-  const collidingReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId, ready: true, sessionId } });
+  await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers, payload: { groupId, ready: true, sessionId: replacementSessionId } });
+  const collidingReady = await app.inject({ method: "POST", url: "/api/v1/adventure/trip/ready", headers: stranger, payload: { groupId, ready: true, sessionId: replacementSessionId } });
   expect(collidingReady.statusCode).toBe(409);
-  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId, sessionId } })).statusCode).toBe(409);
+  expect((await app.inject({ method: "POST", url: "/api/v1/adventure/trip/start", headers, payload: { groupId, sessionId: replacementSessionId } })).statusCode).toBe(409);
 });
 
 it("starts one synchronized session for the ready roster and exposes only each member's own binding", async () => {

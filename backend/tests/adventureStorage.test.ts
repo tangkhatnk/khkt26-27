@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { emptySaved, readSaved, writeSaved } from "../../src/adventure/storage";
+import { synchronizedTripDraftForSession, synchronizedTripQuizPreferences } from "../../src/adventure/synchronizedTripUi";
+import { createSessionQuizDraft, shouldPrefetchQuizReview } from "../../src/adventure/quizDrafts";
 const entries = new Map<string, string>();
 vi.stubGlobal("localStorage", {
   getItem: (key: string) => entries.get(key) ?? null,
@@ -31,6 +33,8 @@ it("keeps a ready member's private draft on the owner device for reconnect", () 
       topic: "biology",
       target: 600,
       breakPlan: { count: 1, seconds: 60 },
+      quizCount: "5",
+      skipQuizReview: true,
     },
   };
   saved.notes["session-1"] = "Private local notes";
@@ -39,6 +43,48 @@ it("keeps a ready member's private draft on the owner device for reconnect", () 
   const restored = readSaved("learner");
   expect(restored.readyTripDrafts?.["session-1"]).toEqual(saved.readyTripDrafts?.["session-1"]);
   expect(restored.notes["session-1"]).toBe("Private local notes");
+  const draft = synchronizedTripDraftForSession(restored.readyTripDrafts, "session-1", "group-1");
+  expect(draft).toBeDefined();
+  const preferences = synchronizedTripQuizPreferences(draft!);
+  expect(preferences).toEqual({ quizCount: "5", skipQuizReview: true });
+  expect(shouldPrefetchQuizReview(createSessionQuizDraft(preferences.quizCount, preferences.skipQuizReview))).toBe(false);
+});
+it("rejects malformed synchronized-trip quiz preferences in saved state", () => {
+  const invalid = emptySaved();
+  invalid.readyTripDrafts = {
+    "session-1": {
+      groupId: "group-1",
+      goal: "Review cell structure",
+      topic: "biology",
+      target: 600,
+      quizCount: "31",
+      skipQuizReview: false,
+    },
+  } as typeof invalid.readyTripDrafts;
+  localStorage.setItem("train-adventure:v1:learner", JSON.stringify(invalid));
+
+  expect(() => readSaved("learner")).toThrow("Dữ liệu đã lưu không hợp lệ");
+});
+it("canonicalizes a skipped invalid quiz count before ready-draft reload and avoids prefetch", () => {
+  const preferences = synchronizedTripQuizPreferences({ quizCount: "31", skipQuizReview: true });
+  const saved = emptySaved();
+  saved.readyTripDrafts = {
+    "session-2": {
+      groupId: "group-2",
+      goal: "Review cell structure",
+      topic: "biology",
+      target: 600,
+      ...preferences,
+    },
+  };
+  writeSaved("learner", saved);
+
+  const restored = readSaved("learner");
+  const draft = synchronizedTripDraftForSession(restored.readyTripDrafts, "session-2", "group-2");
+  expect(draft).toMatchObject({ quizCount: "3", skipQuizReview: true });
+  const launchDraft = createSessionQuizDraft(draft!.quizCount!, draft!.skipQuizReview!);
+  expect(launchDraft.count).toBe(3);
+  expect(shouldPrefetchQuizReview(launchDraft)).toBe(false);
 });
 it("accepts legacy records without a device category and validates new categories", () => {
   const legacy = emptySaved();
