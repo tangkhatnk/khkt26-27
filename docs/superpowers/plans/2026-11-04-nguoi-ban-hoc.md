@@ -27,7 +27,7 @@
 - A returning learner whose lesson batch was updated keeps progress associated with stable lesson IDs and versions.
 - A guest token cannot authenticate an account route or read another token's AI state.
 - Quota rejection occurs before a provider call; per-principal accounting is atomic.
-- A guest AI exercise/quiz requires explicit AI session start, while a normal focus session still works offline.
+- AI exercise sets bind to an explicit guest session, with generated solutions available only after that server-timed session is complete. A private summary quiz may be generated and graded without a timer anchor after an offline or early-finished session; ordinary focus still works offline.
 - The UI remains usable with long Vietnamese lesson names, missing network, an expired guest token, and history links using legacy route keys.
 
 ## Scope and decisions
@@ -72,7 +72,7 @@
 ### 2. Guest AI contract
 
 - [ ] Issue the opaque guest token through `POST /api/v1/ai/guest/credential` and accept it only as `Authorization: GuestAI <token>` under `/api/v1/ai/guest/*`.
-- [ ] Match current schemas for `/sessions/start`, `/materials/read`, `/materials/summarize`, `/study-guides/generate`, `/quizzes/generate`, `/quizzes/:quizId/grade`, and exercise prepare/retrieve/cancel/solution routes.
+- [ ] Match current schemas for `/sessions/start`, `/materials/read`, `/materials/summarize`, `/materials/generate` (study guide), `/quizzes/generate`, `/quizzes/:quizId/grade`, and exercise prepare/retrieve/cancel/solution routes.
 - [ ] Keep token-private state in Redis with its TTL; store only allowed summary history outside it, with no prompts or feedback in public guest history.
 - [ ] Apply issuance/request gates, atomic per-token task budgets, and the configured provider spend cap before provider calls. Do not trust forwarded-for headers.
 - [ ] Add tests for guest credential scope, account-route rejection, quota exhaustion before provider use, malformed input, token expiry, and cross-principal isolation.

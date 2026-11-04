@@ -45,7 +45,7 @@ For account-free AI, browser-only simulation would not provide real provider lim
 - Issue a 256-bit opaque guest AI token from `POST /api/v1/ai/guest/credential`; use `Authorization: GuestAI <token>` only on `/api/v1/ai/guest/*`. The token has no account user ID or database foreign key and cannot authenticate account routes.
 - Keep guest AI state (session, decks, answer keys, start proof, and exercise solutions) private to that token principal in Redis with a TTL. Public guest history remains summary metadata in the existing guest scope and must not contain prompts or feedback. Explain guest AI state expiry where the UI establishes the session.
 - Use separate issuance/request gates, atomic per-principal task budgets, and a configurable provider spend cap. Do not trust forwarded client IP headers while `trustProxy` is disabled.
-- Only an opted-in AI quiz/exercise needs explicit AI session start; ordinary personal focus remains usable offline. Material read/summarize still requires the current consent step.
+- Keep quiz grading private to the guest token and allow summary quizzes after an offline or early-finished focus session without requiring a timer anchor. Bind AI exercise sets to an explicit guest session, and release generated solutions only after that owner-bound server-timed session is complete. Ordinary personal focus remains usable offline; material read/summarize still requires the current consent step.
 - Define metrics from existing focus/session rules and label them as activity. Treat question quality and OCR as technical measurements with explicit input provenance, and learning retention as a future participant study.
 
 ## Constraints
