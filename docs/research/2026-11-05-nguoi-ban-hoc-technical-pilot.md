@@ -6,9 +6,9 @@
 
 ## Scope and limits
 
-This pilot contains an OCR smoke run on 40 pinned CC0 synthetic Vietnamese text-line images, 10 synthetic QA fixtures, and scripted functional tasks. No learner or production data was used. No participant study ran; Day 7 and Day 30 outcomes remain unmeasured, so #72 remains open.
+This pilot contains an OCR smoke run on 40 pinned CC0 synthetic Vietnamese text-line images, a separate nine-page natural printed-Vietnamese OCR stratum, 10 synthetic QA fixtures, and scripted functional tasks. No learner or production data was used. No participant study ran; Day 7 and Day 30 outcomes remain unmeasured, so #72 remains open.
 
-The OCR corpus contains synthetic Vietnamese print only. Natural printed Vietnamese or English, handwriting, and page-layout accuracy remain unmeasured. No gated or terms-restricted corpus was accessed: VietHTR-Line and CAMIO remain subject to their access terms, and UIT-HWDB remains unused unless its maintainers confirm reuse terms. The results do not establish accuracy on real documents or establish that Viễn Du improves learning.
+The synthetic stratum contains synthetic Vietnamese print only. The separate natural stratum measures page-level text recognition on nine first-page scans of Vietnamese government documents. Natural printed English, handwriting, page-layout/structure accuracy, and multi-page document accuracy remain unmeasured. No gated or terms-restricted corpus was accessed: VietHTR-Line and CAMIO remain subject to their access terms, and UIT-HWDB remains unused unless its maintainers confirm reuse terms. These small OCR strata do not establish general real-document accuracy or that Viễn Du improves learning.
 
 ## OCR path
 
@@ -40,6 +40,54 @@ node scripts/evaluation/run-ocr.mjs \
 ```
 
 The runner hydrates Git LFS pointer files from the same immutable Hugging Face revision and verifies every manifest hash before OCR.
+
+## Natural printed-Vietnamese OCR
+
+The app's existing `extractImageWithOcr()` path was run against all nine rows in the `real` / `test` config of [`nrl-ai/vn-ocr-documents-eval` at revision `36f3060fd7628937c77c1b1e2a95892f24f562e0`](https://huggingface.co/datasets/nrl-ai/vn-ocr-documents-eval/tree/36f3060fd7628937c77c1b1e2a95892f24f562e0). Each row contains a page-1 image and a reference transcription. The pinned [README](https://huggingface.co/datasets/nrl-ai/vn-ocr-documents-eval/blob/36f3060fd7628937c77c1b1e2a95892f24f562e0/README.md) says the reference text is a human-verified visual transcription and notes that only page 1 is included. All nine metadata `license` fields declare Public Domain and cite Luật SHTT Việt Nam, Điều 15; the pinned [dataset LICENSE](https://huggingface.co/datasets/nrl-ai/vn-ocr-documents-eval/blob/36f3060fd7628937c77c1b1e2a95892f24f562e0/LICENSE) repeats that per-record basis. This report relies on those dataset-author declarations and cited law, and is not an independent legal opinion. The source entries and upstream PDFs were checked one by one; all nine official source URLs returned HTTP 200 with `application/pdf` on 2026-11-05. No source PDF was downloaded. The dataset author's README/LICENSE says the records contain no personal data and that any named officials appear in official capacity. Review of row titles, issuers, and source descriptions found government acts from chinhphu.vn or hanoi.gov.vn; none of the nine rows was excluded.
+
+The current-law references are the [Intellectual Property Law, Article 15](https://vbpl.moj.gov.vn/bovanhoathethao/pages/vbpqen-toanvan.aspx?ItemID=5978) and [Law 131/2025/QH15](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/01/luat131-2025.pdf). They are included for provenance only; this pilot does not independently determine the legal status of any work.
+
+| Dataset row | Pinned upstream source | Per-row dataset declaration | CER | WER | Mean confidence | Time / page | Failure / timeout |
+|---|---|---|---:|---:|---:|---:|---:|
+| `real_qd_729_ttg` | [chinhphu.vn PDF](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/729-ttg.signed.pdf) | Author-declared Public Domain¹ | 19.53% | 28.65% | 89 | 4,114.49 ms | 0 / 0 |
+| `real_cv_3722_metro` | [chinhphu.vn PDF](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/3722-cn.signed.pdf) | Author-declared Public Domain¹ | 24.04% | 40.73% | 87 | 3,699.50 ms | 0 / 0 |
+| `real_nq_115_ba_vi` | [chinhphu.vn PDF](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/115-nqcp.signed.pdf) | Author-declared Public Domain¹ | 9.51% | 14.93% | 92 | 3,255.88 ms | 0 / 0 |
+| `real_qd_707_ttg` | [chinhphu.vn PDF](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/707-ttg.signed.pdf) | Author-declared Public Domain¹ | 10.35% | 17.61% | 87 | 3,021.31 ms | 0 / 0 |
+| `real_tt_21_bct_fuel` | [chinhphu.vn PDF](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/21-bct.signed.pdf) | Author-declared Public Domain¹ | 13.79% | 29.10% | 86 | 4,049.53 ms | 0 / 0 |
+| `real_hanoi_qd_2280_water` | [hanoi.gov.vn PDF](https://datafiles.hanoi.gov.vn/gov-hni/6244/VanBan/2026/4/29/QD-2280-2026.pdf) | Author-declared Public Domain¹ | 13.70% | 25.00% | 92 | 3,208.40 ms | 0 / 0 |
+| `real_hanoi_tb_453_flag` | [hanoi.gov.vn PDF](https://datafiles.hanoi.gov.vn/gov-hni/6235/VanBan/2026/4/29/TB-453-2026.pdf) | Author-declared Public Domain¹ | 23.29% | 35.89% | 92 | 3,158.18 ms | 0 / 0 |
+| `real_hanoi_kh_173_festival` | [hanoi.gov.vn PDF](https://datafiles.hanoi.gov.vn/gov-hni/6249/VanBan/2026/4/28/KH-173-2026.pdf) | Author-declared Public Domain¹ | 10.43% | 15.51% | 95 | 3,557.71 ms | 0 / 0 |
+| `real_tt_37_bca_vehicle` | [chinhphu.vn PDF](https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/37-bca.pdf) | Author-declared Public Domain¹ | 12.01% | 29.81% | 93 | 3,951.23 ms | 0 / 0 |
+
+¹ Each row's metadata carries the same declaration and a `source_url`; see the pinned manifest and [per-item metadata](https://huggingface.co/datasets/nrl-ai/vn-ocr-documents-eval/blob/36f3060fd7628937c77c1b1e2a95892f24f562e0/real/metadata.jsonl).
+
+| Natural stratum summary | Result |
+|---|---:|
+| Rows included / excluded | 9 / 0 |
+| Micro CER / macro CER | 14.493% / 15.182% |
+| Micro WER / macro WER | 25.426% / 26.357% |
+| Mean / median / P95 time | 3,557.36 / 3,557.71 / 4,114.49 ms |
+| Mean Tesseract confidence | 90.33 |
+| Failures / timeouts | 0 / 0 |
+
+CER is Unicode code-point Levenshtein distance divided by reference length; WER uses whitespace tokens, which are syllable-like rather than word-segmented units for Vietnamese. Both use NFC normalization, collapse all whitespace, trim ends, and preserve case, punctuation, and diacritics. The results file records per-page counts and metrics but contains no OCR transcript or image. The app marked all nine OCR results `needs-review`. The app's OCR limit is 120 seconds; no case timed out. Runtime was Tesseract.js 7.0.0, `tesseract.js-core` 7.0.0, English and Vietnamese language packages 1.0.0, trained data `4.0.0_best_int`, languages `eng+vie`, LSTM OEM 1, Node 24.16.0 on `darwin-x64` / Darwin 25.6.0. Locally generated language data was used without a CDN request. Timing includes worker startup and OCR through `extractImageWithOcr()` return, and excludes asynchronous worker shutdown. Results came from the saved run at 2026-11-04 19:26:41 UTC. With n=9, these descriptive measurements are not an estimate of broad document accuracy. No handwriting, layout, table, formula, or English accuracy was measured.
+
+The checked-file manifest [`vn-ocr-documents-real-36f3060.sha256`](vn-ocr-documents-real-36f3060.sha256) covers the nine page images and `real/metadata.jsonl`; its SHA-256 is `cdfde136202d63d7a7168ab4490da65b9e93fc5c918bc5c3e3d7cb2eb4a2a220`. Every listed file matched. Images, metadata, transcripts, and OCR output stayed under `/tmp` and are not committed.
+
+Reproduce from the repository root after installing dependencies:
+
+```sh
+dataset_dir="/tmp/vn-ocr-documents-eval-36f3060"
+GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/datasets/nrl-ai/vn-ocr-documents-eval "$dataset_dir"
+git -C "$dataset_dir" checkout --detach 36f3060fd7628937c77c1b1e2a95892f24f562e0
+node scripts/prepare-material-worker.mjs
+node scripts/evaluation/run-natural-ocr.mjs \
+  --dataset-dir "$dataset_dir" \
+  --manifest docs/research/vn-ocr-documents-real-36f3060.sha256 \
+  --output /tmp/viendu-natural-ocr-results-36f3060.json
+```
+
+The runner refuses any other dataset revision, checks the row-level category/license/source filters, hydrates only the nine image LFS pointers from the pinned revision when necessary, verifies the manifest hashes, and reports metadata and metrics without printing transcript text.
 
 ## Synthetic AI QA
 
