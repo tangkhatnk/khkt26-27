@@ -3,6 +3,7 @@ import { experimentRoutes } from "./experiments.js";
 import { publicMaterialSummaryRoutes } from "./publicMaterialSummaries.js";
 import { publicReportRoutes } from "./publicReport.js";
 import { studyExerciseRoutes } from "./studyExercises.js";
+import { guestAiRoutes } from "./guestAi.js";
 import { adminRoutes } from "./admin.js";
 import { localRead, verifyLocalUrl } from "./localStorage.js";
 import { Metrics } from "./metrics.js";
@@ -254,6 +255,7 @@ export async function buildApp(deps?: {
   publicReportRoutes(app, db);
   publicMaterialSummaryRoutes(app, db, authenticate);
   studyExerciseRoutes(app, db, authenticate);
+  guestAiRoutes(app, db, redis);
   const authLimits = { rateLimit: { max: 10, timeWindow: "1 minute" } };
   if (config.STORAGE_DRIVER === "local")
     app.get("/files/:id", async (req, reply) => {
