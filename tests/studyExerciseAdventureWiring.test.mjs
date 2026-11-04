@@ -24,7 +24,7 @@ test("summary solution loading awaits sync and rechecks persisted completion and
   const adventure = await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8");
   const flow = await readFile(resolve(projectRoot, "src/adventure/useStudyExerciseFlow.ts"), "utf8");
 
-  assert.match(adventure, /session\.effectiveMetrics\?\.completed \?\?\s*studyElapsedSeconds\(session\.started, session\.target, session\.breakPlan, session\.ended\) >= session\.target/u);
+  assert.match(adventure, /isPersistedStudyExerciseSessionCompleted\(ownerId, session\)/u);
   assert.match(flow, /loadStudyExerciseSolutionsAfterSync\(\{/u);
   assert.match(flow, /sync: \(\) => syncRef\.current\(\)/u);
   assert.match(flow, /latest\.isRouteScopeCurrent\(ownerId, sessionId, "summary"\)/u);

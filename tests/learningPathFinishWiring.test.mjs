@@ -16,3 +16,30 @@ test("the real focus finish path applies scheduled-duration eligibility before l
   assert.ok(finish.includes("breakPlan: next.breakPlan,"));
   assert.ok(finish.includes("value.learningPath = finishLessonFocus(value.learningPath, s);"));
 });
+
+test("interrupted lesson retry is resolved by persisted session identity rather than the editable goal", () => {
+  const summaryStart = adventureApp.indexOf("const summaryInterruptedLesson =");
+  const summaryEnd = adventureApp.indexOf("const summaryLearningRun =", summaryStart);
+  const summary = summaryStart >= 0 && summaryEnd > summaryStart
+    ? adventureApp.slice(summaryStart, summaryEnd)
+    : "";
+
+  assert.match(summary, /interruptedLessonForSession\(learningPathProgress, summarySession\.id\)/u);
+  assert.doesNotMatch(summary, /summarySession\.goal/u);
+});
+
+test("local daily quiz metrics receive guest grades as a private projection", () => {
+  assert.match(adventureApp, /guestQuizResultsForDailySummary\(owner, sessions, saved\.quizDrafts\)/u);
+});
+
+test("the private guest journal row reads its grade without writing it into session history", () => {
+  const journalStart = adventureApp.indexOf('view === "journal"');
+  const historyStart = adventureApp.indexOf('view === "experiments"', journalStart);
+  const journal = journalStart >= 0 && historyStart > journalStart
+    ? adventureApp.slice(journalStart, historyStart)
+    : "";
+
+  assert.match(journal, /owner === "guest" \? guestQuizGradesBySession\.get\(s\.id\) : undefined/u);
+  assert.match(journal, /Điểm quiz riêng: \$\{privateGuestGrade\.score\}\/\$\{privateGuestGrade\.total\}/u);
+  assert.doesNotMatch(journal, /s\.quiz\s*=/u);
+});

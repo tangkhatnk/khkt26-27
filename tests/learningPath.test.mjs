@@ -5,6 +5,7 @@ import {
   completeLessonRun,
   createLearningPathProgress,
   finishLessonFocus,
+  interruptedLessonForSession,
   isValidLearningPathProgress,
   lessonStates,
   normalizeLearningPathProgress,
@@ -110,6 +111,17 @@ test("early finish keeps the lesson locked and a retry uses a new session id", (
 
   assert.equal(progress.activeRun, undefined);
   assert.equal(progress.completed.length, 0);
+  assert.deepEqual(progress.interruptedRuns, [{
+    courseId: course.id,
+    lessonId: course.lessons[0].id,
+    lessonVersion: course.lessons[0].version,
+    sessionId: "settled-session-1",
+    endedAt: 301_000,
+  }]);
+  assert.deepEqual(interruptedLessonForSession(progress, "settled-session-1"), {
+    course,
+    lesson: course.lessons[0],
+  });
   assert.equal(lessonStates(course, progress)[0].status, "available");
   const retry = beginLessonRun(progress, course, course.lessons[0].id, "replacement-session-2");
   assert.equal(retry.activeRun?.sessionId, "replacement-session-2");
@@ -189,6 +201,28 @@ test("catalog updates retain historical evaluations but only matching versions c
 
   const reopened = beginLessonRun(migrated, CURATED_COURSES[0], "math-7-ratios-meaning", "updated-session");
   assert.equal(reopened.activeRun.lessonVersion, CURATED_COURSES[0].lessons[0].version);
+});
+
+test("legacy path data migrates an empty interrupted-session index and stale retry versions stay historical only", () => {
+  const legacy = createLearningPathProgress();
+  delete legacy.interruptedRuns;
+  const migrated = normalizeLearningPathProgress(legacy);
+  assert.deepEqual(migrated.interruptedRuns, []);
+
+  const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
+  assert.ok(course);
+  const stale = {
+    ...migrated,
+    interruptedRuns: [{
+      courseId: course.id,
+      lessonId: course.lessons[0].id,
+      lessonVersion: course.lessons[0].version + 1,
+      sessionId: "stale-retry-session",
+      endedAt: 100,
+    }],
+  };
+  assert.equal(isValidLearningPathProgress(stale), true);
+  assert.equal(interruptedLessonForSession(normalizeLearningPathProgress(stale), "stale-retry-session"), undefined);
 });
 
 test("path progress keeps completion history when the catalog grows beyond the old fixed limit", () => {

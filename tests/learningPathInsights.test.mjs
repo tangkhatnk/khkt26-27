@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CURATED_COURSES } from "../src/adventure/curatedCurriculum.ts";
-import { chooseDuration, dailyStudySummary, difficultySuggestion, durationSuggestion, workedReviewLesson } from "../src/adventure/learningPathInsights.ts";
+import { chooseDuration, dailyStudySummary, difficultySuggestion, durationSuggestion, guestQuizResultsForDailySummary, workedReviewLesson } from "../src/adventure/learningPathInsights.ts";
 import { createLearningPathProgress } from "../src/adventure/learningPath.ts";
 
 const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
@@ -121,6 +121,31 @@ test("daily progress is empty when no recorded session ended today", () => {
     curatedEvaluationCount: 0,
     latestCuratedEvaluation: null,
   });
+});
+
+test("private guest grades appear in local daily quiz metrics without changing session history", () => {
+  const now = new Date(2026, 10, 4, 16).getTime();
+  const session = recordedSession({ id: "guest-private-quiz", minutes: 12, ended: now });
+  const drafts = {
+    [session.id]: { guestGrade: { score: 2, total: 3, feedback: [] } },
+  };
+  const privateResults = guestQuizResultsForDailySummary("guest", [session], drafts);
+
+  assert.deepEqual(privateResults, [{ sessionId: session.id, score: 2, total: 3 }]);
+  assert.deepEqual(dailyStudySummary([session], now, [], privateResults), {
+    sessionCount: 1,
+    focusedSeconds: 12 * 60,
+    plannedBreakSeconds: 0,
+    actualBreakSeconds: 0,
+    awaySeconds: 0,
+    distractions: 0,
+    quizCount: 1,
+    latestQuiz: { score: 2, total: 3, percent: 67 },
+    curatedEvaluationCount: 0,
+    latestCuratedEvaluation: null,
+  });
+  assert.equal(session.quiz, undefined);
+  assert.deepEqual(guestQuizResultsForDailySummary("account-a", [session], drafts), []);
 });
 
 test("difficulty stays at the curated default until three evaluations and ten concept-scoped answers exist", () => {

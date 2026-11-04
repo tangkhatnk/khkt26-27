@@ -30,6 +30,13 @@ export type AssessedAnswer = {
   correctIndex?: number;
   explanation?: string;
 };
+export type InterruptedLessonRun = {
+  courseId: string;
+  lessonId: string;
+  lessonVersion: number;
+  sessionId: string;
+  endedAt: number;
+};
 export type LearningPathProgress = {
   schemaVersion: 1;
   selectedCourseId: string;
@@ -46,6 +53,7 @@ export type LearningPathProgress = {
     completedAt: number;
     assessedAnswers: AssessedAnswer[];
   }[];
+  interruptedRuns: InterruptedLessonRun[];
   activeRun?: {
     courseId: string;
     lessonId: string;
@@ -81,6 +89,7 @@ export function createLearningPathProgress(courseId = DEFAULT_COURSE_ID): Learni
     selectedCourseId: courseById.has(courseId) ? courseId : DEFAULT_COURSE_ID,
     guideDismissed: false,
     completed: [],
+    interruptedRuns: [],
   };
 }
 
@@ -189,7 +198,32 @@ export function finishLessonFocus(
     studyElapsedSeconds(session.started, session.target, session.breakPlan, session.ended) >= session.target;
   return reachedTarget
     ? setLessonRunPhase(progress, session.id, "review")
-    : { ...progress, activeRun: undefined };
+    : {
+      ...progress,
+      interruptedRuns: [
+        ...(progress.interruptedRuns ?? []).filter((item) => item.sessionId !== run.sessionId),
+        {
+          courseId: run.courseId,
+          lessonId: run.lessonId,
+          lessonVersion: run.lessonVersion,
+          sessionId: run.sessionId,
+          endedAt: session.ended,
+        },
+      ],
+      activeRun: undefined,
+    };
+}
+
+export function interruptedLessonForSession(
+  progress: Pick<LearningPathProgress, "interruptedRuns">,
+  sessionId: string,
+): { course: CuratedCourse; lesson: CuratedLesson } | undefined {
+  const interrupted = progress.interruptedRuns.find((item) => item.sessionId === sessionId);
+  if (!interrupted) return undefined;
+  const known = lessonById.get(interrupted.lessonId);
+  return known && known.course.id === interrupted.courseId && known.lesson.version === interrupted.lessonVersion
+    ? known
+    : undefined;
 }
 
 export function setLessonRunPlan(
@@ -257,7 +291,17 @@ export function isValidLearningPathProgress(value: unknown): value is LearningPa
       ((progress.selectedLessonId === undefined) !== (progress.selectedLessonVersion === undefined)) ||
       (progress.selectedLessonId !== undefined && (!lessonById.has(String(progress.selectedLessonId)) ||
         !Number.isSafeInteger(progress.selectedLessonVersion) || Number(progress.selectedLessonVersion) < 1)) ||
-      !Array.isArray(progress.completed))
+      !Array.isArray(progress.completed) ||
+      (progress.interruptedRuns !== undefined && (!Array.isArray(progress.interruptedRuns) ||
+        progress.interruptedRuns.some((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return true;
+          const interrupted = entry as Record<string, unknown>;
+          return typeof interrupted.courseId !== "string" || !interrupted.courseId || interrupted.courseId.length > 200 ||
+            typeof interrupted.lessonId !== "string" || !interrupted.lessonId || interrupted.lessonId.length > 200 ||
+            !Number.isSafeInteger(interrupted.lessonVersion) || Number(interrupted.lessonVersion) < 1 ||
+            typeof interrupted.sessionId !== "string" || !interrupted.sessionId || interrupted.sessionId.length > 200 ||
+            !Number.isSafeInteger(interrupted.endedAt) || Number(interrupted.endedAt) < 0;
+        }))))
     return false;
   for (const entry of progress.completed) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
@@ -321,6 +365,24 @@ export function normalizeLearningPathProgress(value: unknown): LearningPathProgr
         }];
       })
     : [];
+  const interruptedRuns = Array.isArray(raw.interruptedRuns)
+    ? raw.interruptedRuns.flatMap((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+        const interrupted = entry as Record<string, unknown>;
+        if (typeof interrupted.courseId !== "string" || !interrupted.courseId || interrupted.courseId.length > 200 ||
+            typeof interrupted.lessonId !== "string" || !interrupted.lessonId || interrupted.lessonId.length > 200 ||
+            !Number.isSafeInteger(interrupted.lessonVersion) || Number(interrupted.lessonVersion) < 1 ||
+            typeof interrupted.sessionId !== "string" || !interrupted.sessionId || interrupted.sessionId.length > 200 ||
+            !Number.isSafeInteger(interrupted.endedAt) || Number(interrupted.endedAt) < 0) return [];
+        return [{
+          courseId: interrupted.courseId,
+          lessonId: interrupted.lessonId,
+          lessonVersion: Number(interrupted.lessonVersion),
+          sessionId: interrupted.sessionId,
+          endedAt: Number(interrupted.endedAt),
+        }];
+      })
+    : [];
   const run = raw.activeRun && typeof raw.activeRun === "object" && !Array.isArray(raw.activeRun)
     ? raw.activeRun as Record<string, unknown>
     : undefined;
@@ -351,6 +413,7 @@ export function normalizeLearningPathProgress(value: unknown): LearningPathProgr
       : {}),
     guideDismissed: typeof raw.guideDismissed === "boolean" ? raw.guideDismissed : false,
     completed,
+    interruptedRuns,
     ...(activeRun ? { activeRun } : {}),
   };
 }

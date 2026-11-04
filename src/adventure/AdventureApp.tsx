@@ -66,6 +66,7 @@ import { QuizPrefetchCoordinator, quizPrefetchScopeKey, type QuizPrefetchScope }
 import { isCurrentQuizPrefetchRequest } from "./quizPrefetchPresentation";
 import {
   startStudyExerciseFocusIfAllowed,
+  isPersistedStudyExerciseSessionCompleted,
   studyExerciseSourcesForSession,
 } from "./studyExerciseSessionFlow";
 import { useStudyExerciseFlow } from "./useStudyExerciseFlow";
@@ -88,6 +89,7 @@ import {
   completeLessonRun,
   createLearningPathProgress,
   finishLessonFocus,
+  interruptedLessonForSession,
   lessonStates,
   nextAvailableLesson,
   selectLearningPathCourse,
@@ -99,6 +101,7 @@ import {
   dailyStudySummary,
   difficultySuggestion,
   durationSuggestion,
+  guestQuizResultsForDailySummary,
   workedReviewLesson,
 } from "./learningPathInsights";
 import type { CuratedLesson } from "./curatedCurriculum";
@@ -802,7 +805,9 @@ function AdventureWorkspace() {
     learningPathCourse.subjectId,
     nextLearningLesson?.minutes ?? learningPathCourse.lessons[0].minutes,
   );
-  const learningDaily = dailyStudySummary(sessions, now, learningPathProgress.completed);
+  const guestQuizGrades = guestQuizResultsForDailySummary(owner, sessions, saved.quizDrafts);
+  const guestQuizGradesBySession = new Map(guestQuizGrades.map((grade) => [grade.sessionId, grade]));
+  const learningDaily = dailyStudySummary(sessions, now, learningPathProgress.completed, guestQuizGrades);
   const selectedPathLesson = learningPathProgress.activeRun
     ? learningPathCourse.lessons.find((lesson) => lesson.id === learningPathProgress.activeRun?.lessonId &&
       lesson.version === learningPathProgress.activeRun.lessonVersion)
@@ -823,9 +828,8 @@ function AdventureWorkspace() {
   const summaryCuratedEvaluation = summarySession
     ? learningPathProgress.completed.find((evaluation) => evaluation.sessionId === summarySession.id)
     : undefined;
-  const summaryInterruptedLesson = summarySession && !summaryCompleted && selectedPathLesson &&
-    summarySession.goal === `Học bài: ${selectedPathLesson.title}`
-    ? selectedPathLesson
+  const summaryInterruptedLesson = summarySession && !summaryCompleted
+    ? interruptedLessonForSession(learningPathProgress, summarySession.id)
     : undefined;
   const summaryLearningRun = summarySession && learningPathProgress.activeRun?.phase === "review" &&
     learningPathProgress.activeRun.sessionId === summarySession.id
@@ -833,11 +837,11 @@ function AdventureWorkspace() {
     : undefined;
   const summaryLearningCourse = summaryLearningRun
     ? CURATED_COURSES.find((course) => course.id === summaryLearningRun.courseId)
-    : summaryInterruptedLesson ? learningPathCourse : undefined;
+    : summaryInterruptedLesson?.course;
   const summaryLearningLesson = summaryLearningCourse && summaryLearningRun
     ? summaryLearningCourse.lessons.find((lesson) => lesson.id === summaryLearningRun.lessonId &&
       lesson.version === summaryLearningRun.lessonVersion)
-    : summaryInterruptedLesson;
+    : summaryInterruptedLesson?.lesson;
   const summaryMaterialSessionId = summarySession?.id;
   const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
     ? saved.sources?.[summaryMaterialSessionId] ?? []
@@ -955,8 +959,8 @@ function AdventureWorkspace() {
     historySessions(current.current, ownerId).some(session => session.id === sessionId && session.userId === ownerId), []);
   const isStudyExercisePersistedCompleted = useCallback((ownerId: string, sessionId: string) =>
     historySessions(current.current, ownerId).some(session =>
-      session.id === sessionId && session.userId === ownerId && (session.effectiveMetrics?.completed ??
-        studyElapsedSeconds(session.started, session.target, session.breakPlan, session.ended) >= session.target)), []);
+      session.id === sessionId && session.userId === ownerId &&
+        isPersistedStudyExerciseSessionCompleted(ownerId, session)), []);
   const studyExerciseFlow = useStudyExerciseFlow({
     ownerId: owner,
     authenticated: owner === "guest" || (!!user && !needsLogin),
@@ -3842,6 +3846,7 @@ function AdventureWorkspace() {
                       {sessions.map((s) => {
                         const analysis = analyzeSession(s);
                         const gaps = knowledgeGaps(s.quiz);
+                        const privateGuestGrade = owner === "guest" ? guestQuizGradesBySession.get(s.id) : undefined;
                         const curatedResult = learningPathProgress.completed.find((evaluation) => evaluation.sessionId === s.id);
                         return (
                           <button
@@ -3874,7 +3879,9 @@ function AdventureWorkspace() {
                                 <span>{s.correctionFlags?.quizResult
                                   ? `Điểm theo lịch sử đã chỉnh: ${s.effectiveMetrics?.quizScore === null || s.effectiveMetrics?.quizTotal === null
                                     ? "chưa ghi nhận" : `${s.effectiveMetrics?.quizScore}/${s.effectiveMetrics?.quizTotal}`}`
-                                  : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
+                                  : privateGuestGrade
+                                    ? `Điểm quiz riêng: ${privateGuestGrade.score}/${privateGuestGrade.total}`
+                                    : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
                                 <span>{s.quiz?.feedback
                                   ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
                                   : analysis.knowledgeLabel}</span>
@@ -3933,8 +3940,8 @@ function AdventureWorkspace() {
                       />
                     ) : summaryInterruptedLesson ? (
                       <LearningPathRetryNotice
-                        lessonTitle={summaryInterruptedLesson.title}
-                        onRetry={() => openLearningLesson(summaryInterruptedLesson)}
+                        lessonTitle={summaryInterruptedLesson.lesson.title}
+                        onRetry={() => openLearningLesson(summaryInterruptedLesson.lesson)}
                       />
                     ) : null}
                     <SessionSummaryCompanion

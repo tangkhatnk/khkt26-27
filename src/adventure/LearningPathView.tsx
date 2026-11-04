@@ -52,8 +52,9 @@ function formatMinutes(seconds: number): string {
 
 function routeRailPath(nodeCount: number): string {
   if (!nodeCount) return "";
+  const routeX = [300, 700, 410, 590];
   const point = (index: number) => ({
-    x: index % 2 === 0 ? 470 : 530,
+    x: routeX[index % routeX.length],
     y: ((index + 0.5) / nodeCount) * 1000,
   });
   const first = point(0);
@@ -155,7 +156,6 @@ export function LearningPathHome({
             {guideOpen ? "Đang mở hướng dẫn" : "Xem hướng dẫn"}
           </button>
         </div>
-        <div className="learning-path-hero__buddy"><LearningBuddy /></div>
         <div className="learning-path-hero__meta">
           <span className="learning-path-meta-date">{todayLabel}</span>
           <label htmlFor="learning-course">Lớp và môn học</label>
@@ -201,13 +201,22 @@ export function LearningPathHome({
             const milestone = index === lessonStates.length - 1;
             const firstAvailable = status === "available" && lessonStates.findIndex((item) => item.status === "available") === index;
             const active = progress.activeRun?.lessonId === lesson.id && progress.activeRun.lessonVersion === lesson.version;
+            const sweepStep = index % 4;
+            const copySide = sweepStep % 2 === 0 ? "right" : "left";
             const label = status === "current" ? "Đang học" : status === "completed" ? "Đã hoàn thành" : status === "available" ? "Có thể bắt đầu" : "Chưa mở khóa";
             const actionLabel = status === "current" ? "Tiếp tục" : status === "available" ? "Bắt đầu" : label;
             const statusLabel = status === "available" ? "BẮT ĐẦU" : label.toUpperCase();
             return (
-              <div className={`learning-route__row learning-route__row--${index % 2 === 0 ? "left" : "right"}`} key={lesson.id}>
-                <div className={`learning-route__node-wrap learning-route__node-wrap--${index % 2 === 0 ? "left" : "right"}`}>
-                  {firstAvailable && <span className="learning-route__start-marker">Bắt đầu</span>}
+              <div className={`learning-route__row learning-route__row--step-${sweepStep} learning-route__row--copy-${copySide}`} key={lesson.id}>
+                {index === 0 && <aside className="learning-route__buddy-tip" aria-label="Gợi ý từ Người bạn học">
+                  <LearningBuddy compact />
+                  <p>Tập trung đủ thời gian rồi tự kiểm tra để mở bài kế tiếp.</p>
+                </aside>}
+                <div className="learning-route__node-wrap">
+                  {firstAvailable && <span className="learning-route__start-marker">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v10m-4-4 4 4 4-4" /></svg>
+                    Bắt đầu
+                  </span>}
                   <button
                     type="button"
                     className={`learning-route__node is-${status}${milestone ? " is-milestone" : ""}`}

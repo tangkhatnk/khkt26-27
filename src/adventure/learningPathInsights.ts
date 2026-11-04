@@ -92,6 +92,22 @@ export type DailyStudySummary = {
   latestCuratedEvaluation: { lessonId: string; score: number; total: number; percent: number } | null;
 };
 
+export type PrivateGuestQuizResult = { sessionId: string; score: number; total: number };
+
+export function guestQuizResultsForDailySummary(
+  ownerId: string,
+  sessions: readonly Pick<LearningSession, "id">[],
+  quizDrafts: Readonly<Record<string, { guestGrade?: { score: number; total: number } } | undefined>> | undefined,
+): PrivateGuestQuizResult[] {
+  if (ownerId !== "guest" || !quizDrafts) return [];
+  return sessions.flatMap((session) => {
+    const grade = quizDrafts[session.id]?.guestGrade;
+    if (!grade || !Number.isSafeInteger(grade.score) || !Number.isSafeInteger(grade.total) ||
+        grade.total < 1 || grade.score < 0 || grade.score > grade.total) return [];
+    return [{ sessionId: session.id, score: grade.score, total: grade.total }];
+  });
+}
+
 function localDayKey(timestamp: number): string {
   const date = new Date(timestamp);
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -101,6 +117,7 @@ export function dailyStudySummary(
   sessions: readonly LearningSession[],
   now = Date.now(),
   curatedEvaluations: readonly LearningPathProgress["completed"][number][] = [],
+  privateGuestQuizResults: readonly PrivateGuestQuizResult[] = [],
 ): DailyStudySummary {
   const today = localDayKey(now);
   const daily = sessions.filter((session) => Number.isFinite(session.ended) && localDayKey(session.ended) === today);
@@ -110,8 +127,24 @@ export function dailyStudySummary(
     const score = session.effectiveMetrics ? session.effectiveMetrics.quizScore : session.quiz?.score;
     const total = session.effectiveMetrics ? session.effectiveMetrics.quizTotal : session.quiz?.total;
     if (!Number.isSafeInteger(score) || !Number.isSafeInteger(total) || Number(total) < 1) return [];
-    return [{ ended: session.ended, score: Number(score), total: Number(total), percent: analysis.quizPercent }];
-  }).sort((left, right) => right.ended - left.ended);
+    return [{ sessionId: session.id, ended: session.ended, score: Number(score), total: Number(total), percent: analysis.quizPercent }];
+  });
+  const dailyById = new Map(daily.map((session) => [session.id, session]));
+  const quizSessionIds = new Set(quizResults.map((result) => result.sessionId));
+  for (const result of privateGuestQuizResults) {
+    const session = dailyById.get(result.sessionId);
+    if (!session || quizSessionIds.has(result.sessionId) || !Number.isSafeInteger(result.score) ||
+        !Number.isSafeInteger(result.total) || result.total < 1 || result.score < 0 || result.score > result.total) continue;
+    quizSessionIds.add(result.sessionId);
+    quizResults.push({
+      sessionId: result.sessionId,
+      ended: session.ended,
+      score: result.score,
+      total: result.total,
+      percent: Math.round((result.score / result.total) * 100),
+    });
+  }
+  quizResults.sort((left, right) => right.ended - left.ended);
   const dailyCurated = curatedEvaluations
     .filter((evaluation) => Number.isFinite(evaluation.completedAt) && localDayKey(evaluation.completedAt) === today)
     .sort((left, right) => right.completedAt - left.completedAt);

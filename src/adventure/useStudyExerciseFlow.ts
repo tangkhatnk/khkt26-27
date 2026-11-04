@@ -10,6 +10,7 @@ import {
   type StudyExercisePreparationResponse,
   type StudyExerciseSolutionResponse,
 } from "../services/studyExercisesApi.ts";
+import { hasGuestAiCredential } from "../services/guestAiApi.ts";
 import type { MaterialSource } from "./materialSources.ts";
 import {
   fingerprintStudyExerciseSourceText,
@@ -484,6 +485,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
         sourceInvalidationLookups.current.has(key)) return;
     const current = optionsRef.current;
     const ownerId = current.ownerId;
+    if (ownerId === "guest" && !hasGuestAiCredential()) return;
     const authGeneration = current.getAuthGeneration();
     const workspaceGeneration = current.getWorkspaceGeneration();
     sourceInvalidationLookups.current.add(key);

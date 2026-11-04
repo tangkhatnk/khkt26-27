@@ -312,6 +312,30 @@ test("a source callback from the previous owner cannot dispatch against the new 
   runtime.unmount();
 });
 
+test("local guest source changes do not mint a GuestAI credential for background invalidation", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ path: new URL(String(url), "http://localhost").pathname, method: init.method ?? "GET" });
+    return jsonResponse({ detail: "No set" }, 404);
+  };
+
+  const runtime = createHookRuntime();
+  const options = studyExerciseOptions({
+    ownerId: "guest",
+    authenticated: true,
+    plannedSessionId: "session-a",
+    view: "ticket",
+    activeSession: null,
+  });
+  const result = runtime.render(() => flow.useStudyExerciseFlow(options));
+  result.noteSourceChange("session-a", "source-a");
+  await new Promise(resolveState => setImmediate(resolveState));
+
+  assert.deepEqual(calls, []);
+  assert.equal(guestAiApi.hasGuestAiCredential(), false);
+  runtime.unmount();
+});
+
 test("a missing guest exercise set on a saved session explains how to prepare for the next session", async () => {
   const guestStorage = globalThis.window.sessionStorage ?? globalThis.sessionStorage;
   globalThis.window.sessionStorage = guestStorage;

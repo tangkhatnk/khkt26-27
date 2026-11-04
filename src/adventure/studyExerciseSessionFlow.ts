@@ -1,4 +1,5 @@
 import type { MaterialSource } from "./materialSources.ts";
+import { isValidBreakPlan, studyElapsedSeconds, type BreakPlan } from "../../backend/src/adventure/domain.ts";
 
 const EMPTY_STUDY_EXERCISE_SOURCES: readonly MaterialSource[] = Object.freeze([]);
 
@@ -7,6 +8,20 @@ export function studyExerciseSourcesForSession(
   sessionId: string | null | undefined,
 ): readonly MaterialSource[] {
   return sessionId ? sourcesBySession?.[sessionId] ?? EMPTY_STUDY_EXERCISE_SOURCES : EMPTY_STUDY_EXERCISE_SOURCES;
+}
+
+export function isPersistedStudyExerciseSessionCompleted(ownerId: string, session: {
+  started: number;
+  ended: number;
+  target: number;
+  breakPlan?: BreakPlan;
+  effectiveMetrics?: { completed?: boolean } | null;
+}): boolean {
+  if (session.effectiveMetrics) return session.effectiveMetrics.completed === true;
+  if (ownerId !== "guest" || !Number.isSafeInteger(session.started) || !Number.isSafeInteger(session.ended) ||
+      !Number.isSafeInteger(session.target) || session.target < 1 || session.ended < session.started ||
+      (session.breakPlan !== undefined && !isValidBreakPlan(session.breakPlan, session.target))) return false;
+  return studyElapsedSeconds(session.started, session.target, session.breakPlan, session.ended) >= session.target;
 }
 
 export async function loadStudyExercisePreparationWithCurrentSources<Preparation, Source, Match>(input: {
