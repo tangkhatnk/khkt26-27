@@ -1,6 +1,11 @@
 import { isValidBreakPlan } from "../../backend/src/adventure/domain.ts";
 import { validMaterialSources, type MaterialSource } from "./materialSources.ts";
 import type { ActiveTrip } from "./focus";
+import {
+  createLearningPathProgress,
+  normalizeLearningPathProgress,
+  type LearningPathProgress,
+} from "./learningPath.ts";
 import { isDeviceCategory } from "./device.ts";
 import { isQuizCount, isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
 import {
@@ -43,6 +48,8 @@ export type Saved = {
   materialSummaries?: Record<string, Record<string, MaterialSummaryCacheEntry>>;
   /** Owner-local private study plan for a member who has marked ready. */
   readyTripDrafts?: Record<string, SynchronizedTripDraft>;
+  /** Curated lesson progress stays on this owner-local device record. */
+  learningPath?: LearningPathProgress;
 };
 export const MAX_MATERIAL_SUMMARY_CACHE_ENTRIES = 20;
 export const MAX_MATERIAL_SUMMARY_LENGTH = 4_000;
@@ -112,6 +119,7 @@ export const emptySaved = (): Saved => ({
   sources: {},
   guestPublished: [],
   quizDrafts: {},
+  learningPath: createLearningPathProgress(),
 });
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -342,7 +350,10 @@ export function readSaved(owner: string): Saved {
     throw new Error(
       "Dữ liệu đã lưu không hợp lệ. Hãy xuất bản sao trước khi xóa dữ liệu trình duyệt.",
     );
-  return value;
+  return {
+    ...value,
+    learningPath: normalizeLearningPathProgress(value.learningPath),
+  };
 }
 export function writeSaved(owner: string, value: Saved) {
   localStorage.setItem(`train-adventure:v1:${owner}`, JSON.stringify(value));
