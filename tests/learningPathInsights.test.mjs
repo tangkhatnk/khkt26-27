@@ -9,7 +9,7 @@ assert.ok(course);
 
 function assessment(sessionId, conceptId, correctCount, total = 4) {
   return {
-    lessonId: `lesson-${sessionId}`,
+    lessonId: "math-7-ratios-meaning",
     lessonVersion: 1,
     sessionId,
     score: correctCount,
@@ -57,7 +57,7 @@ function recordedSession({ id, topic = "mathematics", minutes, ended, completed 
   };
 }
 
-test("daily progress separates measured focus, planned and actual breaks, away time, and quiz results", () => {
+test("daily progress keeps curated evaluation results separate from AI quiz metrics", () => {
   const now = new Date(2026, 10, 4, 16).getTime();
   const started = new Date(2026, 10, 4, 14).getTime();
   const today = {
@@ -81,8 +81,12 @@ test("daily progress separates measured focus, planned and actual breaks, away t
     quiz: { score: 2, total: 4 },
   };
   const yesterday = recordedSession({ id: "yesterday", minutes: 25, ended: new Date(2026, 10, 3, 16).getTime() });
+  const curatedEvaluations = [
+    { lessonId: "math-7-ratios-meaning", lessonVersion: 1, sessionId: "curated-today", score: 3, total: 4, completedAt: new Date(2026, 10, 4, 15).getTime(), assessedAnswers: [] },
+    { lessonId: "math-7-ratios-property", lessonVersion: 1, sessionId: "curated-yesterday", score: 2, total: 4, completedAt: new Date(2026, 10, 3, 15).getTime(), assessedAnswers: [] },
+  ];
 
-  assert.deepEqual(dailyStudySummary([today, yesterday], now), {
+  assert.deepEqual(dailyStudySummary([today, yesterday], now, curatedEvaluations), {
     sessionCount: 1,
     focusedSeconds: 30 * 60,
     plannedBreakSeconds: 10 * 60,
@@ -91,6 +95,13 @@ test("daily progress separates measured focus, planned and actual breaks, away t
     distractions: 2,
     quizCount: 1,
     latestQuiz: { score: 3, total: 4, percent: 75 },
+    curatedEvaluationCount: 1,
+    latestCuratedEvaluation: {
+      lessonId: "math-7-ratios-meaning",
+      score: 3,
+      total: 4,
+      percent: 75,
+    },
   });
 });
 
@@ -107,6 +118,8 @@ test("daily progress is empty when no recorded session ended today", () => {
     distractions: 0,
     quizCount: 0,
     latestQuiz: null,
+    curatedEvaluationCount: 0,
+    latestCuratedEvaluation: null,
   });
 });
 
@@ -132,6 +145,7 @@ test("difficulty suggests one step up only after enough strong concept-scoped an
     assessment("eval-2", course.conceptId, 3),
     assessment("eval-3", course.conceptId, 4),
     assessment("other-1", "unrelated-concept", 0),
+    { ...assessment("stale-eval", course.conceptId, 0), lessonVersion: 7 },
   ]);
 
   assert.deepEqual(difficultySuggestion(progress, course.conceptId), {
@@ -160,6 +174,13 @@ test("difficulty recommends worked review at or below fifty percent and staying 
 });
 
 test("duration uses a same-subject median of the latest three completed valid focus sessions", () => {
+  const earlyEnded = {
+    ...recordedSession({ id: "legacy-early", minutes: 24, ended: 7 }),
+    started: -24 * 60 * 1000,
+    ended: 7,
+    target: 25 * 60,
+  };
+  delete earlyEnded.effectiveMetrics;
   const sessions = [
     recordedSession({ id: "old", minutes: 5, ended: 1 }),
     recordedSession({ id: "latest", minutes: 17, ended: 4 }),
@@ -167,6 +188,7 @@ test("duration uses a same-subject median of the latest three completed valid fo
     recordedSession({ id: "wrong-subject", topic: "biology", minutes: 25, ended: 5 }),
     recordedSession({ id: "earlier", minutes: 6, ended: 2 }),
     recordedSession({ id: "not-complete", minutes: 25, ended: 6, completed: false }),
+    earlyEnded,
   ];
 
   assert.deepEqual(durationSuggestion(sessions, "mathematics", 6), {

@@ -42,7 +42,7 @@ test("a learner can only start the next unlocked lesson and progress uses actual
   const progress = createLearningPathProgress(course.id);
 
   assert.equal(nextAvailableLesson(course, progress)?.id, "math-7-ratios-meaning");
-  assert.deepEqual(lessonStates(course, progress).map((item) => item.status), ["available", "locked", "locked"]);
+  assert.deepEqual(lessonStates(course, progress).map((item) => item.status), ["available", "locked", "locked", "locked"]);
 
   const started = beginLessonRun(progress, course, course.lessons[0].id, "draft-session-1");
   assert.equal(started.activeRun?.phase, "lesson");
@@ -65,24 +65,26 @@ test("an unfinished focus is not counted as a lesson until its offline evaluatio
 
   progress = setLessonRunPhase(progress, "lesson-session-1", "review");
   progress = completeLessonRun(progress, "lesson-session-1", 1, 2, 1_800_000_000_000, [
-    { questionId: "q1", conceptId: "ratios-proportions", correct: true },
-    { questionId: "q2", conceptId: "ratios-proportions", correct: false },
+    { questionId: "q1", conceptId: "ratios-proportions", correct: true, prompt: "Q1?", options: ["a", "b"], selectedIndex: 1, correctIndex: 1, explanation: "Q1 giải thích." },
+    { questionId: "q2", conceptId: "ratios-proportions", correct: false, prompt: "Q2?", options: ["c", "d"], selectedIndex: 0, correctIndex: 1, explanation: "Q2 giải thích." },
   ]);
 
   assert.equal(progress.activeRun, undefined);
   assert.deepEqual(progress.completed[0], {
     lessonId: "math-7-ratios-meaning",
     lessonVersion: 1,
+    lessonTitle: "Nhận biết tỉ lệ thức",
     sessionId: "lesson-session-1",
     score: 1,
     total: 2,
     completedAt: 1_800_000_000_000,
     assessedAnswers: [
-      { questionId: "q1", conceptId: "ratios-proportions", correct: true },
-      { questionId: "q2", conceptId: "ratios-proportions", correct: false },
+      { questionId: "q1", conceptId: "ratios-proportions", correct: true, prompt: "Q1?", options: ["a", "b"], selectedIndex: 1, correctIndex: 1, explanation: "Q1 giải thích." },
+      { questionId: "q2", conceptId: "ratios-proportions", correct: false, prompt: "Q2?", options: ["c", "d"], selectedIndex: 0, correctIndex: 1, explanation: "Q2 giải thích." },
     ],
   });
-  assert.deepEqual(lessonStates(course, progress).map((item) => item.status), ["completed", "available", "locked"]);
+  assert.deepEqual(normalizeLearningPathProgress(progress).completed, progress.completed);
+  assert.deepEqual(lessonStates(course, progress).map((item) => item.status), ["completed", "available", "locked", "locked"]);
 
   const replay = beginLessonRun(progress, course, course.lessons[0].id, "lesson-session-replay", true);
   assert.ok(replay);
@@ -101,7 +103,7 @@ test("persisted path progress validates known lessons and stable session ownersh
   assert.equal(isValidLearningPathProgress({ ...progress, activeRun: { ...progress.activeRun, sessionId: "" } }), false);
 });
 
-test("catalog updates preserve older completed lessons while clearing only a stale active lesson", () => {
+test("catalog updates retain historical evaluations but only matching versions complete current nodes", () => {
   const legacy = {
     schemaVersion: 1,
     selectedCourseId: "removed-course",
@@ -119,6 +121,11 @@ test("catalog updates preserve older completed lessons while clearing only a sta
   assert.equal(migrated.selectedCourseId, "math-7-ratios");
   assert.deepEqual(migrated.completed, legacy.completed.map((item) => ({ ...item, assessedAnswers: [] })));
   assert.equal(migrated.activeRun, undefined);
+  assert.equal(lessonStates(CURATED_COURSES[0], migrated)[0].status, "available");
+  assert.equal(lessonStates(CURATED_COURSES[0], migrated)[1].status, "locked");
+
+  const reopened = beginLessonRun(migrated, CURATED_COURSES[0], "math-7-ratios-meaning", "updated-session");
+  assert.equal(reopened.activeRun.lessonVersion, CURATED_COURSES[0].lessons[0].version);
 });
 
 test("path progress keeps completion history when the catalog grows beyond the old fixed limit", () => {

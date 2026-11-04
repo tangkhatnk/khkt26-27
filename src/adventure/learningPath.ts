@@ -14,7 +14,16 @@ const lessonById = new Map(CURATED_COURSES.flatMap((course) =>
 ));
 
 export type LessonRunPhase = "lesson" | "ticket" | "focus" | "review";
-export type AssessedAnswer = { questionId: string; conceptId: string; correct: boolean };
+export type AssessedAnswer = {
+  questionId: string;
+  conceptId: string;
+  correct: boolean;
+  prompt?: string;
+  options?: string[];
+  selectedIndex?: number;
+  correctIndex?: number;
+  explanation?: string;
+};
 export type LearningPathProgress = {
   schemaVersion: 1;
   selectedCourseId: string;
@@ -24,6 +33,7 @@ export type LearningPathProgress = {
   completed: {
     lessonId: string;
     lessonVersion: number;
+    lessonTitle?: string;
     sessionId: string;
     score: number;
     total: number;
@@ -38,6 +48,24 @@ export type LearningPathProgress = {
     phase: LessonRunPhase;
   };
 };
+
+function isValidAssessedAnswer(value: unknown): value is AssessedAnswer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const answer = value as Record<string, unknown>;
+  if (typeof answer.questionId !== "string" || !answer.questionId ||
+      typeof answer.conceptId !== "string" || !answer.conceptId || typeof answer.correct !== "boolean" ||
+      (answer.prompt !== undefined && typeof answer.prompt !== "string") ||
+      (answer.options !== undefined && (!Array.isArray(answer.options) || answer.options.length < 2 ||
+        answer.options.some((option) => typeof option !== "string"))) ||
+      (answer.selectedIndex !== undefined && (!Number.isSafeInteger(answer.selectedIndex) || Number(answer.selectedIndex) < 0)) ||
+      (answer.correctIndex !== undefined && (!Number.isSafeInteger(answer.correctIndex) || Number(answer.correctIndex) < 0)) ||
+      (answer.explanation !== undefined && typeof answer.explanation !== "string")) return false;
+  if (answer.selectedIndex !== undefined && (!Array.isArray(answer.options) || Number(answer.selectedIndex) >= answer.options.length)) return false;
+  if (answer.correctIndex !== undefined && (!Array.isArray(answer.options) || Number(answer.correctIndex) >= answer.options.length)) return false;
+  if (answer.selectedIndex !== undefined && answer.correctIndex !== undefined &&
+      (answer.selectedIndex === answer.correctIndex) !== answer.correct) return false;
+  return true;
+}
 
 export function createLearningPathProgress(courseId = DEFAULT_COURSE_ID): LearningPathProgress {
   return {
@@ -74,7 +102,7 @@ export function lessonStates(course: CuratedCourse, progress: LearningPathProgre
   let unlocked = true;
   return course.lessons.map((lesson) => {
     const isCompleted = progress.completed.some((item) =>
-      item.lessonId === lesson.id,
+      item.lessonId === lesson.id && item.lessonVersion === lesson.version,
     );
     const isCurrent = progress.activeRun?.courseId === course.id &&
       progress.activeRun.lessonId === lesson.id &&
@@ -110,7 +138,8 @@ export function beginLessonRun(
   if (!sessionId || progress.activeRun) return null;
   const lesson = replay
     ? course.lessons.find((item) => item.id === lessonId &&
-      progress.completed.some((completed) => completed.lessonId === item.id))
+      progress.completed.some((completed) => completed.lessonId === item.id &&
+        completed.lessonVersion === item.version))
     : nextAvailableLesson(course, progress);
   if (!lesson || lesson.id !== lessonId) return null;
   return {
@@ -155,8 +184,7 @@ export function completeLessonRun(
   if (!Number.isSafeInteger(score) || !Number.isSafeInteger(total) || total < 1 || score < 0 || score > total ||
       !Number.isSafeInteger(completedAt) || completedAt < 0 ||
       !Array.isArray(assessedAnswers) || assessedAnswers.length !== total ||
-      assessedAnswers.some((answer) => typeof answer.questionId !== "string" || !answer.questionId ||
-        typeof answer.conceptId !== "string" || !answer.conceptId || typeof answer.correct !== "boolean") ||
+      assessedAnswers.some((answer) => !isValidAssessedAnswer(answer)) ||
       assessedAnswers.filter((answer) => answer.correct).length !== score)
     throw new Error("Invalid lesson evaluation result.");
   return {
@@ -166,6 +194,7 @@ export function completeLessonRun(
       {
         lessonId: run.lessonId,
         lessonVersion: run.lessonVersion,
+        lessonTitle: courseById.get(run.courseId)?.lessons.find((item) => item.id === run.lessonId)?.title,
         sessionId: run.sessionId,
         score,
         total,
@@ -197,11 +226,9 @@ export function isValidLearningPathProgress(value: unknown): value is LearningPa
         !Number.isSafeInteger(completed.total) || Number(completed.total) < 1 ||
         Number(completed.score) > Number(completed.total) ||
         !Number.isSafeInteger(completed.completedAt) || Number(completed.completedAt) < 0 ||
-        (completed.assessedAnswers !== undefined && (!Array.isArray(completed.assessedAnswers) ||
-          completed.assessedAnswers.some((answer) => !answer || typeof answer !== "object" || Array.isArray(answer) ||
-            typeof (answer as Record<string, unknown>).questionId !== "string" ||
-            typeof (answer as Record<string, unknown>).conceptId !== "string" ||
-            typeof (answer as Record<string, unknown>).correct !== "boolean")))) return false;
+        (completed.lessonTitle !== undefined && typeof completed.lessonTitle !== "string")) return false;
+    if (completed.assessedAnswers !== undefined && (!Array.isArray(completed.assessedAnswers) ||
+        completed.assessedAnswers.some((answer) => !isValidAssessedAnswer(answer)))) return false;
   }
   if (progress.activeRun === undefined) return true;
   if (!progress.activeRun || typeof progress.activeRun !== "object" || Array.isArray(progress.activeRun)) return false;
@@ -231,15 +258,14 @@ export function normalizeLearningPathProgress(value: unknown): LearningPathProgr
         const assessedAnswers = Array.isArray(item.assessedAnswers)
           ? item.assessedAnswers.flatMap((answer) => {
               if (!answer || typeof answer !== "object" || Array.isArray(answer)) return [];
-              const scored = answer as Record<string, unknown>;
-              if (typeof scored.questionId !== "string" || !scored.questionId ||
-                  typeof scored.conceptId !== "string" || !scored.conceptId || typeof scored.correct !== "boolean") return [];
-              return [{ questionId: scored.questionId, conceptId: scored.conceptId, correct: scored.correct }];
+              if (!isValidAssessedAnswer(answer)) return [];
+              return [{ ...answer, ...(answer.options ? { options: [...answer.options] } : {}) }];
             })
           : [];
         return [{
           lessonId: item.lessonId,
           lessonVersion: Number(item.lessonVersion),
+          ...(typeof item.lessonTitle === "string" ? { lessonTitle: item.lessonTitle } : {}),
           sessionId: item.sessionId,
           score: Number(item.score),
           total: Number(item.total),

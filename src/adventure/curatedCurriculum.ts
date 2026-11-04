@@ -39,7 +39,7 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
     subjectId: "mathematics",
     subjectName: "Toán",
     title: "Tỉ lệ thức",
-    description: "Ba bài ngắn về tỉ số, tính chất tỉ lệ thức và cách tìm số chưa biết.",
+    description: "Ba bài cơ bản và một bài vận dụng về tỉ số, tỉ lệ thức.",
     lessons: [
       {
         id: "math-7-ratios-meaning",
@@ -155,6 +155,44 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
           },
         ],
       },
+      {
+        id: "math-7-ratios-application",
+        version: 1,
+        title: "Bài vận dụng tỉ lệ thức",
+        summary: "Dùng tỉ số để giải các tình huống có số liệu mới.",
+        minutes: 8,
+        content: "Một công thức pha màu dùng tỉ lệ sơn vàng : sơn xanh là 2 : 3. Nếu dùng 15 ml sơn xanh thì lượng sơn vàng cần dùng là 10 ml, vì 15 ml ứng với 3 phần và mỗi phần bằng 5 ml. Khi giải bài toán tỉ lệ, hãy xác định rõ hai đại lượng tương ứng trước khi tính.",
+        questions: [
+          {
+            id: "math-7-ratios-application-q1",
+            prompt: "Tỉ lệ sơn vàng : sơn xanh là 2 : 3. Dùng 15 ml sơn xanh thì cần bao nhiêu ml sơn vàng?",
+            options: ["10 ml", "12 ml", "18 ml"],
+            correctIndex: 0,
+            explanation: "15 ml tương ứng với 3 phần, nên mỗi phần là 5 ml. Sơn vàng có 2 phần: 2 × 5 = 10 ml.",
+          },
+          {
+            id: "math-7-ratios-application-q2",
+            prompt: "Bản đồ có tỉ lệ 1 cm ứng với 4 km. Đoạn đường dài 3 cm trên bản đồ ứng với bao nhiêu km?",
+            options: ["7 km", "12 km", "4 km"],
+            correctIndex: 1,
+            explanation: "Mỗi centimet ứng với 4 km, nên 3 cm ứng với 3 × 4 = 12 km.",
+          },
+          {
+            id: "math-7-ratios-application-q3",
+            prompt: "Hai số có tỉ số 3 : 5 và tổng bằng 32. Số bé là bao nhiêu?",
+            options: ["12", "15", "20"],
+            correctIndex: 0,
+            explanation: "Tổng số phần là 8, mỗi phần bằng 32 ÷ 8 = 4. Số bé có 3 phần nên bằng 12.",
+          },
+          {
+            id: "math-7-ratios-application-q4",
+            prompt: "Tìm x biết 4/ x = 6/15.",
+            options: ["8", "12", "10"],
+            correctIndex: 2,
+            explanation: "Nhân chéo được 4 × 15 = 6x, nên x = 60 ÷ 6 = 10.",
+          },
+        ],
+      },
     ],
   },
   {
@@ -165,7 +203,7 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
     subjectId: "physics",
     subjectName: "Vật lí",
     title: "Định luật Ôm",
-    description: "Ba bài ngắn về cường độ dòng điện, điện trở và mạch điện đơn giản.",
+    description: "Ba bài cơ bản và một bài vận dụng về cường độ dòng điện, điện trở.",
     lessons: [
       {
         id: "physics-9-ohm-quantities",
@@ -173,7 +211,7 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
         title: "Ba đại lượng điện",
         summary: "Nhận biết cường độ dòng điện, hiệu điện thế và điện trở.",
         minutes: 5,
-        content: "Cường độ dòng điện I cho biết độ mạnh của dòng điện và đo bằng ampe (A). Hiệu điện thế U đo bằng vôn (V). Điện trở R biểu thị mức cản trở dòng điện và đo bằng ôm (Ω). Với một dây dẫn ở nhiệt độ không đổi, định luật Ôm liên hệ ba đại lượng này.",
+        content: "Cường độ dòng điện I cho biết độ mạnh của dòng điện và đo bằng ampe (A). Hiệu điện thế U đo bằng vôn (V). Điện trở R biểu thị mức cản trở dòng điện và đo bằng ôm (Ω). Với một dây dẫn tuân theo định luật Ôm ở nhiệt độ không đổi, định luật liên hệ ba đại lượng này.",
         questions: [
           {
             id: "physics-9-ohm-quantities-q1",
@@ -281,6 +319,44 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
           },
         ],
       },
+      {
+        id: "physics-9-ohm-application",
+        version: 1,
+        title: "Bài vận dụng định luật Ôm",
+        summary: "Chọn đúng phép biến đổi và đơn vị trong tình huống mới.",
+        minutes: 8,
+        content: "Định luật Ôm có thể dùng theo ba dạng tương đương: I = U/R, U = I × R và R = U/I. Ví dụ, một dây dẫn có U = 12 V và R = 4 Ω thì I = 3 A. Khi so sánh hai trường hợp có cùng hiệu điện thế, điện trở lớn hơn thì cường độ dòng điện nhỏ hơn.",
+        questions: [
+          {
+            id: "physics-9-ohm-application-q1",
+            prompt: "Một dây dẫn có U = 12 V và R = 4 Ω. Cường độ dòng điện là bao nhiêu?",
+            options: ["3 A", "8 A", "48 A"],
+            correctIndex: 0,
+            explanation: "I = U/R = 12/4 = 3 A.",
+          },
+          {
+            id: "physics-9-ohm-application-q2",
+            prompt: "Hai dây cùng được đặt vào hiệu điện thế 12 V. Dây nào có dòng điện nhỏ hơn?",
+            options: ["Dây có điện trở nhỏ hơn", "Dây có điện trở lớn hơn", "Hai dòng luôn bằng nhau"],
+            correctIndex: 1,
+            explanation: "Vì I = U/R, khi U giữ nguyên thì R lớn hơn làm I nhỏ hơn.",
+          },
+          {
+            id: "physics-9-ohm-application-q3",
+            prompt: "Dòng điện 2 A chạy qua dây có điện trở 6 Ω. Hiệu điện thế là bao nhiêu?",
+            options: ["3 V", "8 V", "12 V"],
+            correctIndex: 2,
+            explanation: "U = I × R = 2 × 6 = 12 V.",
+          },
+          {
+            id: "physics-9-ohm-application-q4",
+            prompt: "Một dây có I = 0,4 A và R = 5 Ω. Hiệu điện thế giữa hai đầu dây là bao nhiêu?",
+            options: ["2 V", "1,25 V", "9 V"],
+            correctIndex: 0,
+            explanation: "U = I × R = 0,4 × 5 = 2 V.",
+          },
+        ],
+      },
     ],
   },
   {
@@ -291,7 +367,7 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
     subjectId: "biology",
     subjectName: "Sinh học",
     title: "Hô hấp tế bào",
-    description: "Ba bài ngắn về vai trò, vị trí và sản phẩm của hô hấp hiếu khí.",
+    description: "Ba bài cơ bản và một bài vận dụng về hô hấp tế bào.",
     lessons: [
       {
         id: "biology-10-respiration-purpose",
@@ -379,10 +455,10 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
         questions: [
           {
             id: "biology-10-respiration-products-q1",
-            prompt: "Chất nào là sản phẩm của hô hấp hiếu khí theo phương trình tổng quát?",
-            options: ["Glucose và oxygen", "Carbon dioxide và nước", "Chlorophyll và nitrogen"],
+            prompt: "Trong phương trình C₆H₁₂O₆ + ?O₂ → 6CO₂ + 6H₂O, hệ số trước O₂ là bao nhiêu?",
+            options: ["1", "6", "12"],
             correctIndex: 1,
-            explanation: "Phương trình tổng quát cho thấy glucose và oxygen tạo carbon dioxide, nước và năng lượng.",
+            explanation: "Vế phải có 18 nguyên tử oxygen; glucose có sẵn 6, nên cần thêm 12 nguyên tử oxygen, tức 6 phân tử O₂.",
           },
           {
             id: "biology-10-respiration-products-q2",
@@ -393,17 +469,55 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
           },
           {
             id: "biology-10-respiration-products-q3",
-            prompt: "Theo phương trình tổng quát, cần bao nhiêu phân tử O₂ cho một phân tử glucose?",
-            options: ["6", "1", "12"],
+            prompt: "Theo phương trình tổng quát, một phân tử glucose tạo ra bao nhiêu phân tử H₂O?",
+            options: ["6", "12", "1"],
             correctIndex: 0,
-            explanation: "Hệ số cân bằng trong phương trình là 6O₂ cho mỗi C₆H₁₂O₆.",
+            explanation: "Trong phương trình C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O, hệ số của nước là 6.",
           },
           {
             id: "biology-10-respiration-products-q4",
-            prompt: "Phương trình tổng quát của hô hấp hiếu khí có sản phẩm nào?",
-            options: ["Glucose và oxygen", "Carbon dioxide và nước", "Diệp lục và tinh bột"],
+            prompt: "Nếu hai phân tử glucose được hô hấp hiếu khí hoàn toàn, theo phương trình tổng quát sẽ tạo ra bao nhiêu phân tử CO₂?",
+            options: ["6", "18", "12"],
+            correctIndex: 2,
+            explanation: "Mỗi glucose tạo 6CO₂, nên hai glucose tạo 2 × 6 = 12CO₂.",
+          },
+        ],
+      },
+      {
+        id: "biology-10-respiration-application",
+        version: 1,
+        title: "Bài vận dụng về hô hấp tế bào",
+        summary: "Liên hệ chất tham gia, sản phẩm và nhu cầu năng lượng.",
+        minutes: 8,
+        content: "Trong hô hấp hiếu khí, tế bào dùng glucose và oxygen, tạo carbon dioxide và nước, đồng thời giải phóng năng lượng để tích lũy một phần trong ATP. Phương trình tổng quát giúp nhận ra các chất tham gia và sản phẩm. Quá trình gồm nhiều phản ứng, nên phương trình này là bản tóm lược chứ không phải một bước duy nhất.",
+        questions: [
+          {
+            id: "biology-10-respiration-application-q1",
+            prompt: "Phát biểu nào phân biệt đúng đường phân với chuỗi truyền electron trong hô hấp hiếu khí?",
+            options: ["Đường phân cần oxygen trực tiếp, còn chuỗi truyền electron thì không.", "Đường phân không cần oxygen trực tiếp; chuỗi truyền electron dùng oxygen ở cuối chuỗi.", "Cả hai giai đoạn chỉ diễn ra khi không có oxygen."],
             correctIndex: 1,
-            explanation: "Glucose và oxygen tạo carbon dioxide, nước và giải phóng năng lượng để tạo ATP.",
+            explanation: "Đường phân không trực tiếp dùng oxygen. Oxygen nhận electron ở cuối chuỗi truyền electron trong hô hấp hiếu khí.",
+          },
+          {
+            id: "biology-10-respiration-application-q2",
+            prompt: "Hai sản phẩm chính trong phương trình tổng quát hô hấp hiếu khí của glucose là gì?",
+            options: ["Carbon dioxide và nước", "Oxygen và glucose", "ATP và oxygen"],
+            correctIndex: 0,
+            explanation: "Phương trình tóm lược cho thấy glucose và oxygen tạo carbon dioxide, nước và giải phóng năng lượng.",
+          },
+          {
+            id: "biology-10-respiration-application-q3",
+            prompt: "Khi không có oxygen, giai đoạn nào của hô hấp hiếu khí không thể tiếp tục như mô tả?",
+            options: ["Đường phân", "Chuỗi truyền electron", "Mọi hoạt động trong tế bào"],
+            correctIndex: 1,
+            explanation: "Chuỗi truyền electron của hô hấp hiếu khí cần oxygen nhận electron ở cuối chuỗi. Đường phân không trực tiếp dùng oxygen.",
+          },
+          {
+            id: "biology-10-respiration-application-q4",
+            prompt: "Theo phương trình tổng quát, nếu hai phân tử glucose được phân giải hoàn toàn thì cần bao nhiêu phân tử O₂?",
+            options: ["6", "12", "18"],
+            correctIndex: 1,
+            explanation: "Mỗi glucose cần 6O₂ theo phương trình, nên hai glucose cần 2 × 6 = 12O₂.",
           },
         ],
       },
@@ -417,7 +531,7 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
     subjectId: "english",
     subjectName: "Tiếng Anh",
     title: "Small actions for the environment",
-    description: "Ba bài ngắn về từ vựng môi trường và lời khuyên với should / shouldn't.",
+    description: "Ba bài cơ bản và một bài vận dụng về từ vựng môi trường, câu điều kiện loại một.",
     lessons: [
       {
         id: "english-11-environment-vocabulary",
@@ -530,6 +644,44 @@ export const CURATED_COURSES: readonly CuratedCourse[] = [
             options: ["If it rains", "Cả hai mệnh đề đều là kết quả", "We will stay inside"],
             correctIndex: 2,
             explanation: "“We will stay inside” nêu kết quả có thể xảy ra nếu điều kiện trời mưa đúng.",
+          },
+        ],
+      },
+      {
+        id: "english-11-environment-application",
+        version: 1,
+        title: "Bài vận dụng câu điều kiện loại một",
+        summary: "Dùng câu điều kiện để nêu hành động và kết quả có thể xảy ra.",
+        minutes: 8,
+        content: "Câu điều kiện loại một nói về một điều kiện có thể xảy ra và kết quả có khả năng xảy ra trong tương lai. Mệnh đề if dùng thì hiện tại đơn; mệnh đề kết quả thường dùng will cùng động từ nguyên mẫu. Ví dụ: If our school saves water, it will reduce waste. Mệnh đề if có thể đứng ở đầu câu hoặc sau mệnh đề kết quả.",
+        questions: [
+          {
+            id: "english-11-environment-application-q1",
+            prompt: "Choose the correct sentence.",
+            options: ["If people walk more, they will reduce emissions.", "If people will walk more, they reduce emissions.", "If people walked more, they will reduce emissions."],
+            correctIndex: 0,
+            explanation: "The if-clause uses the present simple, and the result clause uses will + the base verb.",
+          },
+          {
+            id: "english-11-environment-application-q2",
+            prompt: "Complete: If our class ___ paper, we will save resources.",
+            options: ["will reuse", "reuses", "reused"],
+            correctIndex: 1,
+            explanation: "Use the present simple in the if-clause: “If our class reuses paper …”.",
+          },
+          {
+            id: "english-11-environment-application-q3",
+            prompt: "Use the first conditional. Complete: If the river becomes cleaner, more fish ___ there.",
+            options: ["live", "lived", "will live"],
+            correctIndex: 2,
+            explanation: "The result clause uses will + the base verb: “will live”.",
+          },
+          {
+            id: "english-11-environment-application-q4",
+            prompt: "Which sentence has the same meaning as “If we plant trees, the street will be cooler”?",
+            options: ["The street will be cooler if we plant trees.", "The street will be cooler if we will plant trees.", "The street was cooler if we plant trees."],
+            correctIndex: 0,
+            explanation: "The if-clause can follow the result clause. Its verb still stays in the present simple.",
           },
         ],
       },

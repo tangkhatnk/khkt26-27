@@ -1,7 +1,12 @@
 import {
+  isValidBreakPlan,
+  studyElapsedSeconds,
+} from "../../backend/src/adventure/domain.ts";
+import {
   analyzeSession,
   type LearningSession,
 } from "./learning.ts";
+import { CURATED_COURSES } from "./curatedCurriculum.ts";
 import type { LearningPathProgress } from "./learningPath.ts";
 
 export type DifficultySuggestion = {
@@ -16,7 +21,11 @@ export function difficultySuggestion(
   progress: Pick<LearningPathProgress, "completed">,
   conceptId: string,
 ): DifficultySuggestion {
+  const currentLessons = new Map(CURATED_COURSES.flatMap((course) =>
+    course.lessons.map((lesson) => [lesson.id, lesson.version] as const),
+  ));
   const evaluations = progress.completed.filter((evaluation) =>
+    currentLessons.get(evaluation.lessonId) === evaluation.lessonVersion &&
     evaluation.assessedAnswers?.some((answer) => answer.conceptId === conceptId),
   );
   const answers = evaluations.flatMap((evaluation) =>
@@ -56,6 +65,8 @@ export type DailyStudySummary = {
   distractions: number;
   quizCount: number;
   latestQuiz: { score: number; total: number; percent: number } | null;
+  curatedEvaluationCount: number;
+  latestCuratedEvaluation: { lessonId: string; score: number; total: number; percent: number } | null;
 };
 
 function localDayKey(timestamp: number): string {
@@ -66,6 +77,7 @@ function localDayKey(timestamp: number): string {
 export function dailyStudySummary(
   sessions: readonly LearningSession[],
   now = Date.now(),
+  curatedEvaluations: readonly LearningPathProgress["completed"][number][] = [],
 ): DailyStudySummary {
   const today = localDayKey(now);
   const daily = sessions.filter((session) => Number.isFinite(session.ended) && localDayKey(session.ended) === today);
@@ -77,6 +89,9 @@ export function dailyStudySummary(
     if (!Number.isSafeInteger(score) || !Number.isSafeInteger(total) || Number(total) < 1) return [];
     return [{ ended: session.ended, score: Number(score), total: Number(total), percent: analysis.quizPercent }];
   }).sort((left, right) => right.ended - left.ended);
+  const dailyCurated = curatedEvaluations
+    .filter((evaluation) => Number.isFinite(evaluation.completedAt) && localDayKey(evaluation.completedAt) === today)
+    .sort((left, right) => right.completedAt - left.completedAt);
 
   return {
     sessionCount: daily.length,
@@ -96,10 +111,29 @@ export function dailyStudySummary(
     latestQuiz: quizResults[0]
       ? { score: quizResults[0].score, total: quizResults[0].total, percent: quizResults[0].percent }
       : null,
+    curatedEvaluationCount: dailyCurated.length,
+    latestCuratedEvaluation: dailyCurated[0]
+      ? {
+          lessonId: dailyCurated[0].lessonId,
+          score: dailyCurated[0].score,
+          total: dailyCurated[0].total,
+          percent: Math.round((dailyCurated[0].score / dailyCurated[0].total) * 100),
+        }
+      : null,
   };
 }
 
 const clampMinutes = (minutes: number) => Math.max(5, Math.min(25, minutes));
+
+function hasCompletedTarget(session: LearningSession): boolean {
+  if (session.effectiveMetrics) return session.effectiveMetrics.completed === true;
+  if (!Number.isFinite(session.started) || !Number.isFinite(session.ended) ||
+      !Number.isFinite(session.target) || session.target < 1 || session.ended < session.started) return false;
+  const breakPlan = session.breakPlan && isValidBreakPlan(session.breakPlan, session.target)
+    ? session.breakPlan
+    : undefined;
+  return studyElapsedSeconds(session.started, session.target, breakPlan, session.ended) >= session.target;
+}
 
 export function durationSuggestion(
   sessions: readonly LearningSession[],
@@ -109,7 +143,7 @@ export function durationSuggestion(
   const latest = sessions
     .filter((session) => session.topic === subjectId &&
       Number.isFinite(session.started) && Number.isFinite(session.ended) &&
-      session.ended >= session.started && session.effectiveMetrics?.completed !== false)
+      session.ended >= session.started && hasCompletedTarget(session))
     .map((session) => ({
       ended: session.ended,
       focusedSeconds: analyzeSession(session).focusedSeconds,
