@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CURATED_COURSES } from "../src/adventure/curatedCurriculum.ts";
-import { dailyStudySummary, difficultySuggestion, durationSuggestion } from "../src/adventure/learningPathInsights.ts";
+import { chooseDuration, dailyStudySummary, difficultySuggestion, durationSuggestion, workedReviewLesson } from "../src/adventure/learningPathInsights.ts";
 import { createLearningPathProgress } from "../src/adventure/learningPath.ts";
 
 const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
 assert.ok(course);
 
-function assessment(sessionId, conceptId, correctCount, total = 4) {
+function assessment(sessionId, conceptId, correctCount, total = 4, lessonId = "math-7-ratios-meaning") {
   return {
-    lessonId: "math-7-ratios-meaning",
+    lessonId,
     lessonVersion: 1,
     sessionId,
     score: correctCount,
@@ -159,9 +159,9 @@ test("difficulty suggests one step up only after enough strong concept-scoped an
 
 test("difficulty recommends worked review at or below fifty percent and staying put in the middle", () => {
   const weak = learningProgress([
-    assessment("eval-1", course.conceptId, 2),
-    assessment("eval-2", course.conceptId, 2),
-    assessment("eval-3", course.conceptId, 2),
+    assessment("eval-1", course.conceptId, 1, 4, course.lessons[0].id),
+    assessment("eval-2", course.conceptId, 2, 4, course.lessons[1].id),
+    assessment("eval-3", course.conceptId, 2, 4, course.lessons[2].id),
   ]);
   const steady = learningProgress([
     assessment("eval-1", course.conceptId, 3),
@@ -170,6 +170,7 @@ test("difficulty recommends worked review at or below fifty percent and staying 
   ]);
 
   assert.equal(difficultySuggestion(weak, course.conceptId).kind, "worked-review");
+  assert.equal(workedReviewLesson(weak, course.conceptId)?.id, course.lessons[0].id);
   assert.equal(difficultySuggestion(steady, course.conceptId).kind, "stay");
 });
 
@@ -181,6 +182,14 @@ test("duration uses a same-subject median of the latest three completed valid fo
     target: 25 * 60,
   };
   delete earlyEnded.effectiveMetrics;
+  const invalidBreakPlan = {
+    ...recordedSession({ id: "legacy-invalid-break", minutes: 24, ended: 8 }),
+    started: -30 * 60 * 1000,
+    ended: 8,
+    target: 25 * 60,
+    breakPlan: { count: 1, seconds: 30 },
+  };
+  delete invalidBreakPlan.effectiveMetrics;
   const sessions = [
     recordedSession({ id: "old", minutes: 5, ended: 1 }),
     recordedSession({ id: "latest", minutes: 17, ended: 4 }),
@@ -189,6 +198,7 @@ test("duration uses a same-subject median of the latest three completed valid fo
     recordedSession({ id: "earlier", minutes: 6, ended: 2 }),
     recordedSession({ id: "not-complete", minutes: 25, ended: 6, completed: false }),
     earlyEnded,
+    invalidBreakPlan,
   ];
 
   assert.deepEqual(durationSuggestion(sessions, "mathematics", 6), {
@@ -218,4 +228,12 @@ test("duration uses the curated estimate before the history threshold and stays 
   });
   assert.equal(durationSuggestion(short, "mathematics", 1).minutes, 5);
   assert.equal(durationSuggestion(long, "mathematics", 7).minutes, 25);
+});
+
+test("learners can override a suggested duration while the saved suggestion remains bounded", () => {
+  const suggestion = durationSuggestion([], "mathematics", 20);
+
+  assert.equal(chooseDuration(suggestion, 15), 15);
+  assert.equal(chooseDuration(suggestion, 27), 25);
+  assert.equal(chooseDuration(suggestion, undefined), 20);
 });

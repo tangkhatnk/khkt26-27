@@ -3,6 +3,7 @@ import {
   type CuratedCourse,
   type CuratedLesson,
 } from "./curatedCurriculum.ts";
+import { isValidBreakPlan, type BreakPlan } from "../../backend/src/adventure/domain.ts";
 
 export { CURATED_COURSES, CURRICULUM_VERSION } from "./curatedCurriculum.ts";
 export type { CuratedCourse, CuratedLesson, CuratedQuestion } from "./curatedCurriculum.ts";
@@ -46,6 +47,8 @@ export type LearningPathProgress = {
     lessonVersion: number;
     sessionId: string;
     phase: LessonRunPhase;
+    target?: number;
+    breakPlan?: BreakPlan;
   };
 };
 
@@ -170,6 +173,27 @@ export function setLessonRunPhase(
   return { ...progress, activeRun: { ...activeRun, phase } };
 }
 
+export function setLessonRunPlan(
+  progress: LearningPathProgress,
+  sessionId: string,
+  target: number,
+  breakPlan?: BreakPlan,
+): LearningPathProgress {
+  const activeRun = progress.activeRun;
+  if (!activeRun || activeRun.sessionId !== sessionId || !Number.isSafeInteger(target) ||
+      target < 60 || target > 14_400 || (breakPlan !== undefined && !isValidBreakPlan(breakPlan, target)))
+    return progress;
+  if (activeRun.target === target && JSON.stringify(activeRun.breakPlan) === JSON.stringify(breakPlan)) return progress;
+  return {
+    ...progress,
+    activeRun: {
+      ...activeRun,
+      target,
+      ...(breakPlan ? { breakPlan: { ...breakPlan } } : {}),
+    },
+  };
+}
+
 export function completeLessonRun(
   progress: LearningPathProgress,
   sessionId: string,
@@ -234,9 +258,13 @@ export function isValidLearningPathProgress(value: unknown): value is LearningPa
   if (!progress.activeRun || typeof progress.activeRun !== "object" || Array.isArray(progress.activeRun)) return false;
   const run = progress.activeRun as Record<string, unknown>;
   const known = typeof run.lessonId === "string" ? lessonById.get(run.lessonId) : undefined;
+  const target = run.target;
+  const breakPlan = run.breakPlan;
   return Boolean(known && run.courseId === known.course.id && run.lessonVersion === known.lesson.version &&
     typeof run.sessionId === "string" && run.sessionId.length > 0 && run.sessionId.length <= 200 &&
-    ["lesson", "ticket", "focus", "review"].includes(String(run.phase)));
+    ["lesson", "ticket", "focus", "review"].includes(String(run.phase)) &&
+    (target === undefined || (Number.isSafeInteger(target) && Number(target) >= 60 && Number(target) <= 14_400)) &&
+    (breakPlan === undefined || (typeof target === "number" && isValidBreakPlan(breakPlan, target))));
 }
 
 export function normalizeLearningPathProgress(value: unknown): LearningPathProgress {
@@ -288,6 +316,10 @@ export function normalizeLearningPathProgress(value: unknown): LearningPathProgr
         lessonVersion: knownRun.lesson.version,
         sessionId: run.sessionId,
         phase: run.phase as LessonRunPhase,
+        ...(Number.isSafeInteger(run.target) && Number(run.target) >= 60 && Number(run.target) <= 14_400
+          ? { target: Number(run.target) } : {}),
+        ...(run.breakPlan && Number.isSafeInteger(run.target) && isValidBreakPlan(run.breakPlan, Number(run.target))
+          ? { breakPlan: { ...(run.breakPlan as BreakPlan) } } : {}),
       }
     : undefined;
   const selectedLesson = typeof raw.selectedLessonId === "string" ? lessonById.get(raw.selectedLessonId) : undefined;

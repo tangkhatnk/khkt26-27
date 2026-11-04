@@ -43,6 +43,12 @@ import {
 } from "./StudyExercisePreparation";
 import { HomeTripForm } from "./HomeTripForm";
 import {
+  CuratedEvaluation,
+  CuratedEvaluationReceipt,
+  LearningPathHome,
+  LearningPathLessonDetail,
+} from "./LearningPathView";
+import {
   canMarkSynchronizedTripReady,
   isSynchronizedTrip,
   shouldAutoResumeSynchronizedTrip,
@@ -73,6 +79,25 @@ import { guestPublicationNotice, permanentGuestFailure, publishGuestSessions, ty
 import { GuestHistorySync } from "./GuestHistorySync";
 import { SessionCorrectionNotice } from "./SessionCorrectionNotice";
 import { studyTopics } from "./topics";
+import {
+  CURATED_COURSES,
+  beginLessonRun,
+  completeLessonRun,
+  createLearningPathProgress,
+  lessonStates,
+  nextAvailableLesson,
+  selectLearningPathCourse,
+  selectPathLesson,
+  setLessonRunPlan,
+  setLessonRunPhase,
+} from "./learningPath";
+import {
+  dailyStudySummary,
+  difficultySuggestion,
+  durationSuggestion,
+  workedReviewLesson,
+} from "./learningPathInsights";
+import type { CuratedLesson } from "./curatedCurriculum";
 import {
   breakStatus,
   studyStageStatus,
@@ -141,12 +166,10 @@ const stories = [
   "Bình minh lên trên những mái nhà. Mỗi nỗ lực nhỏ đã góp thành chuyến đi này.",
 ];
 const nav = [
-  { id: "station", icon: "⌂", label: "Ga chính" },
-  { id: "map", icon: "⌁", label: "Bản đồ hành trình" },
-  { id: "carriage", icon: "▣", label: "Toa của tôi" },
-  { id: "group", icon: "♧", label: "Chuyến đi chung" },
-  { id: "journal", icon: "▤", label: "Nhật ký học tập" },
-  { id: "experiments", icon: "◎", label: "Lịch sử chuyến đi" },
+  { id: "station", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 7.5 10 3l6.5 4.5v9h-13v-9Z"/><path d="M8 16.5v-5h4v5"/></svg>, label: "Lộ trình" },
+  { id: "group", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="6" r="2.5"/><path d="M2.5 17v-1.5a4.5 4.5 0 0 1 9 0V17m1-11a2.5 2.5 0 1 1 0 5m2 2a4 4 0 0 1 3 4v.5"/></svg>, label: "Học cùng bạn" },
+  { id: "journal", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5h12v15H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M7 7h7m-7 4h7m-7 4h4"/></svg>, label: "Nhật ký học tập" },
+  { id: "experiments", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3v7l4 2.5M17 8a7.5 7.5 0 1 1-3-4"/><path d="M14 2.5h4v4"/></svg>, label: "Lịch sử phiên học" },
   { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo" },
 ];
 const clock = (seconds: number) =>
@@ -205,7 +228,7 @@ export default function AdventureApp() {
 }
 function AdventureWorkspace() {
   const [requestedView, setView] = useBrowserView();
-  const views = ["station", "map", "carriage", "group", "journal", "experiments", "report", "ticket", "focus", "summary", "account", "admin"];
+  const views = ["station", "lesson", "map", "carriage", "group", "journal", "experiments", "report", "ticket", "focus", "summary", "account", "admin"];
   const view = views.includes(requestedView) ? requestedView : "station";
   const { user, login, logout, offline: authOffline, needsLogin } = useAuthStore();
   const owner = user?.id ?? "guest";
@@ -243,6 +266,7 @@ function AdventureWorkspace() {
   const studyFullscreen = useStudyFullscreen(view === "focus" && hasActiveTrip);
   const [loaded, setLoaded] = useState(false),
     [exclusive, setExclusive] = useState(false);
+  const [showLearningGuide, setShowLearningGuide] = useState(false);
   const [storageError, setStorageError] = useState(false);
   const [clockSkewUnsupported, setClockSkewUnsupported] = useState(false);
   const [serverClockReady, setServerClockReady] = useState(false);
@@ -412,6 +436,34 @@ function AdventureWorkspace() {
         }
         try {
           const value = readSaved(owner);
+          const pathRun = value.learningPath?.activeRun;
+          if (pathRun && pathRun.phase === "ticket" && !value.active) {
+            const runCourse = CURATED_COURSES.find((course) => course.id === pathRun.courseId);
+            const runLesson = runCourse?.lessons.find((lesson) => lesson.id === pathRun.lessonId && lesson.version === pathRun.lessonVersion);
+            if (runCourse && runLesson) {
+              setDraftTripId(pathRun.sessionId);
+              const draft = {
+                goal: `Học bài: ${runLesson.title}`,
+                topic: runCourse.subjectId,
+                minutes: Math.max(1, Math.floor((pathRun.target ?? runLesson.minutes * 60) / 60)),
+                breakCount: pathRun.breakPlan?.count ?? 0,
+                breakMinutes: pathRun.breakPlan ? pathRun.breakPlan.seconds / 60 : 5,
+              };
+              updateQuickTripDraft(quickTripDraft, draft);
+              setGoal(draft.goal);
+              setTopic(draft.topic);
+              setMinutes(draft.minutes);
+              setBreakCount(draft.breakCount);
+              setBreakMinutes(draft.breakMinutes);
+              setDocumentText(value.notes[pathRun.sessionId] ?? runLesson.content);
+              setMaterials(value.materials?.[pathRun.sessionId] ?? []);
+              setSources(value.sources?.[pathRun.sessionId] ?? [createMaterialSource(runLesson.id, {
+                name: `${runCourse.title} · ${runLesson.title}`,
+                text: runLesson.content,
+                source: "curated",
+              })]);
+            }
+          }
           if (value.active) {
             if (value.active.syncClock && value.active.clockOffsetMs !== undefined)
               serverClockOffsetMs.current = value.active.clockOffsetMs;
@@ -420,6 +472,7 @@ function AdventureWorkspace() {
           if (owner === "guest")
             value.snapshot = snapshot(value.local, owner, Date.now());
           if (commitRef.current(value)) {
+            setShowLearningGuide(!value.learningPath?.guideDismissed);
             workspaceLive.current = true;
             exclusiveLease.current = true;
             setLoaded(true);
@@ -732,10 +785,45 @@ function AdventureWorkspace() {
   const mapActive = active && !(mode === "group" && group) && active.groupId === null ? active : null;
   const mapProgress = explorationProgress(journey, mapActive ? focused(mapActive) : 0, mapActive?.target);
   const sessions = historySessions(saved, owner);
+  const learningPathProgress = saved.learningPath ?? createLearningPathProgress();
+  const selectedLearningCourse = CURATED_COURSES.find((course) => course.id === learningPathProgress.selectedCourseId) ?? CURATED_COURSES[0];
+  const learningPathCourse = CURATED_COURSES.find((course) => course.id === learningPathProgress.activeRun?.courseId) ?? selectedLearningCourse;
+  const learningPathStates = lessonStates(learningPathCourse, learningPathProgress);
+  const nextLearningLesson = nextAvailableLesson(learningPathCourse, learningPathProgress);
+  const learningDifficulty = difficultySuggestion(learningPathProgress, learningPathCourse.conceptId);
+  const learningReviewLesson = workedReviewLesson(learningPathProgress, learningPathCourse.conceptId);
+  const learningDuration = durationSuggestion(
+    sessions,
+    learningPathCourse.subjectId,
+    nextLearningLesson?.minutes ?? learningPathCourse.lessons[0].minutes,
+  );
+  const learningDaily = dailyStudySummary(sessions, now, learningPathProgress.completed);
+  const selectedPathLesson = learningPathProgress.activeRun
+    ? learningPathCourse.lessons.find((lesson) => lesson.id === learningPathProgress.activeRun?.lessonId &&
+      lesson.version === learningPathProgress.activeRun.lessonVersion)
+    : learningPathCourse.lessons.find((lesson) => lesson.id === learningPathProgress.selectedLessonId &&
+      lesson.version === learningPathProgress.selectedLessonVersion);
+  const selectedPathLessonState = selectedPathLesson
+    ? learningPathStates.find((item) => item.lesson.id === selectedPathLesson.id)?.status ?? "locked"
+    : "locked";
   const summarySessionId = summary?.id ?? (view === "summary" ? saved.summarySessionId : undefined);
   const summarySession = summarySessionId
     ? sessions.find((session) => session.id === summarySessionId && !removedIds.has(session.id)) ?? null
     : null;
+  const summaryCuratedEvaluation = summarySession
+    ? learningPathProgress.completed.find((evaluation) => evaluation.sessionId === summarySession.id)
+    : undefined;
+  const summaryLearningRun = summarySession && learningPathProgress.activeRun?.phase === "review" &&
+    learningPathProgress.activeRun.sessionId === summarySession.id
+    ? learningPathProgress.activeRun
+    : undefined;
+  const summaryLearningCourse = summaryLearningRun
+    ? CURATED_COURSES.find((course) => course.id === summaryLearningRun.courseId)
+    : undefined;
+  const summaryLearningLesson = summaryLearningCourse && summaryLearningRun
+    ? summaryLearningCourse.lessons.find((lesson) => lesson.id === summaryLearningRun.lessonId &&
+      lesson.version === summaryLearningRun.lessonVersion)
+    : undefined;
   const summaryMaterialSessionId = summarySession?.id;
   const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
     ? saved.sources?.[summaryMaterialSessionId] ?? []
@@ -1315,6 +1403,158 @@ function AdventureWorkspace() {
     setBreakMinutes(draft.breakMinutes);
     go("ticket");
   };
+  function selectLearningCourse(courseId: string) {
+    const value = current.current;
+    const progress = selectLearningPathCourse(value.learningPath ?? createLearningPathProgress(), courseId);
+    if (progress !== value.learningPath) commit({ ...value, learningPath: progress });
+  }
+  function openLearningLesson(lesson: CuratedLesson) {
+    const course = CURATED_COURSES.find((item) => item.lessons.some((candidate) => candidate.id === lesson.id && candidate.version === lesson.version));
+    if (!course) return;
+    const value = current.current;
+    const progress = selectPathLesson(value.learningPath ?? createLearningPathProgress(), course, lesson);
+    if (commit({ ...value, learningPath: progress })) go("lesson");
+  }
+  function updateLearningPathPlan(target: number, count = breakCount, breakDuration = breakMinutes) {
+    const value = current.current;
+    const progress = value.learningPath;
+    const run = progress?.activeRun;
+    if (!progress || !run || run.sessionId !== draftTripIdRef.current || run.phase !== "ticket") return;
+    const breakPlan = count > 0 ? { count, seconds: breakDuration * 60 } : undefined;
+    const updated = setLessonRunPlan(progress, run.sessionId, target, breakPlan);
+    if (updated !== progress) commit({ ...value, learningPath: updated });
+  }
+  function startLearningLesson(lesson: CuratedLesson, minutesValue: number) {
+    const value = current.current;
+    if (studyGuideNeedsConfirmation) {
+      setError("Hãy xác nhận hoặc bỏ bản ôn tập AI trước khi bắt đầu chặng học.");
+      return;
+    }
+    if (value.active) {
+      go("focus");
+      setNotice("Hãy tiếp tục hoặc kết thúc phiên đang chạy trước khi bắt đầu bài học.");
+      return;
+    }
+    if (value.learningPath?.activeRun) {
+      resumeLearningPathRun();
+      return;
+    }
+    const course = CURATED_COURSES.find((item) => item.lessons.some((candidate) => candidate.id === lesson.id && candidate.version === lesson.version));
+    if (!course || !Number.isSafeInteger(minutesValue) || minutesValue < 5 || minutesValue > 25) return;
+    const sessionId = draftTripIdRef.current;
+    const replay = (value.learningPath?.completed ?? []).some((entry) =>
+      entry.lessonId === lesson.id && entry.lessonVersion === lesson.version,
+    );
+    const started = beginLessonRun(value.learningPath ?? createLearningPathProgress(course.id), course, lesson.id, sessionId, replay);
+    if (!started) {
+      setError("Bài học này chưa mở hoặc một chặng khác đang chờ tiếp tục.");
+      return;
+    }
+    const pathProgress = setLessonRunPlan(
+      setLessonRunPhase(started, sessionId, "ticket"),
+      sessionId,
+      minutesValue * 60,
+    );
+    if (!commit({ ...value, learningPath: pathProgress })) return;
+    const draft = {
+      goal: `Học bài: ${lesson.title}`,
+      topic: course.subjectId,
+      minutes: minutesValue,
+      breakCount: 0,
+      breakMinutes: 5,
+    };
+    updateQuickTripDraft(quickTripDraft, draft);
+    setDraftTripId(sessionId);
+    draftSessionIdsRef.current.solo = sessionId;
+    setMode("solo");
+    setGoal(draft.goal);
+    setTopic(draft.topic);
+    setMinutes(draft.minutes);
+    setBreakCount(0);
+    setBreakMinutes(5);
+    setDocumentText(lesson.content);
+    setMaterials([]);
+    setSources([createMaterialSource(lesson.id, {
+      name: `${course.title} · ${lesson.title}`,
+      text: lesson.content,
+      source: "curated",
+    })]);
+    setStudyInput("notes");
+    setSummary(null);
+    go("ticket");
+  }
+  function resumeLearningPathRun() {
+    const value = current.current;
+    const run = value.learningPath?.activeRun;
+    if (!run) {
+      if (value.active) go("focus");
+      return;
+    }
+    if (run.phase === "focus" && value.active?.id === run.sessionId) {
+      go("focus");
+      return;
+    }
+    if (run.phase === "review") {
+      const session = historySessions(value, ownerRef.current).find((item) => item.id === run.sessionId);
+      if (!session) {
+        setError("Không tìm thấy phiên đã lưu cho bài tự kiểm tra này. Hãy mở nhật ký học tập để xem dữ liệu trên thiết bị.");
+        return;
+      }
+      commit({ ...value, summarySessionId: session.id });
+      setSummary(session as Session);
+      go("summary");
+      return;
+    }
+    const course = CURATED_COURSES.find((item) => item.id === run.courseId);
+    const lesson = course?.lessons.find((item) => item.id === run.lessonId && item.version === run.lessonVersion);
+    if (!course || !lesson) {
+      setError("Phiên bản bài học đã thay đổi. Tiến độ cũ vẫn được giữ trong nhật ký.");
+      return;
+    }
+    const target = run.target ?? lesson.minutes * 60;
+    const draft = {
+      goal: `Học bài: ${lesson.title}`,
+      topic: course.subjectId,
+      minutes: target / 60,
+      breakCount: run.breakPlan?.count ?? 0,
+      breakMinutes: run.breakPlan ? run.breakPlan.seconds / 60 : 5,
+    };
+    updateQuickTripDraft(quickTripDraft, draft);
+    setDraftTripId(run.sessionId);
+    draftSessionIdsRef.current.solo = run.sessionId;
+    setMode("solo");
+    setGoal(draft.goal);
+    setTopic(draft.topic);
+    setMinutes(draft.minutes);
+    setBreakCount(draft.breakCount);
+    setBreakMinutes(draft.breakMinutes);
+    setDocumentText(value.notes[run.sessionId] ?? lesson.content);
+    setMaterials(value.materials?.[run.sessionId] ?? []);
+    setSources(value.sources?.[run.sessionId] ?? [createMaterialSource(lesson.id, {
+      name: `${course.title} · ${lesson.title}`,
+      text: lesson.content,
+      source: "curated",
+    })]);
+    setStudyInput("notes");
+    go("ticket", { preserveTicketPlan: true });
+  }
+  function dismissLearningGuide() {
+    const value = current.current;
+    const progress = value.learningPath ?? createLearningPathProgress();
+    if (commit({ ...value, learningPath: { ...progress, guideDismissed: true } })) setShowLearningGuide(false);
+  }
+  function completeCuratedEvaluation(sessionId: string, score: number, total: number, answers: Parameters<typeof completeLessonRun>[5]): boolean {
+    const value = current.current;
+    if (!value.learningPath?.activeRun || value.learningPath.activeRun.sessionId !== sessionId ||
+        value.learningPath.activeRun.phase !== "review") return false;
+    try {
+      const progress = completeLessonRun(value.learningPath, sessionId, score, total, Date.now(), answers);
+      return commit({ ...value, learningPath: progress });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Chưa lưu được kết quả tự kiểm tra.");
+      return false;
+    }
+  }
   async function mutation(path: string, body: unknown): Promise<Snapshot> {
     if (needsLogin) throw new Error("Đăng nhập lại để cập nhật nhóm hoặc đồng bộ trang trí.");
     const id = ownerRef.current;
@@ -1608,6 +1848,9 @@ function AdventureWorkspace() {
         if (commit({
           ...current.current,
           ...(input.snapshot ? { snapshot: input.snapshot } : {}),
+          ...(current.current.learningPath?.activeRun?.sessionId === trip.id
+            ? { learningPath: setLessonRunPhase(current.current.learningPath, trip.id, "focus") }
+            : {}),
           active: trip,
           quizDrafts: updateQuizDrafts(current.current.quizDrafts, trip.id, initialQuizDraft),
         })) {
@@ -1809,6 +2052,8 @@ function AdventureWorkspace() {
     };
     const value = structuredClone(current.current);
     value.active = null;
+    if (value.learningPath?.activeRun?.sessionId === s.id)
+      value.learningPath = setLessonRunPhase(value.learningPath, s.id, "review");
     if (value.readyTripDrafts) delete value.readyTripDrafts[s.id];
     value.notes[s.id] = next.document;
     (value.materials ??= {})[s.id] = next.materials ?? [];
@@ -2161,9 +2406,6 @@ function AdventureWorkspace() {
     setMode("solo");
     go("ticket");
   }
-  const progress = journey
-    ? Math.min(100, (journey.remaining / journey.threshold) * 100)
-    : 0;
   return (
     <div className="adventure" ref={studyFullscreen.ref}>
       <aside className="sidebar">
@@ -2175,26 +2417,24 @@ function AdventureWorkspace() {
             go("station");
           }}
         >
-          <span className="brand-icon">▥</span>
+          <span className="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M5 27V6l11 11L27 6v21" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 22h12" stroke="#8fc09a" strokeWidth="2" strokeLinecap="round"/></svg></span>
           <span>
             viễn du<small>HỌC TẬP · KHÁM PHÁ</small>
           </span>
         </a>
-        <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
+          <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
         <nav aria-label="Điều hướng chính">
           {nav.map((n) => {
-            const label = n.id === "group" && group && !isSynchronizedTrip(group.trip)
-              ? "Đoàn tàu"
-              : n.label;
             return (
               <button
                 key={n.id}
                 className={view === n.id ? "nav active" : "nav"}
                 aria-current={view === n.id ? "page" : undefined}
+                aria-label={n.label}
                 onClick={() => go(n.id)}
               >
                 <span aria-hidden="true">{n.icon}</span>
-                {label}
+                {n.label}
                 {n.id === "station" && <i />}
               </button>
             );
@@ -2229,6 +2469,9 @@ function AdventureWorkspace() {
               {nav.find((n) => n.id === view)?.label ??
                 (
                   {
+                    lesson: "Bài học",
+                    map: "Bản đồ hành trình",
+                    carriage: "Toa của tôi",
                     ticket: "Vé học",
                     focus: "Chuyến đang chạy",
                     summary: "Thành quả",
@@ -2309,130 +2552,56 @@ function AdventureWorkspace() {
             <>
               {view === "station" && (
                 <>
-                  <div className="page-heading">
-                    <div>
-                      <div className="eyebrow">
-                        CHƯƠNG 01 · THEO DẤU BÌNH MINH
-                      </div>
-                      <h1>
-                        Một hành trình mới,
-                        <br />
-                        bắt đầu từ hôm nay<span className="orange">.</span>
-                      </h1>
-                      <p>
-                        Dành một khoảng lặng cho việc học. Để toa tàu đưa bạn đi
-                        xa.
-                      </p>
-                    </div>
-                    <div className="date-chip">
-                      ◷{" "}
-                      <span>
-                        {new Date(now).toLocaleDateString("vi-VN", {
-                          weekday: "long",
-                          day: "numeric",
-                          month: "long",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="dashboard-grid">
-                    <section className="hero-card">
-                      <div className="hero-label">
-                        <span className="pill">
-                          ✦ HÀNH TRÌNH CỦA{" "}
-                          {mode === "group" && group
-                            ? isSynchronizedTrip(group.trip) ? "CHUYẾN ĐI CHUNG" : "ĐOÀN"
-                            : "BẠN"}
-                        </span>
-                        <span className="chapter">
-                          0{(journey?.station ?? 0) + 1} / 05
-                        </span>
-                      </div>
-                      <JourneyView
-                        journey={journey}
-                        carriages={trainCars}
-                        ownId={owner}
-                      />
-                      <div className="hero-caption">
-                        <div>
-                          <span className="eyebrow">BẠN ĐANG Ở</span>
-                          <h2>{stations[journey?.station ?? 0]}</h2>
-                          <p>{stories[journey?.station ?? 0]}</p>
-                        </div>
-                        <button
-                          className="round-button"
-                          aria-label="Xem bản đồ"
-                          onClick={() => go("map")}
-                        >
-                          ↗
-                        </button>
-                      </div>
-                      <div className="journey-progress">
-                        <div>
-                          <span>
-                            {journey?.station === 4
-                              ? "Đã đến đích · phần dư được giữ lại"
-                              : `Trạm tiếp theo: ${stations[(journey?.station ?? 0) + 1]}`}
-                          </span>
-                          <strong>
-                            {Math.floor((journey?.remaining ?? 0) / 60)} /{" "}
-                            {Math.floor((journey?.threshold ?? 1800) / 60)} phút
-                          </strong>
-                        </div>
-                        <progress max="100" value={progress} />
-                      </div>
-                    </section>
-                    <HomeTripForm
-                      draftRef={quickTripDraft}
-                      topics={availableTopics}
-                      hasActiveTrip={Boolean(active)}
-                      onPrepare={onPrepareQuickTrip}
-                    />
-                  </div>
-                  <div className="stat-row">
-                    <Stat
-                      icon="◷"
-                      label="PHÚT ĐÃ TẬP TRUNG"
-                      value={`${minutesTotal}`}
-                      detail="Từng phút đều có ý nghĩa"
-                    />
-                    <Stat
-                      icon="▤"
-                      label="CHUYẾN ĐÃ LƯU"
-                      value={`${sessions.length}`}
-                      detail="Gồm cả những chặng ngắn"
-                    />
-                    <Stat
-                      icon="⚑"
-                      label="TRẠM ĐÃ KHÁM PHÁ"
-                      value={`${(carriage?.journey.station ?? 0) + 1} / 5`}
-                      detail="Một thế giới đang chờ bạn"
-                    />
-                  </div>
-                  <div className="section-heading">
-                    <h2>Hành trình là của bạn</h2>
-                    <span>Từng bước nhỏ, mỗi ngày</span>
-                  </div>
-                  <div className="feature-row">
-                    <button className="feature" onClick={() => go("carriage")}>
-                      <span className="feature-icon peach">▣</span>
-                      <div>
-                        <h3>Một toa mang dấu ấn riêng</h3>
-                        <p>Đổi màu, đặt tên và lưu những kỷ niệm.</p>
-                      </div>
-                      <span>↗</span>
-                    </button>
-                    <button className="feature" onClick={() => go("group")}>
-                      <span className="feature-icon green">♧</span>
-                      <div>
-                        <h3>Cùng bạn bè đi xa hơn</h3>
-                        <p>Nối toa. Khác lịch học, chung điểm đến.</p>
-                      </div>
-                      <span>↗</span>
-                    </button>
-                  </div>
+                  <LearningPathHome
+                    courses={CURATED_COURSES}
+                    course={learningPathCourse}
+                    progress={learningPathProgress}
+                    lessonStates={learningPathStates}
+                    nextLesson={nextLearningLesson}
+                    reviewLesson={learningReviewLesson}
+                    daily={learningDaily}
+                    difficulty={learningDifficulty}
+                    duration={learningDuration}
+                    guideOpen={showLearningGuide}
+                    existingSessionGoal={active?.goal}
+                    ownGoalForm={
+                      <details className="learning-own-goal">
+                        <summary>Chuẩn bị buổi học theo mục tiêu riêng</summary>
+                        <HomeTripForm
+                          draftRef={quickTripDraft}
+                          topics={availableTopics}
+                          hasActiveTrip={Boolean(active)}
+                          onPrepare={onPrepareQuickTrip}
+                        />
+                      </details>
+                    }
+                    onSelectCourse={selectLearningCourse}
+                    onOpenLesson={openLearningLesson}
+                    onResume={resumeLearningPathRun}
+                    onResumeExistingSession={() => go("focus")}
+                    onOpenGuide={() => setShowLearningGuide(true)}
+                    onDismissGuide={dismissLearningGuide}
+                    onNavigate={go}
+                  />
                 </>
               )}
+              {view === "lesson" && (selectedPathLesson ? (
+                <LearningPathLessonDetail
+                  course={learningPathCourse}
+                  lesson={selectedPathLesson}
+                  status={selectedPathLessonState}
+                  active={learningPathProgress.activeRun?.lessonId === selectedPathLesson.id &&
+                    learningPathProgress.activeRun.lessonVersion === selectedPathLesson.version}
+                  replay={selectedPathLessonState === "completed"}
+                  difficulty={learningDifficulty}
+                  duration={learningDuration}
+                  onBack={() => go("station")}
+                  onStart={(minutesValue) => startLearningLesson(selectedPathLesson, minutesValue)}
+                  onResume={resumeLearningPathRun}
+                />
+              ) : (
+                <Empty title="Bài học không còn trong lộ trình" text="Tiến độ cũ vẫn được giữ trong nhật ký. Hãy chọn một bài hiện có để tiếp tục." action="Mở lộ trình" onClick={() => go("station")} />
+              ))}
               {view === "ticket" && (
                 <>
                   <Heading
@@ -2574,6 +2743,7 @@ function AdventureWorkspace() {
                           onChange={(value) => {
                             updateQuickTripDraft(quickTripDraft, { minutes: value });
                             setMinutes(value);
+                            updateLearningPathPlan(value * 60);
                           }}
                           breakCount={breakCount}
                           breakMinutes={breakMinutes}
@@ -2582,10 +2752,12 @@ function AdventureWorkspace() {
                           onBreakCountChange={(value) => {
                             if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakCount: value });
                             setBreakCount(value);
+                            updateLearningPathPlan(minutes * 60, value, breakMinutes);
                           }}
                           onBreakMinutesChange={(value) => {
                             if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakMinutes: value });
                             setBreakMinutes(value);
+                            updateLearningPathPlan(minutes * 60, breakCount, value);
                           }}
                         />
                       </TicketEditor>
@@ -3520,6 +3692,7 @@ function AdventureWorkspace() {
                       {sessions.map((s) => {
                         const analysis = analyzeSession(s);
                         const gaps = knowledgeGaps(s.quiz);
+                        const curatedResult = learningPathProgress.completed.find((evaluation) => evaluation.sessionId === s.id);
                         return (
                           <button
                             key={s.id}
@@ -3555,6 +3728,7 @@ function AdventureWorkspace() {
                                 <span>{s.quiz?.feedback
                                   ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
                                   : analysis.knowledgeLabel}</span>
+                                {curatedResult && <span>Bài tự kiểm tra đã lưu riêng: {curatedResult.score}/{curatedResult.total}</span>}
                                 <small>{analysis.focusExplanation}</small>
                               </div>
                             </div>
@@ -3599,6 +3773,15 @@ function AdventureWorkspace() {
                       title="Thêm một chặng đường đáng nhớ."
                       text={summarySession.goal}
                     />
+                    {summaryCuratedEvaluation ? (
+                      <CuratedEvaluationReceipt evaluation={summaryCuratedEvaluation} />
+                    ) : summaryLearningLesson && summaryLearningCourse && summaryLearningRun ? (
+                      <CuratedEvaluation
+                        lesson={summaryLearningLesson}
+                        conceptId={summaryLearningCourse.conceptId}
+                        onSubmit={(score, total, answers) => completeCuratedEvaluation(summarySession.id, score, total, answers)}
+                      />
+                    ) : null}
                     <div className="summary-arrival">
                       <TopDownScene
                         carriages={[{

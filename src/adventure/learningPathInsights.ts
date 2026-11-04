@@ -6,8 +6,12 @@ import {
   analyzeSession,
   type LearningSession,
 } from "./learning.ts";
-import { CURATED_COURSES } from "./curatedCurriculum.ts";
+import { CURATED_COURSES, type CuratedLesson } from "./curatedCurriculum.ts";
 import type { LearningPathProgress } from "./learningPath.ts";
+
+const currentLessons = new Map(CURATED_COURSES.flatMap((course) =>
+  course.lessons.map((lesson) => [lesson.id, { version: lesson.version, lesson }] as const),
+));
 
 export type DifficultySuggestion = {
   kind: "curated-default" | "step-up" | "worked-review" | "stay";
@@ -21,11 +25,8 @@ export function difficultySuggestion(
   progress: Pick<LearningPathProgress, "completed">,
   conceptId: string,
 ): DifficultySuggestion {
-  const currentLessons = new Map(CURATED_COURSES.flatMap((course) =>
-    course.lessons.map((lesson) => [lesson.id, lesson.version] as const),
-  ));
   const evaluations = progress.completed.filter((evaluation) =>
-    currentLessons.get(evaluation.lessonId) === evaluation.lessonVersion &&
+    currentLessons.get(evaluation.lessonId)?.version === evaluation.lessonVersion &&
     evaluation.assessedAnswers?.some((answer) => answer.conceptId === conceptId),
   );
   const answers = evaluations.flatMap((evaluation) =>
@@ -47,6 +48,28 @@ export function difficultySuggestion(
   if (correctRate !== null && correctRate <= 0.5)
     return { kind: "worked-review", ...evidence };
   return { kind: "stay", ...evidence };
+}
+
+export function workedReviewLesson(
+  progress: Pick<LearningPathProgress, "completed">,
+  conceptId: string,
+): CuratedLesson | undefined {
+  const latestByLesson = new Map<string, LearningPathProgress["completed"][number]>();
+  for (const evaluation of progress.completed) {
+    if (currentLessons.get(evaluation.lessonId)?.version !== evaluation.lessonVersion ||
+        !evaluation.assessedAnswers?.some((answer) => answer.conceptId === conceptId)) continue;
+    const previous = latestByLesson.get(evaluation.lessonId);
+    if (!previous || evaluation.completedAt > previous.completedAt)
+      latestByLesson.set(evaluation.lessonId, evaluation);
+  }
+  return [...latestByLesson.values()]
+    .map((evaluation) => {
+      const answers = evaluation.assessedAnswers.filter((answer) => answer.conceptId === conceptId);
+      const correct = answers.filter((answer) => answer.correct).length;
+      return { evaluation, lesson: currentLessons.get(evaluation.lessonId)!.lesson, rate: correct / answers.length };
+    })
+    .filter((item) => Number.isFinite(item.rate))
+    .sort((left, right) => left.rate - right.rate || right.evaluation.completedAt - left.evaluation.completedAt)[0]?.lesson;
 }
 
 export type DurationSuggestion = {
@@ -125,14 +148,16 @@ export function dailyStudySummary(
 
 const clampMinutes = (minutes: number) => Math.max(5, Math.min(25, minutes));
 
+export function chooseDuration(suggestion: DurationSuggestion, override?: number): number {
+  return Number.isSafeInteger(override) ? clampMinutes(Number(override)) : suggestion.minutes;
+}
+
 function hasCompletedTarget(session: LearningSession): boolean {
   if (session.effectiveMetrics) return session.effectiveMetrics.completed === true;
   if (!Number.isFinite(session.started) || !Number.isFinite(session.ended) ||
       !Number.isFinite(session.target) || session.target < 1 || session.ended < session.started) return false;
-  const breakPlan = session.breakPlan && isValidBreakPlan(session.breakPlan, session.target)
-    ? session.breakPlan
-    : undefined;
-  return studyElapsedSeconds(session.started, session.target, breakPlan, session.ended) >= session.target;
+  if (session.breakPlan && !isValidBreakPlan(session.breakPlan, session.target)) return false;
+  return studyElapsedSeconds(session.started, session.target, session.breakPlan, session.ended) >= session.target;
 }
 
 export function durationSuggestion(
