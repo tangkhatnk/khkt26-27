@@ -9,6 +9,7 @@ Help secondary students (THCS–THPT) see a useful next step across grades and s
 ## Goals
 
 - Add a path organized by grade and subject, with reviewed lesson batches, a learner companion, a current step, and first-use guidance that can be skipped or reopened.
+- Publish curated content in versioned batches only after a maintainer checks the lesson text, answer keys, explanations, and grade fit. Do not imply external educator endorsement unless one is obtained.
 - Present the path as vertically alternating lesson nodes with tactile depth, clear current/locked/completed states, an illustrated companion, and milestone markers in both light and dark themes.
 - Remove legacy train artwork from primary learner surfaces while retaining internal route and session IDs for compatibility.
 - Show daily activity and progress only when backed by recorded learner activity; do not invent progress or force a streak mechanic.
