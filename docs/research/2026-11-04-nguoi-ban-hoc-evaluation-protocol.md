@@ -2,7 +2,7 @@
 
 **Related issues:** [#76](https://github.com/tangkhatnk/khkt26-27/issues/76), [#72](https://github.com/tangkhatnk/khkt26-27/issues/72).
 
-**Status:** Protocol and source review only. No corpus has been downloaded, no benchmark or human review has run, and no participant or production data is included. Recheck dataset terms and pin revisions before any run.
+**Status:** Protocol and source review only. The CC0 synthetic snapshot is pinned; no OCR benchmark or human review has run, and no participant or production data is included. Recheck terms and pin any additional dataset revision before use.
 
 ## Evidence boundary
 
@@ -34,7 +34,7 @@ Do not present one corpus as covering all OCR cases. The primary-source review f
 |---|---|---|
 | Vietnamese handwriting | [VietHTR-Line](https://huggingface.co/datasets/5CD-AI/VietHTR-Line/blob/main/README.md): 60,247 line/transcription pairs, including a fixed 1,000-row test split; test/train source pages are separated. Access is gated and may be reviewed; the card states research/education use and CC BY-NC-ND 4.0. | Best candidate for a held-out Vietnamese handwriting recognition run after access is approved. It is line crops, not full-page OCR; do not redistribute images/transcriptions or treat the visible-condition labels as validated difficulty strata. |
 | Printed Vietnamese and English | [CAMIO Transcription Languages (LDC2022T07)](https://catalog.ldc.upenn.edu/LDC2022T07): machine-printed images; 1,250 images per language have line transcripts and reading order, with train/validation/test partitions. The catalog lists the LDC User Agreement for non-members. | Best matched candidate for printed VI/EN, subject to access, license, and any fee approval. Use its held-out test partitions and retain per-language results. |
-| Vietnamese synthetic-print smoke test | [vn-synthetic-ocr](https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr): CC0-1.0, 20 clean and 20 matched noisy Vietnamese line crops with UTF-8 NFC ground truth. Pin the dataset commit before running. | Use the 40 cases for an immediate local Tesseract-path smoke/CER regression check. This is synthetic text-line printing only, not real scans, handwriting, page layout, or an adoption benchmark. Keep corpus files out of the repository; retain only revision, row IDs, and aggregate/error metadata allowed by CC0. |
+| Vietnamese synthetic-print smoke test | [vn-synthetic-ocr](https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr), pinned to revision [`7c1c9114c610150b8b36783f089199eee62348b2`](https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr/tree/7c1c9114c610150b8b36783f089199eee62348b2): CC0-1.0, 20 clean and 20 matched noisy Vietnamese line crops with UTF-8 NFC ground truth. | Use the 40 cases for an immediate local Tesseract-path smoke/CER regression check. This is synthetic text-line printing only, not real scans, handwriting, page layout, or an adoption benchmark. Keep corpus files out of the repository; retain only revision, row IDs, and aggregate/error metadata allowed by CC0. |
 | Vietnamese handwriting alternate | [UIT-HWDB authors' repository](https://github.com/nghiangh/UIT-HWDB-dataset) reports 110,745 word, 7,273 line, and 1,144 paragraph samples but gives Google Drive links without license or terms in the repository. | Do not use until the original maintainers confirm permission and terms. A third-party Hugging Face conversion's CC BY claim does not establish rights in the original images. |
 | Printed Vietnamese fallback | [vn_documents_ocr_v2](https://github.com/nrl-ai/nom-vn/tree/main/benchmarks/data/vn_documents_ocr_v2) describes public-domain government scans and per-record CC0/public-domain and other source licenses. | Possible narrow fallback after pinning a revision, reconciling its README's approximate total with the listed config counts, and selecting only records whose per-item rights and provenance are verified. It does not cover handwriting or provide a matched printed English set. |
 | Unverified natural-image alternate | [VietnameseOCRdataset](https://huggingface.co/datasets/brianhuster/VietnameseOCRdataset) reports Apache-2.0 on the dataset card and about 7.3k rows. Its README is empty and it exposes only a `train` split. | Do not use yet: provenance and the basis for the dataset license are undocumented, and there is no published held-out split. |
@@ -45,7 +45,18 @@ There is no single reviewed source in this set that covers printed VI/EN, Vietna
 
 The [VietOCR repository](https://github.com/pbcquoc/vietocr) is Apache-2.0 code and describes Vietnamese printed/handwriting text recognition. Evaluate it as an optional line-recognition component, with the same frozen inputs and environment as the existing OCR path. The [PP-StructureV3 pipeline](https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-StructureV3/PP-StructureV3.html) is a separate optional offline layout/parser comparison; neither tool's documentation is evidence of Viễn Du's accuracy.
 
-The immediate implementation checkpoint is to run the application's existing local Tesseract path on all 40 pinned `vn-synthetic-ocr` rows, plus any natural rows whose license and held-out split have been verified by that point. Report synthetic and natural strata separately; if no natural rows are approved, say that natural-document accuracy remains unmeasured. Store only dataset revision, IDs, engine versions, CER/WER summaries, timings, failures, and allowed error metadata; do not commit corpus images or ground-truth transcripts.
+The CC0 dataset's current `main` was resolved to commit `7c1c9114c610150b8b36783f089199eee62348b2` on 2026-11-04. The companion [SHA-256 manifest](vn-synthetic-ocr-7c1c9114.sha256) contains expected checksums for both metadata files and all 40 PNG LFS objects. To reproduce the fetch without committing the corpus:
+
+```sh
+manifest="$PWD/docs/research/vn-synthetic-ocr-7c1c9114.sha256"
+data_dir="$(mktemp -d)"
+GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr "$data_dir"
+git -C "$data_dir" checkout --detach 7c1c9114c610150b8b36783f089199eee62348b2
+git -C "$data_dir" lfs pull --include='clean/*.png,noisy/*.png'
+(cd "$data_dir" && shasum -a 256 -c "$manifest")
+```
+
+The local application pilot should run the existing Tesseract path on all 40 pinned rows, plus any natural rows whose license and held-out split have been verified by that point. Report synthetic and natural strata separately; if no natural rows are approved, say that natural-document accuracy remains unmeasured. Store only dataset revision, IDs, engine versions, CER/WER summaries, timings, failures, and allowed error metadata; do not commit corpus images or ground-truth transcripts.
 
 ## Reproducible workflow comparison
 
@@ -75,4 +86,4 @@ The delayed-test rationale is supported by the testing-effect literature, includ
 - [Roediger & Karpicke, Test-Enhanced Learning (PubMed)](https://pubmed.ncbi.nlm.nih.gov/16507066/)
 - [VietOCR repository and Apache-2.0 license](https://github.com/pbcquoc/vietocr)
 - [PaddleOCR PP-StructureV3 documentation](https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-StructureV3/PP-StructureV3.html)
-- [VietHTR-Line dataset card](https://huggingface.co/datasets/5CD-AI/VietHTR-Line/blob/main/README.md), [CAMIO LDC catalog](https://catalog.ldc.upenn.edu/LDC2022T07), [vn-synthetic-ocr dataset card](https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr), [UIT-HWDB authors' repository](https://github.com/nghiangh/UIT-HWDB-dataset), [vn_documents_ocr_v2 README](https://github.com/nrl-ai/nom-vn/tree/main/benchmarks/data/vn_documents_ocr_v2), [VietnameseOCRdataset card](https://huggingface.co/datasets/brianhuster/VietnameseOCRdataset), [DocLayNet dataset card](https://huggingface.co/datasets/docling-project/DocLayNet), and [OmniDocBench README](https://github.com/opendatalab/OmniDocBench).
+- [VietHTR-Line dataset card](https://huggingface.co/datasets/5CD-AI/VietHTR-Line/blob/main/README.md), [CAMIO LDC catalog](https://catalog.ldc.upenn.edu/LDC2022T07), [vn-synthetic-ocr dataset card](https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr) and [pinned revision](https://huggingface.co/datasets/nrl-ai/vn-synthetic-ocr/tree/7c1c9114c610150b8b36783f089199eee62348b2), [UIT-HWDB authors' repository](https://github.com/nghiangh/UIT-HWDB-dataset), [vn_documents_ocr_v2 README](https://github.com/nrl-ai/nom-vn/tree/main/benchmarks/data/vn_documents_ocr_v2), [VietnameseOCRdataset card](https://huggingface.co/datasets/brianhuster/VietnameseOCRdataset), [DocLayNet dataset card](https://huggingface.co/datasets/docling-project/DocLayNet), and [OmniDocBench README](https://github.com/opendatalab/OmniDocBench).
