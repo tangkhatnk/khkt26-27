@@ -182,12 +182,19 @@ export type Person = {
   joinedAt: number;
   journey: Journey;
 };
-export type TripParticipantStatus = "ready" | "bound" | "completed" | "skipped";
+export type TripParticipantStatus = "not-ready" | "ready" | "bound" | "completed" | "skipped";
 export type GroupTrip = {
+  /** Missing/legacy keeps the independently started #66 session contract. */
+  mode?: "legacy" | "synchronized";
   status: "waiting" | "departed" | "closed";
-  goal: string;
-  topic: string;
+  /** Private per-member study inputs are never stored on synchronized trips. */
+  goal?: string;
+  topic?: string;
   target: number;
+  breakPlan?: BreakPlan;
+  /** Server-authoritative shared session clock for synchronized trips. */
+  startedAt?: number;
+  endsAt?: number;
   participants: Record<string, {
     status: TripParticipantStatus;
     sessionId?: string;
@@ -469,21 +476,37 @@ export function settle(
   if (tripBinding && tripBinding.id !== input.groupId)
     throw new Error("Phiên đã được liên kết với một chuyến khác.");
   if (tripGroup?.trip) {
-    if (
-      tripGroup.trip.status !== "departed" ||
-      tripGroup.archived ||
-      p.groupId !== tripGroup.id ||
-      !tripGroup.members.includes(input.userId) ||
-      participant?.status !== "bound" ||
-      participant.sessionId !== input.id
-    )
-      throw new Error("Phiên chưa được liên kết hợp lệ với chuyến này.");
-    if (
-      input.goal !== tripGroup.trip.goal ||
-      input.topic !== tripGroup.trip.topic ||
-      input.target !== tripGroup.trip.target
-    )
-      throw new Error("Mục tiêu, chủ đề hoặc thời lượng không khớp với chuyến đã lập.");
+    if (tripGroup.trip.mode === "synchronized") {
+      const trip = tripGroup.trip;
+      if (
+        (trip.status !== "departed" && trip.status !== "closed") ||
+        participant?.status !== "bound" ||
+        participant.sessionId !== input.id ||
+        !Number.isSafeInteger(trip.startedAt) ||
+        !Number.isSafeInteger(trip.endsAt) ||
+        input.started !== trip.startedAt ||
+        input.ended > trip.endsAt! ||
+        input.target !== trip.target ||
+        JSON.stringify(input.breakPlan ?? null) !== JSON.stringify(trip.breakPlan ?? null)
+      )
+        throw new Error("Phiên chưa được liên kết hợp lệ với thời gian chung của chuyến.");
+    } else {
+      if (
+        tripGroup.trip.status !== "departed" ||
+        tripGroup.archived ||
+        p.groupId !== tripGroup.id ||
+        !tripGroup.members.includes(input.userId) ||
+        participant?.status !== "bound" ||
+        participant.sessionId !== input.id
+      )
+        throw new Error("Phiên chưa được liên kết hợp lệ với chuyến này.");
+      if (
+        input.goal !== tripGroup.trip.goal ||
+        input.topic !== tripGroup.trip.topic ||
+        input.target !== tripGroup.trip.target
+      )
+        throw new Error("Mục tiêu, chủ đề hoặc thời lượng không khớp với chuyến đã lập.");
+    }
   } else if (!input.groupId && tripBinding) {
     throw new Error("Phiên cần được lưu theo chuyến đã liên kết.");
   }
@@ -541,13 +564,15 @@ export function settle(
     participant.status = "completed";
     const history = tripGroup.membershipHistory?.[input.userId];
     const membership = history?.slice().reverse().find((item) => item.left === null);
-    if (membership) membership.left = now;
-    p.groupId = null;
-    if (Object.values(tripGroup.trip.participants).every((member) =>
+    if (membership) membership.left = tripGroup.trip.mode === "synchronized"
+      ? Math.min(input.ended, membership.left ?? input.ended)
+      : now;
+    if (p.groupId === tripGroup.id) p.groupId = null;
+    if (tripGroup.trip.mode !== "synchronized" && Object.values(tripGroup.trip.participants).every((member) =>
       member.status === "completed" || member.status === "skipped",
     )) {
-      tripGroup.trip.status = "closed";
-      tripGroup.archived = true;
+        tripGroup.trip.status = "closed";
+        tripGroup.archived = true;
     }
   }
   return session;
@@ -557,8 +582,10 @@ export function snapshot(world: World, userId: string, now: number) {
   resolveVote(p.journey, now);
   const g = p.groupId ? world.groups[p.groupId] : null;
   if (g) resolveVote(g.journey, now);
-  const ownTripSessionId = g?.trip?.participants[userId]?.status === "bound"
-    ? g.trip.participants[userId]?.sessionId
+  const ownTripStatus = g?.trip?.participants[userId]?.status;
+  const ownTripSessionId = ownTripStatus === "bound" ||
+    (g?.trip?.mode === "synchronized" && ownTripStatus === "ready")
+    ? g?.trip?.participants[userId]?.sessionId
     : undefined;
   const ownedSessions = Object.values(world.sessions).filter((session) => session.userId === userId);
   const removedOwnedSessionIds = ownedSessions
@@ -575,6 +602,7 @@ export function snapshot(world: World, userId: string, now: number) {
     .sort();
   return {
     revision: world.revision ?? 0,
+    serverNow: now,
     person: p,
     group: g
       ? {
@@ -588,13 +616,19 @@ export function snapshot(world: World, userId: string, now: number) {
             name: person(world, id).name,
             color: person(world, id).color,
             decor: person(world, id).decor,
-            ...(g.trip ? { tripStatus: g.trip.participants[id]?.status ?? "ready" } : {}),
+            ...(g.trip ? { tripStatus: g.trip.participants[id]?.status ?? (g.trip.mode === "synchronized" ? "not-ready" : "ready") } : {}),
           })),
           ...(g.trip ? { trip: {
             status: g.trip.status,
-            goal: g.trip.goal,
-            topic: g.trip.topic,
             target: g.trip.target,
+            ...(g.trip.mode === "synchronized"
+              ? {
+                  mode: "synchronized" as const,
+                  ...(g.trip.breakPlan ? { breakPlan: g.trip.breakPlan } : {}),
+                  ...(g.trip.startedAt !== undefined ? { startedAt: g.trip.startedAt } : {}),
+                  ...(g.trip.endsAt !== undefined ? { endsAt: g.trip.endsAt } : {}),
+                }
+              : { goal: g.trip.goal, topic: g.trip.topic }),
             ...(ownTripSessionId ? { ownSessionId: ownTripSessionId } : {}),
           } } : {}),
         }

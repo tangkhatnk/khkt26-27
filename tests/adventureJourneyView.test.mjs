@@ -14,6 +14,7 @@ let JourneyView;
 let tripSceneTiming;
 let StudyGuideComposer;
 let QuizPanel;
+let QuizReviewPreference;
 let SessionCorrectionNotice;
 
 before(async () => {
@@ -28,6 +29,7 @@ before(async () => {
   ({ JourneyView } = await vite.ssrLoadModule("/src/adventure/JourneyView.tsx"));
   ({ StudyGuideComposer } = await vite.ssrLoadModule("/src/adventure/StudyGuideComposer.tsx"));
   ({ QuizPanel } = await vite.ssrLoadModule("/src/adventure/QuizPanel.tsx"));
+  ({ QuizReviewPreference } = await vite.ssrLoadModule("/src/adventure/QuizReviewPreference.tsx"));
   ({ SessionCorrectionNotice } = await vite.ssrLoadModule("/src/adventure/SessionCorrectionNotice.tsx"));
   ({ tripSceneTiming } = await vite.ssrLoadModule("/src/adventure/focus.ts"));
 });
@@ -71,6 +73,18 @@ test("boarding pass keeps the goal, route, and planned time on a concise ticket"
   assert.match(markup, /<svg class="boarding-ticket__landscape" aria-hidden="true"/u);
 });
 
+test("boarding pass uses shared-trip wording only for synchronized group sessions", () => {
+  const synchronized = boardingTicket({ synchronizedTrip: true });
+  const legacy = boardingTicket({ synchronizedTrip: false });
+  const solo = boardingTicket({ mode: "solo", synchronizedTrip: false });
+
+  assert.match(synchronized, /Cùng chuyến/u);
+  assert.doesNotMatch(synchronized, /Cùng đoàn/u);
+  assert.match(legacy, /Cùng đoàn/u);
+  assert.match(solo, /Một mình/u);
+  assert.doesNotMatch(solo, /Cùng chuyến|Cùng đoàn/u);
+});
+
 test("pending AI guide review exposes a clearly primary confirmation and explicit discard", () => {
   const markup = renderToStaticMarkup(React.createElement(StudyGuideComposer, {
     disabled: false,
@@ -107,6 +121,47 @@ test("quiz generation exposes a distinct primary action", () => {
   }));
 
   assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
+});
+
+test("a skipped review stays closed after the session and offers an explicit opt-in", () => {
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "owner-a",
+    session: { id: "trip-a", topic: "biology", goal: "Review cells" },
+    draft: { count: 3, requestedCount: 3, questions: [], answers: {}, reviewSkipped: true },
+    canUseAI: true,
+    needsLogin: false,
+    onGenerate: async () => [],
+    onSaveDraft: () => {},
+    onGrade: async () => ({}),
+    onLogin: () => {},
+    onStartReview: () => {},
+  }));
+
+  assert.match(markup, /Đã bỏ qua câu hỏi ôn tập/u);
+  assert.match(markup, /Bật ôn tập/u);
+  assert.doesNotMatch(markup, /Tạo câu hỏi bằng AI/u);
+});
+
+test("departure review preference uses an explicit skip toggle and hides the count while skipped", () => {
+  const control = (skipped, disabled = false) => renderToStaticMarkup(React.createElement(QuizReviewPreference, {
+    count: "3",
+    skipped,
+    disabled,
+    onCountChange: () => {},
+    onToggleSkip: () => {},
+  }));
+  const enabledMarkup = control(false);
+  assert.match(enabledMarkup, /type="number"[^>]*value="3"/u);
+  assert.match(enabledMarkup, /aria-pressed="false"[^>]*>Bỏ qua ôn tập/u);
+
+  const skippedMarkup = control(true);
+  assert.doesNotMatch(skippedMarkup, /type="number"/u);
+  assert.match(skippedMarkup, /aria-pressed="true"[^>]*>Bật ôn tập/u);
+  assert.match(skippedMarkup, /không tạo sẵn câu hỏi/u);
+
+  const busyMarkup = control(false, true);
+  assert.match(busyMarkup, /<input[^>]*disabled=""/u);
+  assert.match(busyMarkup, /<button[^>]*disabled=""/u);
 });
 
 test("corrected summary notice separates effective metrics from the recorded end time", () => {

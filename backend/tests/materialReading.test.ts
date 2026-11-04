@@ -94,6 +94,28 @@ describe("Gemini material reader", () => {
     expect(content).not.toContain("test-only-private-key");
   });
 
+  it("asks for faithful Markdown and explicit LaTeX while preserving uncertain image text", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    const structuredTranscript = "## Định luật\n\n| Đại lượng | Giá trị |\n|---|---|\n| Lực | [không rõ] |\n\n$$F = ma$$";
+    generateContent.mockResolvedValue({ text: response([{ pageNumber: 1, text: structuredTranscript }], false) });
+
+    const result = await readMaterialDocument({ mimeType: "image/png", data: image });
+    const request = generateContent.mock.calls[0][0];
+    const instruction = `${request.config.systemInstruction}\n${request.contents[0].parts[0].text}`;
+
+    expect(instruction).toMatch(/Markdown/u);
+    expect(instruction).toMatch(/LaTeX|TeX/u);
+    expect(instruction).toContain("$...$");
+    expect(instruction).toContain("$$...$$");
+    expect(instruction).toContain("\\(...\\)");
+    expect(instruction).toContain("\\[...\\]");
+    expect(instruction).toContain("ghi thành \\\\(x\\\\) trong JSON");
+    expect(instruction).toMatch(/không đoán.*ký hiệu|không suy đoán.*ký hiệu/iu);
+    expect(result.text).toBe(`[Trang 1]\n${structuredTranscript}`);
+    expect(result.text).toContain("[không rõ]");
+    expect(result.message).toMatch(/chưa đầy đủ|đối chiếu/u);
+  });
+
   it("marks contextual reconstructions as unverified even when Gemini claims the page is complete", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
     const data = await pdf(1);

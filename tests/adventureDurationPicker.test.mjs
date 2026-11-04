@@ -77,4 +77,14 @@ test('DurationPicker summarizes valid plans and keeps exact intervals behind a d
       assert.doesNotMatch(html, /<details/);
     }
   });
+
+  await t.test('a synchronized trip locks both shared break controls', () => {
+    const html = render({ breakCount: 1, breaksLocked: true });
+    const inputs = [...html.matchAll(/<input\b[^>]*>/gu)].map(([input]) => input);
+    const breakCountInput = inputs.find((input) => input.includes('-break-count'));
+    const breakMinutesInput = inputs.find((input) => input.includes('-break-minutes'));
+
+    assert.ok(breakCountInput?.includes('disabled=""'));
+    assert.ok(breakMinutesInput?.includes('disabled=""'));
+  });
 });

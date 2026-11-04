@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseGroundedStudyExercises,
+  studyExerciseCountsSchema,
   studyExercisePreparationRequestSchema,
   studyExercisePreparationResponseSchema,
   studyExerciseQuestionSchema,
@@ -34,6 +35,79 @@ describe("study exercise contracts", () => {
     expect(studyExercisePreparationRequestSchema.parse({ ...base, count: 5 }).count).toBe(5);
     expect(studyExercisePreparationRequestSchema.safeParse({ ...base, count: 0 }).success).toBe(false);
     expect(studyExercisePreparationRequestSchema.safeParse({ ...base, count: 6 }).success).toBe(false);
+  });
+
+  it("validates independent exercise-type counts and preserves scalar request compatibility", () => {
+    const counts = { multipleChoice: 5, trueFalse: 5, shortAnswer: 5, essay: 5 };
+    expect(studyExerciseCountsSchema.parse(counts)).toEqual(counts);
+    expect(studyExerciseCountsSchema.safeParse({
+      multipleChoice: 6, trueFalse: 0, shortAnswer: 0, essay: 0,
+    }).success).toBe(false);
+    expect(studyExerciseCountsSchema.safeParse({
+      multipleChoice: 0, trueFalse: 0, shortAnswer: 0, essay: 0,
+    }).success).toBe(false);
+
+    const base = {
+      requestId: "00000000-0000-4000-8000-000000000104",
+      plannedSessionId: "00000000-0000-4000-8000-000000000004",
+      mode: "generated",
+      text: "A source text with enough content.",
+    };
+    expect(studyExercisePreparationRequestSchema.parse({ ...base, counts: {
+      multipleChoice: 2, trueFalse: 1, shortAnswer: 0, essay: 2,
+    } })).toMatchObject({ counts: { multipleChoice: 2, trueFalse: 1, shortAnswer: 0, essay: 2 } });
+    expect(studyExercisePreparationRequestSchema.safeParse({ ...base, count: 2, counts }).success).toBe(false);
+    expect(studyExercisePreparationRequestSchema.safeParse({ ...base, counts: {
+      multipleChoice: 0, trueFalse: 0, shortAnswer: 0, essay: 0,
+    } }).success).toBe(false);
+  });
+
+  it("requires generated questions to match the exact type composition", () => {
+    const source = "A stack follows last-in, first-out order and pop removes the newest item.";
+    const exercises = [
+      {
+        type: "multiple-choice",
+        prompt: "Which operation removes the newest item from a stack?",
+        choices: ["push", "pop", "peek", "clear"],
+        evidenceExcerpt: "pop removes the newest item",
+      },
+      {
+        type: "multiple-choice",
+        prompt: "Which stack operation removes the newest item?",
+        choices: ["push", "pop", "peek", "clear"],
+        evidenceExcerpt: "pop removes the newest item",
+      },
+      {
+        type: "true-false",
+        prompt: "Is a stack last-in, first-out?",
+        choices: ["Đúng", "Sai"],
+        evidenceExcerpt: "A stack follows last-in, first-out order",
+      },
+      {
+        type: "true-false",
+        prompt: "Does the stack follow last-in, first-out order?",
+        choices: ["Đúng", "Sai"],
+        evidenceExcerpt: "A stack follows last-in, first-out order",
+      },
+      {
+        type: "short-answer",
+        prompt: "Explain how last-in, first-out order determines which item leaves first.",
+        evidenceExcerpt: "A stack follows last-in, first-out order",
+      },
+      {
+        type: "essay",
+        prompt: "Compare the newest-item removal described for the stack.",
+        evidenceExcerpt: "pop removes the newest item",
+      },
+    ];
+    const counts = { multipleChoice: 2, trueFalse: 2, shortAnswer: 1, essay: 1 };
+    expect(parseGroundedStudyExercises({ exercises }, source, counts)).toHaveLength(6);
+    expect(() => parseGroundedStudyExercises({ exercises }, source, {
+      ...counts, essay: 0, shortAnswer: 2,
+    })).toThrow();
+    expect(() => parseGroundedStudyExercises({
+      exercises: exercises.map(({ type: _type, ...exercise }) => exercise),
+    }, source, counts)).toThrow();
   });
 
   it("accepts exactly 20,000 JavaScript characters and rejects longer source text", () => {

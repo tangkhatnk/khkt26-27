@@ -252,6 +252,22 @@ html[data-theme="dark"] .adventure .departure-source-options button[aria-pressed
   color: #e5f0e4;
 }
 
+html[data-theme="dark"] .adventure .departure-quiz-skip[aria-pressed="true"] {
+  background: #344b3a;
+  border-color: #627d66;
+  color: #e5f0e4;
+}
+
+html[data-theme="dark"] .adventure .departure-quiz-skip[aria-pressed="true"]:hover:not(:disabled) {
+  background: #304438;
+}
+
+html[data-theme="dark"] .adventure .departure-quiz-skip[aria-pressed="true"]:focus-visible {
+  outline: 3px solid #ffd6b7;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 1px #17231b, 0 0 0 4px #ffd6b7;
+}
+
 html[data-theme="dark"] .adventure .ticket-editor {
   background: #1d2b22;
   border-color: #455b49;

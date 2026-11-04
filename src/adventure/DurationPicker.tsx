@@ -27,6 +27,7 @@ export function DurationPicker({
   onBreakCountChange,
   onBreakMinutesChange,
   durationLocked = false,
+  breaksLocked = false,
 }: {
   value: number;
   onChange: (minutes: number) => void;
@@ -35,6 +36,7 @@ export function DurationPicker({
   onBreakCountChange?: (count: number) => void;
   onBreakMinutesChange?: (minutes: number) => void;
   durationLocked?: boolean;
+  breaksLocked?: boolean;
 }) {
   const id = useId();
   const durationHelpId = `${id}-duration-help`;
@@ -136,6 +138,7 @@ export function DurationPicker({
                 max={maxBreakCount}
                 step={1}
                 value={inputValue(breakCount)}
+                disabled={breaksLocked}
                 onChange={(event) =>
                   onBreakCountChange?.(event.target.value === "" ? NaN : Number(event.target.value))
                 }
@@ -152,7 +155,7 @@ export function DurationPicker({
                 min={1}
                 max={30}
                 step={1}
-                disabled={breakCount === 0}
+                disabled={breaksLocked || breakCount === 0}
                 value={inputValue(breakMinutes)}
                 onChange={(event) =>
                   onBreakMinutesChange?.(event.target.value === "" ? NaN : Number(event.target.value))

@@ -9,6 +9,7 @@ import {
   isValidQuizDraft,
   QuizRequestGuard,
   quizPanelDraftState,
+  shouldPrefetchQuizReview,
   type QuizDraft,
   type QuizQuestion,
 } from "./quizDrafts";
@@ -86,7 +87,8 @@ export function QuizPanel({
 
   async function generate() {
     const count = Number(countInput);
-    if (!isQuizCount(count) || assessment || generating || grading || !canUseAI) return;
+    if (!isQuizCount(count) || assessment || generating || grading || !canUseAI ||
+        !shouldPrefetchQuizReview(draft)) return;
     const request = requests.current.begin(ownerId, session.id);
     setGenerating(true);
     setError("");
@@ -207,7 +209,14 @@ export function QuizPanel({
       ) : (
         <>
           <p>Câu hỏi dùng nguồn tài liệu đã kiểm tra. Khi không có tệp, AI dùng chủ đề, mục tiêu và ghi chú của chuyến.</p>
-          {canUseAI ? (
+          {draft.reviewSkipped ? (
+            <div className="quiz-review-skipped" role="status">
+              <p>Đã bỏ qua câu hỏi ôn tập cho chuyến này. Phần học và lịch sử chuyến đã được lưu.</p>
+              <button type="button" onClick={() => saveDraft({ ...draft, correctionVersion, reviewSkipped: false })}>
+                Bật ôn tập
+              </button>
+            </div>
+          ) : canUseAI ? (
             <>
               <label className="quiz-count-label">
                 Số câu hỏi

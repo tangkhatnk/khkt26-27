@@ -11,6 +11,7 @@ import {
   type DeviceCategory,
   type Segment,
 } from "../../backend/src/adventure/domain.ts";
+import { serverTimeFromClientTime } from "./serverClock.ts";
 
 export type ActiveTrip = {
   id: string;
@@ -24,6 +25,10 @@ export type ActiveTrip = {
   /** Fixed automatic rest schedule; absent on trips created by older versions. */
   breakPlan?: BreakPlan;
   groupId: string | null;
+  /** Present only for sessions driven by a server-synchronized trip clock. */
+  syncClock?: boolean;
+  /** Server minus device clock offset sampled from an ordinary snapshot. */
+  clockOffsetMs?: number;
   started: number;
   lastAt: number;
   segments: Segment[];
@@ -38,9 +43,53 @@ export type ActiveTrip = {
   deviceCategory?: DeviceCategory;
 };
 
+/** A synchronized trip uses its server-owned break plan exactly, including no plan. */
+export function resolveTripBreakPlan(input: {
+  synchronized: boolean;
+  sharedPlan: BreakPlan | undefined;
+  localPlan: BreakPlan | undefined;
+}): BreakPlan | undefined {
+  return input.synchronized ? input.sharedPlan : input.sharedPlan ?? input.localPlan;
+}
+
 /** Compare the current wall clock with the active trip's last accepted timestamp. */
 export function isDeviceClockBehind(lastAt: number, readClock: () => number = Date.now): boolean {
   return readClock() < lastAt;
+}
+
+export function tripClockNow(s: Pick<ActiveTrip, "syncClock" | "clockOffsetMs" | "lastAt">, clientNow: number): number {
+  if (!s.syncClock) return clientNow;
+  const converted = s.clockOffsetMs === undefined ? Number.NaN : serverTimeFromClientTime(clientNow, s.clockOffsetMs);
+  return Number.isFinite(converted) ? converted : s.lastAt;
+}
+
+/** Scheduled rests are deterministic; reconnecting mid-rest may safely reconstruct elapsed rest. */
+export function scheduledBreakSegmentsThrough(
+  started: number,
+  target: number,
+  plan: BreakPlan | undefined,
+  observedAt: number,
+): Segment[] {
+  return breakWindows(started, target, plan)
+    .map((window) => ({ start: window.start, end: Math.min(window.end, observedAt), kind: "break" as const }))
+    .filter((segment) => segment.end > segment.start);
+}
+
+/** Begin a bound session at the shared start without crediting work before local observation. */
+export function startSynchronizedSession(value: ActiveTrip, observedAt: number, foreground: boolean): ActiveTrip {
+  const deadline = value.started + totalDuration(value) * 1000;
+  const at = Math.max(value.started, Math.min(deadline, observedAt));
+  const segments = scheduledBreakSegmentsThrough(value.started, value.target, value.breakPlan, at);
+  return {
+    ...value,
+    lastAt: at,
+    segments,
+    state: foreground ? "focus" : "away",
+    reconnect: 0,
+    ...(foreground
+      ? { observedAt: undefined, awayCounted: undefined }
+      : { observedAt: at, awayCounted: true }),
+  };
 }
 
 export function focused(s: ActiveTrip): number {

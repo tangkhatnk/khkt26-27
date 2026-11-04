@@ -198,6 +198,7 @@ model StudyExerciseSet {
   planned_session_id           String   @db.Uuid
   mode                         String   @db.VarChar(20)
   requested_count              Int?
+  requested_counts             Json?
   status                       String   @default("preparing") @db.VarChar(20)
   source_text                  String   @db.Text
   source_fingerprint           String   @db.Char(64)

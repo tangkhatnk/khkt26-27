@@ -59,6 +59,52 @@ test('renders read-only text with safe paragraph and chemistry notation', () => 
   assert.doesNotMatch(html, /material-reader__toolbar/);
 });
 
+test('renders vector norms and fractions inside table cells without splitting math or escaped pipes', () => {
+  const text = [
+    '| Vector | Norm |',
+    '| --- | --- |',
+    '| a | $|\\vec{a}| = \\sqrt{a_1^2+a_2^2}$ |',
+    '| fraction | \\(\\frac{3}{4}\\) |',
+    '| label\\|text | plain |',
+  ].join('\n');
+  const html = renderToStaticMarkup(createElement(MaterialSourceReader, {
+    title: 'Toán', text,
+  }));
+
+  assert.equal((html.match(/<th\b/gu) ?? []).length, 2);
+  assert.equal((html.match(/<td\b/gu) ?? []).length, 6);
+  assert.match(html, /<td>label\|text<\/td>/u);
+  assert.match(html, /class="katex"/u);
+  assert.match(html, /<mover\b/u);
+  assert.match(html, /<msqrt>/u);
+  assert.match(html, /<mfrac>/u);
+});
+
+test('keeps an escaped pipe in the final table cell when the row has no trailing separator', () => {
+  const text = '| First | Last |\n| --- | --- |\n| a | b\\|';
+  const html = renderToStaticMarkup(createElement(MaterialSourceReader, { title: 'Ghi chú', text }));
+
+  assert.equal((html.match(/<td\b/gu) ?? []).length, 2);
+  assert.match(html, /<td>b\|<\/td>/u);
+});
+
+test('ignores spaces after an outer table separator instead of adding an empty cell', () => {
+  const text = '| First | Last |\n| --- | --- |\n| a | b |   ';
+  const html = renderToStaticMarkup(createElement(MaterialSourceReader, { title: 'Ghi chú', text }));
+
+  assert.equal((html.match(/<td\b/gu) ?? []).length, 2);
+  assert.match(html, /<tr><td>a<\/td><td>b<\/td><\/tr>/u);
+});
+
+test('does not treat an unmatched currency dollar as an inline math delimiter in a table', () => {
+  const text = '| Number | Cost | Note |\n| --- | --- | --- |\n| 10 | $10 | dollar |';
+  const html = renderToStaticMarkup(createElement(MaterialSourceReader, { title: 'Ghi chú', text }));
+
+  assert.equal((html.match(/<td\b/gu) ?? []).length, 3);
+  assert.match(html, /<tr><td>10<\/td><td>\$10<\/td><td>dollar<\/td><\/tr>/u);
+  assert.doesNotMatch(html, /class="katex"/u);
+});
+
 test('formats old AI guides for display without changing their saved source or editor value', () => {
   const backslash = String.fromCharCode(92);
   const escapedBreak = `${backslash}n`;

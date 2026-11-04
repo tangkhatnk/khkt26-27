@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as focus from '../src/adventure/focus.ts';
 import { isDeviceClockBehind } from '../src/adventure/focus.ts';
+import { estimateServerClockOffset, MAX_SERVER_CLOCK_OFFSET_MS, serverTimeFromClientTime } from '../src/adventure/serverClock.ts';
 
 const { tick, depart, returnFromBackground, leaveFocusView, restore, focused, elapsedSeconds, sessionEndAt } = focus;
 const trip = (target = 600) => ({
@@ -35,6 +36,13 @@ test('scene timing exposes study distance and fixed rest anchors while retaining
   const beforeTrip = focus.tripSceneTiming(scheduled, 0);
   assert.equal(beforeTrip.elapsedStudySeconds, 0);
   assert.equal(beforeTrip.remainingSeconds, 180);
+});
+
+test('a synchronized no-break plan does not reuse a stale device-local break plan', () => {
+  const staleLocalPlan = { count: 1, seconds: 60 };
+  assert.equal(focus.resolveTripBreakPlan({ synchronized: true, sharedPlan: undefined, localPlan: staleLocalPlan }), undefined);
+  assert.deepEqual(focus.resolveTripBreakPlan({ synchronized: true, sharedPlan: staleLocalPlan, localPlan: undefined }), staleLocalPlan);
+  assert.deepEqual(focus.resolveTripBreakPlan({ synchronized: false, sharedPlan: undefined, localPlan: staleLocalPlan }), staleLocalPlan);
 });
 
 test('blur, visibility, pagehide, and route departure record one distraction', () => {
@@ -196,4 +204,105 @@ test('normal focus return timestamps are not mistaken for a clock rollback', () 
 
   assert.equal(returned.lastAt, 10005);
   assert.equal(isDeviceClockBehind(returned.lastAt, () => 10006), false);
+});
+
+test('late synchronized snapshots convert fast and slow device clocks and retain the shared break schedule', () => {
+  const started = 1_000_000;
+  const serverNow = started + 315_000;
+  for (const skew of [300_000, -240_000]) {
+    const clientNow = serverNow + skew;
+    const offset = estimateServerClockOffset(serverNow, clientNow);
+    const scheduled = {
+      ...trip(600),
+      started,
+      lastAt: serverNow,
+      syncClock: true,
+      clockOffsetMs: offset,
+      breakPlan: { count: 1, seconds: 60 },
+      segments: focus.scheduledBreakSegmentsThrough(started, 600, { count: 1, seconds: 60 }, serverNow),
+    };
+    const resumedAt = serverTimeFromClientTime(clientNow + 50_000, offset);
+    const resumed = tick(scheduled, resumedAt);
+    assert.equal(offset, -skew);
+    assert.equal(resumed.lastAt, serverNow + 50_000);
+    assert.equal(focused(resumed), 5);
+    assert.deepEqual(resumed.segments.map(({ kind, start, end }) => [kind, start, end]), [
+      ['break', started + 300_000, started + 360_000],
+      ['focus', started + 360_000, started + 365_000],
+    ]);
+    assert.equal(isDeviceClockBehind(resumed.lastAt, () => serverTimeFromClientTime(clientNow + 51_000, offset)), false);
+  }
+});
+
+test('synchronized reconnect does not invent focus before observation and early end uses server time', () => {
+  const started = 2_000_000;
+  const observedAt = started + 30_000;
+  const clientNow = observedAt - 420_000;
+  const offset = estimateServerClockOffset(observedAt, clientNow);
+  const waiting = {
+    ...trip(120),
+    started,
+    lastAt: observedAt,
+    syncClock: true,
+    clockOffsetMs: offset,
+    breakPlan: { count: 1, seconds: 60 },
+    segments: focus.scheduledBreakSegmentsThrough(started, 120, { count: 1, seconds: 60 }, observedAt),
+  };
+  const afterOneSecond = tick(waiting, serverTimeFromClientTime(clientNow + 1_000, offset));
+  assert.equal(focused(afterOneSecond), 1);
+  assert.deepEqual(afterOneSecond.segments, [
+    { start: observedAt, end: observedAt + 1_000, kind: 'focus' },
+  ]);
+  assert.equal(afterOneSecond.distractions ?? 0, 0);
+  assert.equal(sessionEndAt(afterOneSecond, serverTimeFromClientTime(clientNow + 20_000, offset)), observedAt + 20_000);
+  assert.equal(sessionEndAt(afterOneSecond, serverTimeFromClientTime(clientNow + 200_000, offset)), started + 180_000);
+});
+
+test('a late observer receives scheduled breaks without focus or a fabricated distraction before observation', () => {
+  const started = 3_000_000;
+  const observedAt = started + 150_000;
+  const plan = { count: 1, seconds: 60 };
+  const prefix = focus.scheduledBreakSegmentsThrough(started, 120, plan, observedAt);
+  const waiting = {
+    ...trip(120), started, lastAt: observedAt, syncClock: true,
+    clockOffsetMs: 0, breakPlan: plan, segments: prefix,
+  };
+
+  assert.deepEqual(prefix, [{ start: started + 60_000, end: started + 120_000, kind: 'break' }]);
+  assert.equal(focused(waiting), 0);
+  assert.equal(waiting.distractions ?? 0, 0);
+  const oneSecondFocused = tick(waiting, observedAt + 1_000);
+  assert.equal(focused(oneSecondFocused), 1);
+  assert.equal(oneSecondFocused.distractions ?? 0, 0);
+});
+
+test('a hidden ready member waits for foreground before focused time starts after the host launches', () => {
+  const started = 4_000_000;
+  const observedAt = started + 150_000;
+  const plan = { count: 1, seconds: 60 };
+  const hidden = focus.startSynchronizedSession({
+    ...trip(120), started, lastAt: started, syncClock: true, clockOffsetMs: 0,
+    breakPlan: plan, segments: [],
+  }, observedAt, false);
+
+  assert.equal(hidden.state, 'away');
+  assert.equal(hidden.lastAt, observedAt);
+  assert.equal(focused(hidden), 0);
+  assert.equal(hidden.distractions ?? 0, 0);
+  assert.deepEqual(hidden.segments, [{ start: started + 60_000, end: started + 120_000, kind: 'break' }]);
+
+  const foreground = returnFromBackground(hidden, observedAt + 1_000);
+  assert.equal(foreground.state, 'focus');
+  assert.equal(focused(foreground), 0);
+  assert.equal(foreground.distractions ?? 0, 0);
+  assert.equal(focused(tick(foreground, observedAt + 2_000)), 1);
+  assert.equal(focused(tick(foreground, observedAt + 2_000)), 1);
+});
+
+test('server clock rejects skew beyond the supported range instead of clamping it', () => {
+  assert.equal(estimateServerClockOffset(200_000_000, 0), null);
+  assert.equal(estimateServerClockOffset(0, 200_000_000), null);
+  assert.equal(estimateServerClockOffset(200_000_000, 200_000_000 - MAX_SERVER_CLOCK_OFFSET_MS), MAX_SERVER_CLOCK_OFFSET_MS);
+  assert.equal(estimateServerClockOffset(200_000_000, 200_000_000 - MAX_SERVER_CLOCK_OFFSET_MS - 1), null);
+  assert.ok(Number.isNaN(serverTimeFromClientTime(200_000_000, MAX_SERVER_CLOCK_OFFSET_MS + 1)));
 });
