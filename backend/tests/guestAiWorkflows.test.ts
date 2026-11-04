@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 import Fastify from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { Redis } from "ioredis";
 import RedisMock from "ioredis-mock";
 import { ZodError } from "zod";
 import { ApiError } from "../src/errors.js";
 import { guestAiRoutes } from "../src/guestAi.js";
+import { signalForRequest } from "../src/guestAiWorkflows.js";
 import type { GuestAiWorkflowProviders } from "../src/guestAiWorkflows.js";
 import type { StudyExerciseQuestion } from "../src/studyExerciseSchemas.js";
 
@@ -62,6 +65,38 @@ async function issueCredential() {
 }
 
 describe("guest AI workflows", () => {
+  it("aborts guest provider signals on aborted requests and unfinished response closes", () => {
+    const requestRaw = Object.assign(new EventEmitter(), { aborted: false });
+    const replyRaw = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: false });
+    const lifecycle = signalForRequest(
+      { raw: requestRaw } as unknown as FastifyRequest,
+      { raw: replyRaw } as unknown as FastifyReply,
+    );
+    requestRaw.emit("aborted");
+    expect(lifecycle.signal.aborted).toBe(true);
+    lifecycle.dispose();
+
+    const openRequestRaw = Object.assign(new EventEmitter(), { aborted: false });
+    const openReplyRaw = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: false });
+    const openResponse = signalForRequest(
+      { raw: openRequestRaw } as unknown as FastifyRequest,
+      { raw: openReplyRaw } as unknown as FastifyReply,
+    );
+    openReplyRaw.emit("close");
+    expect(openResponse.signal.aborted).toBe(true);
+    openResponse.dispose();
+
+    const endedRequestRaw = Object.assign(new EventEmitter(), { aborted: false });
+    const endedReplyRaw = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: true });
+    const endedResponse = signalForRequest(
+      { raw: endedRequestRaw } as unknown as FastifyRequest,
+      { raw: endedReplyRaw } as unknown as FastifyReply,
+    );
+    endedReplyRaw.emit("close");
+    expect(endedResponse.signal.aborted).toBe(false);
+    endedResponse.dispose();
+  });
+
   it("requires the private GuestAI credential and keeps document output no-store", async () => {
     const body = { mimeType: "application/pdf", data: Buffer.from("%PDF-").toString("base64") };
     const unauthorized = await app.inject({ method: "POST", url: "/api/v1/ai/guest/materials/read", payload: body });
@@ -75,6 +110,71 @@ describe("guest AI workflows", () => {
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.json()).toEqual({ text: "private material text" });
     expect(providers.readMaterialDocument).toHaveBeenCalledOnce();
+  });
+
+  it("aborts guest exercise generation when the client closes the response after upload", async () => {
+    const token = await issueCredential();
+    const plannedSessionId = "00000000-0000-4000-8000-000000000080";
+    const requestId = "00000000-0000-4000-8000-000000000081";
+    let startProvider!: () => void;
+    const providerStarted = new Promise<void>(resolve => { startProvider = resolve; });
+    let providerCanceled!: () => void;
+    const providerCancelled = new Promise<void>(resolve => { providerCanceled = resolve; });
+    let providerSignal: AbortSignal | undefined;
+    let forceSettleFirst: (() => void) | undefined;
+    let calls = 0;
+    vi.mocked(providers.generateStudyExerciseQuestions).mockImplementation(async (_text, _count, signal) => {
+      calls += 1;
+      if (calls > 1) return exerciseQuestions;
+      providerSignal = signal;
+      startProvider();
+      return await new Promise((_, reject) => {
+        const rejectCancelled = () => reject(Object.assign(new Error("provider cancelled"), { name: "AbortError" }));
+        forceSettleFirst = rejectCancelled;
+        signal.addEventListener("abort", () => {
+          providerCanceled();
+          rejectCancelled();
+        }, { once: true });
+      });
+    });
+
+    const baseUrl = await app.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+    const requestBody = {
+      requestId, plannedSessionId, mode: "generated", text: sessionText, count: 1,
+    };
+    const pendingResponse = fetch(`${baseUrl}/api/v1/ai/guest/study-exercises`, {
+      method: "POST",
+      headers: { authorization: `GuestAI ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    try {
+      await providerStarted;
+      expect(providerSignal?.aborted).toBe(false);
+      controller.abort();
+      await expect(pendingResponse).rejects.toMatchObject({ name: "AbortError" });
+      await vi.waitFor(() => expect(providerSignal?.aborted).toBe(true));
+      await providerCancelled;
+      const gateKey = `guest-ai:session-gate:${plannedSessionId}`;
+      await vi.waitFor(async () => expect(await redis.hget(gateKey, "exerciseStatus")).toBeNull());
+      expect(await redis.keys("guest-ai:exercise:*")).toHaveLength(0);
+
+      const retry = await app.inject({
+        method: "POST", url: "/api/v1/ai/guest/study-exercises",
+        headers: { authorization: `GuestAI ${token}` }, payload: requestBody,
+      });
+      expect(retry.statusCode).toBe(201);
+      expect(calls).toBe(2);
+      expect(await redis.keys("guest-ai:exercise:*")).toHaveLength(1);
+      const quotaKeys = await redis.keys("guest-ai:quota:principal:*:task:question");
+      expect(quotaKeys).toHaveLength(1);
+      expect(await redis.get(quotaKeys[0]!)).toBe("2");
+    } finally {
+      controller.abort();
+      forceSettleFirst?.();
+    }
   });
 
   it("rejects malformed guest quiz input before provider calls", async () => {

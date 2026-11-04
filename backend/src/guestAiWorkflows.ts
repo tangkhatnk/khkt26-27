@@ -169,12 +169,21 @@ function publicQuizDto(record: GuestQuizRecord) {
   };
 }
 
-function signalForRequest(request: FastifyRequest) {
+export function signalForRequest(request: FastifyRequest, reply: FastifyReply) {
   const controller = new AbortController();
   const abort = () => controller.abort();
+  const closed = () => { if (!reply.raw.writableEnded) abort(); };
   if (request.raw.aborted) abort();
   else request.raw.once("aborted", abort);
-  return { signal: controller.signal, dispose: () => request.raw.off("aborted", abort) };
+  if (!reply.raw.writableEnded && reply.raw.destroyed) abort();
+  else if (!reply.raw.writableEnded) reply.raw.once("close", closed);
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      request.raw.off("aborted", abort);
+      reply.raw.off("close", closed);
+    },
+  };
 }
 
 async function reserve(
@@ -231,7 +240,7 @@ export function guestAiWorkflowRoutes(
     reply.header("Cache-Control", "no-store");
     const input = materialReadRequestSchema.parse(request.body);
     await reserve(redis, request, "document", estimateGuestAiProviderUnits({ task: "document", operation: "read" }));
-    const signal = signalForRequest(request);
+    const signal = signalForRequest(request, reply);
     try { return await providers.readMaterialDocument(input, signal.signal); }
     finally { signal.dispose(); }
   });
@@ -244,7 +253,7 @@ export function guestAiWorkflowRoutes(
     reply.header("Cache-Control", "no-store");
     const input = materialSummaryRequestSchema.parse(request.body);
     await reserve(redis, request, "document", estimateGuestAiProviderUnits({ task: "document", operation: "summarize" }));
-    const signal = signalForRequest(request);
+    const signal = signalForRequest(request, reply);
     try { return await providers.summarizeMaterialText(input, signal.signal); }
     finally { signal.dispose(); }
   });
@@ -257,7 +266,7 @@ export function guestAiWorkflowRoutes(
     reply.header("Cache-Control", "no-store");
     const input = studyGuideRequestSchema.parse(request.body);
     await reserve(redis, request, "tutor", estimateGuestAiProviderUnits({ task: "tutor", operation: "study-guide" }));
-    const signal = signalForRequest(request);
+    const signal = signalForRequest(request, reply);
     try { return await providers.generateStudyGuide(input, signal.signal); }
     finally { signal.dispose(); }
   });
@@ -452,7 +461,7 @@ export function guestAiWorkflowRoutes(
       if (input.mode === "provided") {
         exercises = [studyExerciseQuestionSchema.parse({ id: randomUUID(), prompt: input.text })];
       } else {
-        const signal = signalForRequest(request);
+        const signal = signalForRequest(request, reply);
         let generated;
         try {
           generated = await providers.generateStudyExerciseQuestions(
@@ -582,7 +591,7 @@ export function guestAiWorkflowRoutes(
 
     try {
       await reserve(redis, request, "evaluation", estimateGuestAiProviderUnits({ task: "evaluation", operation: "exercise-solutions" }));
-      const signal = signalForRequest(request);
+      const signal = signalForRequest(request, reply);
       let generated;
       try { generated = await providers.generateStudyExerciseSolutions(record.sourceText, record.exercises, signal.signal); }
       finally { signal.dispose(); }
