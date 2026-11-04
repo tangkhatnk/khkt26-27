@@ -28,6 +28,8 @@
 - A guest token cannot authenticate an account route or read another token's AI state.
 - Quota rejection occurs before a provider call; per-principal accounting is atomic.
 - AI exercise sets bind to an explicit guest session, with generated solutions available only after that server-timed session is complete. A private summary quiz may be generated and graded without a timer anchor after an offline or early-finished session; ordinary focus still works offline.
+- Guest session start keeps one immutable `startedAt` and returns a fresh `serverNow` on each replay. The client estimates a bounded guest-only clock offset from `serverNow` at receipt; any time that elapsed before a delayed start response is acknowledged remains uncredited. Rebinding the same exercise ID to the same token/session is idempotent before and after start, but a new set cannot be bound after start.
+- If the learner cancels a guest AI request or closes its response, cancel provider work where supported and release the in-flight claim so the same request can be retried without publishing partial private state.
 - The UI remains usable with long Vietnamese lesson names, missing network, an expired guest token, and history links using legacy route keys.
 
 ## Scope and decisions
@@ -39,6 +41,7 @@
 - Base optional difficulty recommendations only on assessed concept outcomes: after at least three completed evaluations and ten scored answers, suggest one step up at mean correctness ≥80%, a worked review at ≤50%, and otherwise keep the level. Before enough evidence, use the curated default and make no personalized claim. Never use XP or session duration as mastery.
 - Suggest duration from the median valid study time in the last three completed same-subject sessions, rounded to five minutes and bounded to 5–25 minutes; otherwise use the curated estimate. Let the learner override it.
 - Permit guest AI use through a bounded guest capability with explicit limits and the same request validation as signed-in use. Keep materials and results private to their learner scope; retain explicit confirmation before sending material to AI.
+- Keep guest credentials and private AI state in Redis with seven-day expiry; keep account state under account authentication and existing sync boundaries. Store only the allowed anonymous session summary outside the guest-private Redis namespace. Read `GUEST_AI_*` limits from backend configuration; the shared ceiling is internal usage units, not billed provider tokens.
 - Treat metrics as observed activity, not evidence that learning improved. Do not publish effectiveness, OCR, or AI-quality claims until the relevant benchmark or human study has produced real results.
 - Root review and the repository's required CI and approvals gate merge and deployment.
 
@@ -50,7 +53,7 @@
 | Versioned curated lessons and private learner progress | Frontend lane | Lesson IDs and content versions are stable; progress survives reload and remains scoped to the current learner. A maintainer checks every batch's lesson text, answer keys, explanations, and grade fit before it is described as reviewed; do not imply external educator endorsement without one. Daily activity appears only when backed by real sessions, with no forced streak. |
 | Goal → material → focus → retrieval → evaluation; history, journal, and reports remain visible | Frontend lane and integration | Existing focus/session behavior is preserved; end-to-end flow reaches the current evaluation/summary and navigation retains all three destinations. |
 | Evidence-based difficulty and focus-duration suggestions | Frontend lane | Unit tests prove the 3-evaluation/10-answer thresholds, 80%/50% bands, curated cold start, median valid-time duration, bounds, and learner override; the live path uses the suggestions. |
-| Bounded AI use without an account, with private materials/results and explicit send confirmation | Backend contract, then integration | Guest authorization and quota tests; request/response contract reviewed before frontend wiring; ownership and consent behavior covered. |
+| Bounded AI use without an account, with private materials/results and explicit send confirmation | Backend contract, then integration | Guest authorization, quota, provider-cancellation, replay/idempotency and ownership tests; request/response contract reviewed before frontend wiring; ownership and consent behavior covered. |
 | Focus time, distractions, valid study time, and points | Metrics checkpoint | Values are defined against current session rules and labeled as activity measurements; no outcome claim is inferred from them. |
 | AI question quality, independent OCR accuracy, comparison benchmark, and statistical protocol in #72 | Research checkpoint after feature lanes | Runnable synthetic/de-identified benchmark, input and scoring documentation, OCR results on a held-out source, and a controlled-study protocol; report actual limitations and leave unmeasured results blank. |
 
@@ -74,8 +77,10 @@
 - [ ] Issue the opaque guest token through `POST /api/v1/ai/guest/credential` and accept it only as `Authorization: GuestAI <token>` under `/api/v1/ai/guest/*`.
 - [ ] Match current schemas for `/sessions/start`, `/materials/read`, `/materials/summarize`, `/materials/generate` (study guide), `/quizzes/generate`, `/quizzes/:quizId/grade`, and exercise prepare/retrieve/cancel/solution routes.
 - [ ] Keep token-private state in Redis with its TTL; store only allowed summary history outside it, with no prompts or feedback in public guest history.
-- [ ] Apply issuance/request gates, atomic per-token task budgets, and the configured provider spend cap before provider calls. Do not trust forwarded-for headers.
+- [ ] Apply issuance/request gates, atomic per-token task budgets, and the configured global internal-unit ceiling before provider calls. Do not trust forwarded-for headers; the configured units do not represent billed provider tokens.
 - [ ] Add tests for guest credential scope, account-route rejection, quota exhaustion before provider use, malformed input, token expiry, and cross-principal isolation.
+- [ ] Return immutable `startedAt` plus fresh `serverNow` on every successful start/replay; make exercise binding idempotent only for the same token/session/exercise ID, including safe recovery after a lost start reply, without extending an already-started gate.
+- [ ] Abort guest provider work when the caller cancels or the response closes, release request claims, and avoid storing a partial private result.
 - [x] Root approved the guest credential and quota direction. FE has the exact lane contract and may integrate under it; final test evidence remains a gate.
 
 ### 3. Integration
