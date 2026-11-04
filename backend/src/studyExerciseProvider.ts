@@ -17,6 +17,7 @@ import {
 const GENERATION_TIMEOUT_MS = 85_000;
 const MIN_PROVIDER_REQUEST_BUDGET_MS = 11_000;
 const REQUEST_RESERVE_MARGIN_MS = 1_000;
+const FALLBACK_MAX_REQUEST_BUDGET_MS = 40_000;
 const MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024;
 
 function generatedQuestionJsonSchema(type: StudyExerciseType) {
@@ -236,6 +237,22 @@ function requestBudget(operation: GenerationOperation, activeAttempts: number) {
   return budget;
 }
 
+function initialFallbackBudget(
+  operation: GenerationOperation,
+  remainingBatches: number,
+  repairAvailable: boolean,
+) {
+  operation.assertActive();
+  const futureBatchAttempts = Math.max(0, remainingBatches - 1);
+  const reservedAttempts = futureBatchAttempts + (repairAvailable ? 1 : 0);
+  const remaining = operation.deadline - Date.now() - REQUEST_RESERVE_MARGIN_MS;
+  const protectedBudget = reservedAttempts * MIN_PROVIDER_REQUEST_BUDGET_MS;
+  const budget = Math.min(FALLBACK_MAX_REQUEST_BUDGET_MS, remaining - protectedBudget);
+  if (budget < MIN_PROVIDER_REQUEST_BUDGET_MS)
+    throw providerError(undefined, true);
+  return Math.floor(budget);
+}
+
 type QuestionOutputValidationCategory =
   | "invalid-json"
   | "schema-invalid"
@@ -363,7 +380,9 @@ async function requestWithFallback(
     }
 
     fallbackState.activeModel = fallbackModel;
-    const fallbackBudgetMs = requestBudget(operation, remainingBatches + repairAttempts);
+    const fallbackBudgetMs = initialFallbackBudget(
+      operation, remainingBatches, fallbackState.validationRepairAvailable === true,
+    );
     const fallbackStartedAt = Date.now();
     try {
       return await requestProviderText(

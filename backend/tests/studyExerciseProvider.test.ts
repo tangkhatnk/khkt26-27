@@ -415,6 +415,64 @@ describe("study exercise Gemini provider", () => {
     );
   });
 
+  it("gives the initial fallback more than 15 seconds while reserving every later batch and repair floor", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = "fallback-test-model";
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const source = "A stack follows last-in, first-out order; pop removes the newest item.";
+    let callCount = 0;
+    generateContent.mockImplementation(async request => {
+      callCount += 1;
+      const payload = JSON.parse(request.contents) as { type: string; count: number };
+      if (callCount === 1) {
+        await vi.advanceTimersByTimeAsync(9_000);
+        throw { status: 503, code: "SERVICE_UNAVAILABLE" };
+      }
+      if (callCount === 2) {
+        await vi.advanceTimersByTimeAsync(18_000);
+        return { text: JSON.stringify({ exercises: [question(payload.type, source, 0)] }) };
+      }
+      if (callCount === 3) {
+        return { text: JSON.stringify({ exercises: [{
+          type: "true-false", prompt: "Is this statement accurate?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+        }] }) };
+      }
+      if (payload.type === "true-false") {
+        return { text: JSON.stringify({ exercises: [{
+          type: "true-false", prompt: "Đúng hay sai: stack removes the newest item first?",
+          choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+        }] }) };
+      }
+      return { text: JSON.stringify({ exercises: [question(payload.type, source, 0)] }) };
+    });
+
+    const startedAt = Date.now();
+    const generated = await generateStudyExerciseQuestions(source, {
+      multipleChoice: 1, trueFalse: 1, shortAnswer: 1, essay: 1,
+    });
+    const requests = generateContent.mock.calls.map(([request]) => request);
+    const budgets = requests.map(request => request.config.httpOptions.timeout);
+
+    expect(generated).toHaveLength(4);
+    expect(requests.map(request => request.model)).toEqual([
+      originalModel,
+      "fallback-test-model", "fallback-test-model", "fallback-test-model", "fallback-test-model", "fallback-test-model",
+    ]);
+    expect(budgets).toEqual([
+      14_000, // Preserve the primary's fair slice across four batches, failover, and repair.
+      31_000, // Use the remaining time after reserving 11s for three batches, repair, and margin.
+      14_250,
+      19_000,
+      28_500,
+      57_000,
+    ]);
+    expect(budgets[1]).toBeGreaterThan(15_000);
+    expect(budgets[1]).toBeLessThanOrEqual(40_000);
+    expect(budgets.slice(2).every(budget => budget >= 11_000)).toBe(true);
+    expect(Date.now() - startedAt).toBe(27_000);
+  });
+
   it("retries only documented deadline and rate-limit codes", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
     config.GEMINI_FALLBACK_MODEL = "fallback-test-model";
