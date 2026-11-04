@@ -41,5 +41,6 @@ test("the private guest journal row reads its grade without writing it into sess
 
   assert.match(journal, /owner === "guest" \? guestQuizGradesBySession\.get\(s\.id\) : undefined/u);
   assert.match(journal, /Điểm quiz riêng: \$\{privateGuestGrade\.score\}\/\$\{privateGuestGrade\.total\}/u);
+  assert.match(journal, /privateGuestGrade\s*\?\s*"Xem đáp án trong tổng kết"\s*:\s*s\.quiz\?\.feedback/u);
   assert.doesNotMatch(journal, /s\.quiz\s*=/u);
 });

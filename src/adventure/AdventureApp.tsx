@@ -3882,9 +3882,11 @@ function AdventureWorkspace() {
                                   : privateGuestGrade
                                     ? `Điểm quiz riêng: ${privateGuestGrade.score}/${privateGuestGrade.total}`
                                     : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
-                                <span>{s.quiz?.feedback
-                                  ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
-                                  : analysis.knowledgeLabel}</span>
+                                <span>{privateGuestGrade
+                                  ? "Xem đáp án trong tổng kết"
+                                  : s.quiz?.feedback
+                                    ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
+                                    : analysis.knowledgeLabel}</span>
                                 {curatedResult && <span>Bài tự kiểm tra đã lưu riêng: {curatedResult.score}/{curatedResult.total}</span>}
                                 <small>{analysis.focusExplanation}</small>
                               </div>
