@@ -16,11 +16,13 @@ The runner invoked the existing `extractImageWithOcr()` from `src/material/ocrMa
 
 | Stratum | n | Micro CER | Macro CER | Micro WER | Macro WER | Mean time/image | Median | P95 | Failures / timeouts |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Clean synthetic print | 20 | 2.273% | 2.401% | 9.160% | 9.257% | 459 ms | 457 ms | 489 ms | 0 / 0 |
-| Noisy synthetic print | 20 | 3.846% | 3.890% | 14.504% | 14.332% | 447 ms | 443 ms | 494 ms | 0 / 0 |
-| Combined | 40 | 3.059% | 3.145% | 11.832% | 11.794% | 453 ms | 447 ms | 494 ms | 0 / 0 |
+| Clean synthetic print | 20 | 2.273% | 2.401% | 9.160% | 9.257% | 463.11 ms | 458.20 ms | 518.96 ms | 0 / 0 |
+| Noisy synthetic print | 20 | 3.846% | 3.890% | 14.504% | 14.332% | 449.32 ms | 451.495 ms | 500.77 ms | 0 / 0 |
+| Combined | 40 | 3.059% | 3.145% | 11.832% | 11.794% | 456.21 ms | 458.20 ms | 507.32 ms | 0 / 0 |
 
-CER uses Unicode code-point edit distance; WER uses whitespace-delimited tokens. For Vietnamese, those tokens are syllable-like units, not word-segmented words. Text was normalized to NFC and line endings, outer whitespace was trimmed, while case, punctuation, diacritics, and internal whitespace were retained. Micro rates pool edits over all reference units; macro rates average per-image rates. Mean Tesseract confidence was 95.15 clean, 93.80 noisy, and 94.48 combined. Each image used a fresh worker. Time runs from immediately before `extractImageWithOcr()` until it returns, including worker startup and OCR, but excluding asynchronous shutdown completion.
+CER uses Unicode code-point edit distance; WER uses whitespace-delimited tokens. For Vietnamese, those tokens are syllable-like units, not word-segmented words. Text was normalized to NFC and line endings, outer whitespace was trimmed, while case, punctuation, diacritics, and internal whitespace were retained. Micro rates pool edits over all reference units; macro rates average per-image rates. Mean Tesseract confidence was 95.15 clean, 93.80 noisy, and 94.48 combined. Each image used a fresh worker. Time runs from immediately before `extractImageWithOcr()` until it returns, including worker startup and OCR, but excluding asynchronous shutdown completion. Timings below come from one saved run recorded at 2026-11-04 18:51:37 UTC. Even-sample medians average the two middle observations.
+
+The clean and noisy rows share all 20 metadata IDs. The mean paired per-image CER difference (clean minus noisy) was −1.489 percentage points; a deterministic paired percentile bootstrap (100,000 resamples, seed `20261105`) gave a 95% interval of [−2.808, −0.232] percentage points. This descriptive interval is based on only 20 synthetic pairs and does not estimate natural-document performance.
 
 Engine/runtime: Tesseract.js 7.0.0, `tesseract.js-core` 7.0.0, `@tesseract.js-data/eng` 1.0.0, `@tesseract.js-data/vie` 1.0.0, trained data `4.0.0_best_int`, languages `eng+vie`, LSTM OEM 1; Node 24.16.0 on `darwin-x64`, Darwin 25.6.0. Language files were generated under local `public/ocr/lang`; no CDN was used. The app's OCR result remained marked `needs-review` for all cases.
 

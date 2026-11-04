@@ -129,6 +129,11 @@ function summarize(rows) {
   const referenceTokens = rows.reduce((sum, row) => sum + row.referenceTokens, 0);
   const tokenErrors = rows.reduce((sum, row) => sum + row.tokenErrors, 0);
   const sortedTimes = rows.map((row) => row.elapsedMs).sort((left, right) => left - right);
+  const medianElapsedMs = sortedTimes.length
+    ? sortedTimes.length % 2
+      ? sortedTimes[Math.floor(sortedTimes.length / 2)]
+      : (sortedTimes[sortedTimes.length / 2 - 1] + sortedTimes[sortedTimes.length / 2]) / 2
+    : null;
   const macroMean = (field) => rows.reduce((sum, row) => sum + row[field], 0) / Math.max(rows.length, 1);
   return {
     cases: rows.length,
@@ -139,11 +144,54 @@ function summarize(rows) {
     microWer: referenceTokens ? tokenErrors / referenceTokens : null,
     macroWer: macroMean('wer'),
     meanElapsedMs: rows.length ? rows.reduce((sum, row) => sum + row.elapsedMs, 0) / rows.length : null,
-    medianElapsedMs: rows.length ? sortedTimes[Math.floor((sortedTimes.length - 1) / 2)] : null,
+    medianElapsedMs,
     p95ElapsedMs: rows.length ? sortedTimes[Math.min(sortedTimes.length - 1, Math.ceil(sortedTimes.length * 0.95) - 1)] : null,
     meanConfidence: rows.filter((row) => row.confidence !== null).length
       ? rows.reduce((sum, row) => sum + (row.confidence ?? 0), 0) / rows.filter((row) => row.confidence !== null).length
       : null,
+  };
+}
+
+function pairedCleanMinusNoisyBootstrap(rows, { replicates = 100_000, seed = 20_261_105 } = {}) {
+  const clean = new Map(rows.filter(row => row.stratum === 'clean').map(row => [row.id, row.cer]));
+  const noisy = new Map(rows.filter(row => row.stratum === 'noisy').map(row => [row.id, row.cer]));
+  const ids = [...clean.keys()].sort();
+  if (ids.length !== noisy.size || ids.some(id => !noisy.has(id)))
+    throw new Error('Clean and noisy OCR strata must have identical paired row IDs for the bootstrap interval.');
+
+  const differences = ids.map(id => clean.get(id) - noisy.get(id));
+  const observedMean = differences.reduce((sum, value) => sum + value, 0) / differences.length;
+  const samples = new Array(replicates);
+  let state = seed >>> 0;
+  const nextRandom = () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
+  for (let sample = 0; sample < replicates; sample += 1) {
+    let sum = 0;
+    for (let draw = 0; draw < differences.length; draw += 1)
+      sum += differences[Math.floor(nextRandom() * differences.length)];
+    samples[sample] = sum / differences.length;
+  }
+  samples.sort((left, right) => left - right);
+  const percentile = probability => {
+    const position = (samples.length - 1) * probability;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    return samples[lower] + (samples[upper] - samples[lower]) * (position - lower);
+  };
+  return {
+    pairedCases: differences.length,
+    statistic: 'mean paired per-image CER difference: clean minus noisy',
+    pointEstimate: observedMean,
+    confidenceLevel: 0.95,
+    intervalMethod: 'percentile bootstrap, paired by row ID, resampled with replacement',
+    lower: percentile(0.025),
+    upper: percentile(0.975),
+    replicates,
+    seed,
   };
 }
 
@@ -314,6 +362,7 @@ async function main() {
     },
     overall: summarize(rows),
     strata: groups,
+    pairedCleanMinusNoisyCer: pairedCleanMinusNoisyBootstrap(rows),
     cases: rows,
   };
   const json = `${JSON.stringify(output, null, 2)}\n`;
