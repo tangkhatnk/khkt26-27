@@ -36,6 +36,20 @@ test("dark base button styling leaves selected duration and mode choices distinc
   assert.match(selected, /color:\s*#d9edda/u);
 });
 
+test("dark skipped quiz toggle keeps selected contrast and visible hover and focus", () => {
+  const selectedSource = rule('html[data-theme="dark"] .adventure .departure-source-options button[aria-pressed="true"]');
+  const skippedQuiz = rule('html[data-theme="dark"] .adventure .departure-quiz-skip[aria-pressed="true"]');
+  const quizHover = rule('html[data-theme="dark"] .adventure .departure-quiz-skip[aria-pressed="true"]:hover:not(:disabled)');
+  const quizFocus = rule('html[data-theme="dark"] .adventure .departure-quiz-skip[aria-pressed="true"]:focus-visible');
+  const value = (body, property) => body.match(new RegExp(`${property}:\\s*([^;]+);`, "u"))?.[1].trim();
+
+  for (const property of ["background", "border-color", "color"]) {
+    assert.equal(value(skippedQuiz, property), value(selectedSource, property), `${property} should match the dark selected source option`);
+  }
+  assert.match(quizHover, /background:\s*#304438/u);
+  assert.match(quizFocus, /outline:\s*3px solid #ffd6b7/u);
+});
+
 test("dark primary actions keep a clear border and focus treatment", () => {
   const primary = rule('html[data-theme="dark"] .adventure .primary');
   const hover = rule('html[data-theme="dark"] .adventure .primary:hover:not(:disabled)');
