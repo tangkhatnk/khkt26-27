@@ -68,12 +68,215 @@ describe("study exercise Gemini provider", () => {
     expect(request.config.responseJsonSchema.properties.exercises.items.properties.type).toBeUndefined();
   });
 
+  it("aligns typed and scalar prompt instructions with the grounded-evidence validator", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    const source = "The area formula uses the base and perpendicular height.";
+    const response = { exercises: [{
+      prompt: "Which area formula uses the base and height?",
+      evidenceExcerpt: source,
+    }] };
+    const requests = [
+      { composition: { multipleChoice: 1, trueFalse: 0, shortAnswer: 0, essay: 0 }, type: "multiple-choice" },
+      { composition: { multipleChoice: 0, trueFalse: 1, shortAnswer: 0, essay: 0 }, type: "true-false" },
+      { composition: { multipleChoice: 0, trueFalse: 0, shortAnswer: 1, essay: 0 }, type: "short-answer" },
+      { composition: { multipleChoice: 0, trueFalse: 0, shortAnswer: 0, essay: 1 }, type: "essay" },
+      { composition: 1, type: undefined },
+    ] as const;
+
+    for (const { composition, type } of requests) {
+      const isTrueFalse = type === "true-false";
+      generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [{
+        prompt: isTrueFalse ? "Đúng hay sai: The area formula uses the base and height?"
+          : response.exercises[0].prompt,
+        evidenceExcerpt: source,
+        ...(type === undefined ? {} : { type }),
+        ...(type === "multiple-choice" ? { choices: ["A", "B", "C", "D"] } : {}),
+        ...(type === "true-false" ? { choices: ["Đúng", "Sai"] } : {}),
+      }] }) });
+      await expect(generateStudyExerciseQuestions(source, composition)).resolves.toHaveLength(1);
+
+      const instruction = generateContent.mock.calls.at(-1)![0].config.systemInstruction;
+      expect(instruction).toContain("nhắc lại nguyên văn ít nhất một từ khóa có nghĩa");
+      expect(instruction).toContain("evidenceExcerpt phải là một đoạn trích nguyên văn liên tục");
+      if (isTrueFalse)
+        expect(instruction).toContain("Đúng hay sai: Stack luôn loại bỏ phần tử mới nhất trước?");
+    }
+  });
+
+  it("repairs one invalid typed batch on the same working model", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = originalModel;
+    const source = "The base remains fixed while height changes.";
+    const invalid = { exercises: [{
+      type: "true-false",
+      prompt: "Is this statement accurate?",
+      choices: ["Đúng", "Sai"],
+      evidenceExcerpt: source,
+    }] };
+    const repaired = { exercises: [{
+      type: "true-false",
+      prompt: "Đúng hay sai: the base remains fixed?",
+      choices: ["Đúng", "Sai"],
+      evidenceExcerpt: source,
+    }] };
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalid) });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(repaired) });
+
+    await expect(generateStudyExerciseQuestions(source, {
+      multipleChoice: 0, trueFalse: 1, shortAnswer: 0, essay: 0,
+    })).resolves.toMatchObject([{ type: "true-false", prompt: repaired.exercises[0].prompt }]);
+
+    const requests = generateContent.mock.calls.map(([request]) => request);
+    expect(requests).toHaveLength(2);
+    expect(requests.map(request => request.model)).toEqual([originalModel, originalModel]);
+    expect(requests.map(request =>
+      request.config.responseJsonSchema.properties.exercises.items.properties.type.enum))
+      .toEqual([["true-false"], ["true-false"]]);
+    expect(requests[1]!.config.systemInstruction).toContain("prompt-not-grounded");
+    expect(requests[1]!.config.systemInstruction).not.toContain(invalid.exercises[0].prompt);
+  });
+
+  it("repairs with the fallback model when it produced the invalid batch", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = "fallback-test-model";
+    const source = "The base remains fixed while height changes.";
+    generateContent.mockRejectedValueOnce({ status: 503, code: "SERVICE_UNAVAILABLE" });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [{
+      type: "true-false", prompt: "Is this statement accurate?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+    }] }) });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [{
+      type: "true-false", prompt: "Đúng hay sai: the base remains fixed?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+    }] }) });
+
+    await expect(generateStudyExerciseQuestions(source, {
+      multipleChoice: 0, trueFalse: 1, shortAnswer: 0, essay: 0,
+    })).resolves.toHaveLength(1);
+    const requests = generateContent.mock.calls.map(([request]) => request);
+    expect(requests.map(request => request.model)).toEqual([
+      originalModel, "fallback-test-model", "fallback-test-model",
+    ]);
+    expect(requests.map(request =>
+      request.config.responseJsonSchema.properties.exercises.items.properties.type.enum))
+      .toEqual([["true-false"], ["true-false"], ["true-false"]]);
+  });
+
+  it("rejects a batch when its one validation repair is still invalid", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = originalModel;
+    const source = "The base remains fixed while height changes.";
+    const invalid = { exercises: [{
+      type: "true-false",
+      prompt: "Is this statement accurate?",
+      choices: ["Đúng", "Sai"],
+      evidenceExcerpt: source,
+    }] };
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalid) });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalid) });
+
+    await expect(generateStudyExerciseQuestions(source, {
+      multipleChoice: 0, trueFalse: 1, shortAnswer: 0, essay: 0,
+    })).rejects.toMatchObject({ status: 502, kind: "invalid-ai-output" });
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses only one validation repair across all requested batches", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = originalModel;
+    const source = "The base remains fixed while height changes.";
+    const invalid = (type: string, choices: string[]) => ({ exercises: [{
+      type,
+      prompt: "Is this statement accurate?",
+      choices,
+      evidenceExcerpt: source,
+    }] });
+    const repairedMultipleChoice = { exercises: [{
+      type: "multiple-choice",
+      prompt: "Which base remains fixed?",
+      choices: ["The base", "The height"],
+      evidenceExcerpt: source,
+    }] };
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalid("multiple-choice", ["A", "B"])) });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(repairedMultipleChoice) });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalid("true-false", ["Đúng", "Sai"])) });
+
+    await expect(generateStudyExerciseQuestions(source, {
+      multipleChoice: 1, trueFalse: 1, shortAnswer: 0, essay: 0,
+    })).rejects.toMatchObject({ status: 502, kind: "invalid-ai-output" });
+    expect(generateContent).toHaveBeenCalledTimes(3);
+    expect(generateContent.mock.calls.map(([request]) => request.model))
+      .toEqual([originalModel, originalModel, originalModel]);
+  });
+
+  it("propagates caller cancellation during the validation repair", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = originalModel;
+    const source = "The base remains fixed while height changes.";
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [{
+      type: "true-false", prompt: "Is this statement accurate?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+    }] }) });
+    let markRepairStarted!: () => void;
+    const repairStarted = new Promise<void>(resolve => { markRepairStarted = resolve; });
+    generateContent.mockImplementationOnce(request => {
+      markRepairStarted();
+      return new Promise((_resolve, reject) => request.config.abortSignal.addEventListener(
+        "abort", () => reject(new Error("request aborted")), { once: true },
+      ));
+    });
+
+    const controller = new AbortController();
+    const pending = generateStudyExerciseQuestions(source, {
+      multipleChoice: 0, trueFalse: 1, shortAnswer: 0, essay: 0,
+    }, controller.signal);
+    await repairStarted;
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ status: 499, kind: "request-cancelled" });
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a validation repair inside the shared 85 second generation deadline", async () => {
+    config.GEMINI_API_KEY = "test-only-private-key";
+    config.GEMINI_FALLBACK_MODEL = originalModel;
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const startedAt = Date.now();
+    const source = "The base remains fixed while height changes.";
+    generateContent.mockImplementationOnce(async () => {
+      await vi.advanceTimersByTimeAsync(35_000);
+      return { text: JSON.stringify({ exercises: [{
+        type: "true-false", prompt: "Is this statement accurate?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+      }] }) };
+    });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [{
+      type: "true-false", prompt: "Đúng hay sai: the base remains fixed?", choices: ["Đúng", "Sai"], evidenceExcerpt: source,
+    }] }) });
+
+    await expect(generateStudyExerciseQuestions(source, {
+      multipleChoice: 0, trueFalse: 1, shortAnswer: 0, essay: 0,
+    })).resolves.toHaveLength(1);
+
+    const requests = generateContent.mock.calls.map(([request]) => request);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.config.httpOptions.timeout).toBeLessThanOrEqual(42_000);
+    expect(requests[1]!.config.httpOptions.timeout).toBeGreaterThanOrEqual(11_000);
+    expect(requests[1]!.config.httpOptions.timeout).toBeLessThanOrEqual(85_000 - 35_000 - 1_000);
+    expect(Date.now() - startedAt).toBe(35_000);
+  });
+
   it("rejects choices on typed short-answer and essay exercises", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
     const source = "A stack follows last-in, first-out order.";
 
     for (const type of ["short-answer", "essay"] as const) {
       generateContent.mockReset();
+      generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [
+        {
+          type,
+          prompt: "Explain why a stack follows last-in, first-out order.",
+          choices: ["push", "pop"],
+          evidenceExcerpt: source,
+        },
+      ] }) });
       generateContent.mockResolvedValueOnce({ text: JSON.stringify({ exercises: [
         {
           type,
@@ -89,6 +292,7 @@ describe("study exercise Gemini provider", () => {
         shortAnswer: type === "short-answer" ? 1 : 0,
         essay: type === "essay" ? 1 : 0,
       })).rejects.toMatchObject({ status: 502, kind: "invalid-ai-output" });
+      expect(generateContent).toHaveBeenCalledTimes(2);
     }
   });
 
@@ -121,16 +325,16 @@ describe("study exercise Gemini provider", () => {
 
   it("rejects provider output that adds an answer before the session", async () => {
     config.GEMINI_API_KEY = "test-only-private-key";
-    generateContent.mockResolvedValueOnce({ text: JSON.stringify({
-      exercises: [{
-        prompt: "Explain how a stack changes after a push followed by a pop.",
-        evidenceExcerpt: "A stack follows last-in, first-out (LIFO) order.",
-        answer: "The stack becomes empty.",
-      }],
-    }) });
+    const invalidOutput = { exercises: [{
+      prompt: "Explain how a stack changes after a push followed by a pop.",
+      evidenceExcerpt: "A stack follows last-in, first-out (LIFO) order.",
+      answer: "The stack becomes empty.",
+    }] };
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalidOutput) });
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify(invalidOutput) });
     await expect(generateStudyExerciseQuestions(
       "A stack follows last-in, first-out (LIFO) order.", 1,
-    )).rejects.toThrow();
+    )).rejects.toMatchObject({ status: 502, kind: "invalid-ai-output" });
   });
 
   it("generates each requested type in batches of five under one shared deadline", async () => {
@@ -159,8 +363,9 @@ describe("study exercise Gemini provider", () => {
     expect(calls).toHaveLength(4);
     expect(calls.map(request => JSON.parse(request.contents).count)).toEqual([5, 5, 5, 5]);
     expect(calls.every(request => request.config.responseJsonSchema.properties.exercises.maxItems <= 5)).toBe(true);
-    expect(calls[0]!.config.responseJsonSchema.properties.exercises.items.properties.type.enum)
-      .toEqual(["multiple-choice", "true-false", "short-answer", "essay"]);
+    expect(calls.map(request =>
+      request.config.responseJsonSchema.properties.exercises.items.properties.type.enum))
+      .toEqual([["multiple-choice"], ["true-false"], ["short-answer"], ["essay"]]);
     expect(calls.every((request, index) => request.config.httpOptions.timeout <=
       85_000 - (callTimes[index]! - startedAt) - 1_000)).toBe(true);
     expect(calls.every(request => request.config.httpOptions.timeout >= 11_000)).toBe(true);
