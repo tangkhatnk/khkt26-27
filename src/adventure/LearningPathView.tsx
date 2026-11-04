@@ -53,7 +53,7 @@ function formatMinutes(seconds: number): string {
 function routeRailPath(nodeCount: number): string {
   if (!nodeCount) return "";
   const point = (index: number) => ({
-    x: index % 2 === 0 ? 44 : 56,
+    x: index % 2 === 0 ? 470 : 530,
     y: ((index + 0.5) / nodeCount) * 1000,
   });
   const first = point(0);
@@ -148,8 +148,8 @@ export function LearningPathHome({
       <header className="learning-path-hero">
         <div className="learning-path-hero__copy">
           <span className="learning-path-kicker">VIỄN DU · LỘ TRÌNH HỌC</span>
-          <h1>Chọn chặng học tiếp theo<span>.</span></h1>
-          <p>Mỗi chặng gồm một phần đọc ngắn, một khoảng tập trung và câu hỏi tự kiểm tra có giải thích.</p>
+          <h1>Chặng tiếp theo<span>.</span></h1>
+          <p>Bài ngắn, tập trung, rồi tự kiểm tra.</p>
           <button className="learning-guide-toggle" type="button" onClick={onOpenGuide}>
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M8.2 7.5a1.9 1.9 0 1 1 3.3 1.3c-.8.8-1.5 1.1-1.5 2.4M10 14.5h.01"/></svg>
             {guideOpen ? "Đang mở hướng dẫn" : "Xem hướng dẫn"}
@@ -181,7 +181,10 @@ export function LearningPathHome({
           <div>
             <span className="learning-path-kicker">LỘ TRÌNH CỤ THỂ</span>
             <h2 id="learning-route-title">{course.title}</h2>
-            <p>{course.description} Đây là nhóm bài học thử nghiệm, không đại diện toàn bộ chương trình lớp học.</p>
+            <p className="learning-route__description">
+              <span className="learning-route__description-full">{course.description} Nhóm bài thử nghiệm, không đại diện toàn bộ chương trình lớp học.</span>
+              <span className="learning-route__description-short">Nhóm bài thử nghiệm, không bao quát toàn bộ chương trình lớp.</span>
+            </p>
           </div>
           <div className="learning-route-legend" aria-label="Trạng thái bài học">
             <span><i className="legend-current" /> Tiếp theo</span>
@@ -190,7 +193,7 @@ export function LearningPathHome({
           </div>
         </div>
         <div className="learning-route" aria-label={`Các bài học trong ${course.title}`}>
-          <svg className="learning-route__rail" viewBox="0 0 100 1000" preserveAspectRatio="none" aria-hidden="true">
+          <svg className="learning-route__rail" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
             <path className="learning-route__rail-shadow" d={routeRailPath(lessonStates.length)} />
             <path className="learning-route__rail-line" d={routeRailPath(lessonStates.length)} />
           </svg>
@@ -287,6 +290,26 @@ export function LearningPathHome({
       </details>
       <p className="learning-path-footnote">Không cần đăng nhập để học các bài có sẵn và lưu tiến độ trên thiết bị.</p>
     </div>
+  );
+}
+
+export function LearningPathRetryNotice({
+  lessonTitle,
+  onRetry,
+}: {
+  lessonTitle: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="learning-retry-notice" aria-labelledby="learning-retry-title">
+      <Buddy compact />
+      <div>
+        <span className="learning-path-kicker">CHẶNG HỌC DỪNG SỚM</span>
+        <h2 id="learning-retry-title">{lessonTitle} chưa hoàn thành</h2>
+        <p>Thời lượng tập trung chưa đủ theo kế hoạch. Phiên này vẫn được lưu; hãy bắt đầu lại để mở bài tiếp theo.</p>
+      </div>
+      <button className="learning-primary-action" type="button" onClick={onRetry}>Bắt đầu lại từ đầu</button>
+    </section>
   );
 }
 

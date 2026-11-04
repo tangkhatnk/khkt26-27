@@ -47,6 +47,7 @@ import {
   CuratedEvaluationReceipt,
   LearningPathHome,
   LearningPathLessonDetail,
+  LearningPathRetryNotice,
 } from "./LearningPathView";
 import {
   canMarkSynchronizedTripReady,
@@ -84,6 +85,7 @@ import {
   beginLessonRun,
   completeLessonRun,
   createLearningPathProgress,
+  finishLessonFocus,
   lessonStates,
   nextAvailableLesson,
   selectLearningPathCourse,
@@ -166,11 +168,11 @@ const stories = [
   "Bình minh lên trên những mái nhà. Mỗi nỗ lực nhỏ đã góp thành chuyến đi này.",
 ];
 const nav = [
-  { id: "station", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 7.5 10 3l6.5 4.5v9h-13v-9Z"/><path d="M8 16.5v-5h4v5"/></svg>, label: "Lộ trình" },
-  { id: "group", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="6" r="2.5"/><path d="M2.5 17v-1.5a4.5 4.5 0 0 1 9 0V17m1-11a2.5 2.5 0 1 1 0 5m2 2a4 4 0 0 1 3 4v.5"/></svg>, label: "Học cùng bạn" },
-  { id: "journal", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5h12v15H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M7 7h7m-7 4h7m-7 4h4"/></svg>, label: "Nhật ký học tập" },
-  { id: "experiments", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3v7l4 2.5M17 8a7.5 7.5 0 1 1-3-4"/><path d="M14 2.5h4v4"/></svg>, label: "Lịch sử phiên học" },
-  { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo" },
+  { id: "station", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 7.5 10 3l6.5 4.5v9h-13v-9Z"/><path d="M8 16.5v-5h4v5"/></svg>, label: "Lộ trình", mobileLabel: "Lộ trình" },
+  { id: "group", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="6" r="2.5"/><path d="M2.5 17v-1.5a4.5 4.5 0 0 1 9 0V17m1-11a2.5 2.5 0 1 1 0 5m2 2a4 4 0 0 1 3 4v.5"/></svg>, label: "Học cùng bạn", mobileLabel: "Học nhóm" },
+  { id: "journal", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5h12v15H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M7 7h7m-7 4h7m-7 4h4"/></svg>, label: "Nhật ký học tập", mobileLabel: "Nhật ký" },
+  { id: "experiments", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3v7l4 2.5M17 8a7.5 7.5 0 1 1-3-4"/><path d="M14 2.5h4v4"/></svg>, label: "Lịch sử phiên học", mobileLabel: "Lịch sử" },
+  { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo", mobileLabel: "Báo cáo" },
 ];
 const clock = (seconds: number) =>
   `${Math.floor(Math.max(0, seconds) / 60)
@@ -472,7 +474,7 @@ function AdventureWorkspace() {
           if (owner === "guest")
             value.snapshot = snapshot(value.local, owner, Date.now());
           if (commitRef.current(value)) {
-            setShowLearningGuide(!value.learningPath?.guideDismissed);
+            setShowLearningGuide(false);
             workspaceLive.current = true;
             exclusiveLease.current = true;
             setLoaded(true);
@@ -810,8 +812,16 @@ function AdventureWorkspace() {
   const summarySession = summarySessionId
     ? sessions.find((session) => session.id === summarySessionId && !removedIds.has(session.id)) ?? null
     : null;
+  const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
+    studyElapsedSeconds(
+      summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
+    ) >= summarySession.target));
   const summaryCuratedEvaluation = summarySession
     ? learningPathProgress.completed.find((evaluation) => evaluation.sessionId === summarySession.id)
+    : undefined;
+  const summaryInterruptedLesson = summarySession && !summaryCompleted && selectedPathLesson &&
+    summarySession.goal === `Học bài: ${selectedPathLesson.title}`
+    ? selectedPathLesson
     : undefined;
   const summaryLearningRun = summarySession && learningPathProgress.activeRun?.phase === "review" &&
     learningPathProgress.activeRun.sessionId === summarySession.id
@@ -819,11 +829,11 @@ function AdventureWorkspace() {
     : undefined;
   const summaryLearningCourse = summaryLearningRun
     ? CURATED_COURSES.find((course) => course.id === summaryLearningRun.courseId)
-    : undefined;
+    : summaryInterruptedLesson ? learningPathCourse : undefined;
   const summaryLearningLesson = summaryLearningCourse && summaryLearningRun
     ? summaryLearningCourse.lessons.find((lesson) => lesson.id === summaryLearningRun.lessonId &&
       lesson.version === summaryLearningRun.lessonVersion)
-    : undefined;
+    : summaryInterruptedLesson;
   const summaryMaterialSessionId = summarySession?.id;
   const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
     ? saved.sources?.[summaryMaterialSessionId] ?? []
@@ -915,10 +925,6 @@ function AdventureWorkspace() {
       cancelMaterialSummaryRequest(active.sessionId, active.sourceId);
   }, [owner, summarySessionId, summaryMaterialSources, cancelMaterialSummaryRequest]);
   const guestNotice = guestNoticeStatus ? guestPublicationNotice(guestNoticeStatus) : null;
-  const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
-    studyElapsedSeconds(
-      summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
-    ) >= summarySession.target));
   const isStudyExerciseOwnerWorkspaceCurrent = useCallback((ownerId: string, authGeneration: number, workspaceGeneration: number) => {
     const auth = useAuthStore.getState();
     return ownerRef.current === ownerId && getAuthGeneration() === authGeneration &&
@@ -2053,7 +2059,7 @@ function AdventureWorkspace() {
     const value = structuredClone(current.current);
     value.active = null;
     if (value.learningPath?.activeRun?.sessionId === s.id)
-      value.learningPath = setLessonRunPhase(value.learningPath, s.id, "review");
+      value.learningPath = finishLessonFocus(value.learningPath, s);
     if (value.readyTripDrafts) delete value.readyTripDrafts[s.id];
     value.notes[s.id] = next.document;
     (value.materials ??= {})[s.id] = next.materials ?? [];
@@ -2429,6 +2435,7 @@ function AdventureWorkspace() {
               <button
                 key={n.id}
                 className={view === n.id ? "nav active" : "nav"}
+                data-mobile-label={n.mobileLabel}
                 aria-current={view === n.id ? "page" : undefined}
                 aria-label={n.label}
                 onClick={() => go(n.id)}
@@ -3780,6 +3787,11 @@ function AdventureWorkspace() {
                         lesson={summaryLearningLesson}
                         conceptId={summaryLearningCourse.conceptId}
                         onSubmit={(score, total, answers) => completeCuratedEvaluation(summarySession.id, score, total, answers)}
+                      />
+                    ) : summaryInterruptedLesson ? (
+                      <LearningPathRetryNotice
+                        lessonTitle={summaryInterruptedLesson.title}
+                        onRetry={() => openLearningLesson(summaryInterruptedLesson)}
                       />
                     ) : null}
                     <div className="summary-arrival">

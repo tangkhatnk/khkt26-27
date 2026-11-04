@@ -4,6 +4,7 @@ import {
   beginLessonRun,
   completeLessonRun,
   createLearningPathProgress,
+  finishLessonFocus,
   isValidLearningPathProgress,
   lessonStates,
   normalizeLearningPathProgress,
@@ -90,6 +91,68 @@ test("an unfinished focus is not counted as a lesson until its offline evaluatio
   assert.ok(replay);
   assert.equal(lessonStates(course, replay)[0].status, "current");
   assert.equal(normalizeLearningPathProgress(replay).activeRun?.sessionId, "lesson-session-replay");
+});
+
+test("early finish keeps the lesson locked and a retry uses a new session id", () => {
+  const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
+  assert.ok(course);
+  const started = beginLessonRun(
+    createLearningPathProgress(course.id), course, course.lessons[0].id, "settled-session-1",
+  );
+  assert.ok(started);
+  let progress = setLessonRunPhase(started, "settled-session-1", "ticket");
+  progress = { ...progress, activeRun: { ...progress.activeRun, target: 600 } };
+  progress = setLessonRunPhase(progress, "settled-session-1", "focus");
+
+  progress = finishLessonFocus(progress, {
+    id: "settled-session-1", started: 1_000, ended: 301_000, target: 600,
+  });
+
+  assert.equal(progress.activeRun, undefined);
+  assert.equal(progress.completed.length, 0);
+  assert.equal(lessonStates(course, progress)[0].status, "available");
+  const retry = beginLessonRun(progress, course, course.lessons[0].id, "replacement-session-2");
+  assert.equal(retry.activeRun?.sessionId, "replacement-session-2");
+  assert.notEqual(retry.activeRun?.sessionId, "settled-session-1");
+});
+
+test("only a full scheduled focus advances a lesson into offline review", () => {
+  const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
+  assert.ok(course);
+  let progress = beginLessonRun(
+    createLearningPathProgress(course.id), course, course.lessons[0].id, "complete-session-1",
+  );
+  assert.ok(progress);
+  progress = { ...progress, activeRun: { ...progress.activeRun, target: 600 } };
+  progress = setLessonRunPhase(progress, "complete-session-1", "ticket");
+  progress = setLessonRunPhase(progress, "complete-session-1", "focus");
+
+  progress = finishLessonFocus(progress, {
+    id: "complete-session-1", started: 1_000, ended: 601_000, target: 600,
+  });
+
+  assert.equal(progress.activeRun?.phase, "review");
+  assert.deepEqual(lessonStates(course, progress).map((item) => item.status), ["current", "locked", "locked", "locked"]);
+});
+
+test("an invalid scheduled break plan cannot count as a completed lesson", () => {
+  const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
+  assert.ok(course);
+  let progress = beginLessonRun(
+    createLearningPathProgress(course.id), course, course.lessons[0].id, "invalid-plan-session",
+  );
+  assert.ok(progress);
+  progress = setLessonRunPhase(progress, "invalid-plan-session", "ticket");
+  progress = setLessonRunPhase(progress, "invalid-plan-session", "focus");
+
+  progress = finishLessonFocus(progress, {
+    id: "invalid-plan-session", started: 1_000, ended: 3_601_000, target: 600,
+    breakPlan: { count: 1, seconds: 0 },
+  });
+
+  assert.equal(progress.activeRun, undefined);
+  assert.equal(progress.completed.length, 0);
+  assert.equal(lessonStates(course, progress)[0].status, "available");
 });
 
 test("persisted path progress validates known lessons and stable session ownership", () => {

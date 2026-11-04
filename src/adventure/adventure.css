@@ -1665,10 +1665,31 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   .adventure button.nav {
     flex: 1;
     min-width: 0;
-    padding: 12px 4px;
+    min-height: 54px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 2px;
   }
   .nav > span {
-    font-size: 25px;
+    display: flex;
+    width: 20px;
+    height: 20px;
+    align-items: center;
+    justify-content: center;
+  }
+  .nav > span svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+  }
+  .adventure button.nav::after {
+    content: attr(data-mobile-label);
+    color: inherit;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 12px;
+    white-space: nowrap;
   }
   .main-area {
     margin-left: 0;

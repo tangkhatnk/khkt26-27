@@ -3,7 +3,12 @@ import {
   type CuratedCourse,
   type CuratedLesson,
 } from "./curatedCurriculum.ts";
-import { isValidBreakPlan, type BreakPlan } from "../../backend/src/adventure/domain.ts";
+import {
+  isValidBreakPlan,
+  studyElapsedSeconds,
+  type BreakPlan,
+  type Session,
+} from "../../backend/src/adventure/domain.ts";
 
 export { CURATED_COURSES, CURRICULUM_VERSION } from "./curatedCurriculum.ts";
 export type { CuratedCourse, CuratedLesson, CuratedQuestion } from "./curatedCurriculum.ts";
@@ -171,6 +176,20 @@ export function setLessonRunPhase(
   if (!activeRun || activeRun.sessionId !== sessionId ||
       phaseOrder.indexOf(phase) < phaseOrder.indexOf(activeRun.phase)) return progress;
   return { ...progress, activeRun: { ...activeRun, phase } };
+}
+
+export function finishLessonFocus(
+  progress: LearningPathProgress,
+  session: Pick<Session, "id" | "started" | "target" | "breakPlan" | "ended">,
+): LearningPathProgress {
+  const run = progress.activeRun;
+  if (!run || run.sessionId !== session.id || run.phase !== "focus") return progress;
+  const breakPlanIsValid = !session.breakPlan || isValidBreakPlan(session.breakPlan, session.target);
+  const reachedTarget = Number.isSafeInteger(session.target) && session.target > 0 && breakPlanIsValid &&
+    studyElapsedSeconds(session.started, session.target, session.breakPlan, session.ended) >= session.target;
+  return reachedTarget
+    ? setLessonRunPhase(progress, session.id, "review")
+    : { ...progress, activeRun: undefined };
 }
 
 export function setLessonRunPlan(
