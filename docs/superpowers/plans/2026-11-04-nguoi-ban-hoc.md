@@ -99,4 +99,5 @@
 ## Checkpoint (2026-11-04)
 
 - Base for all three task branches: `origin/main` at `9dbec2683dd43f1f4249dd7bddebc5cdf0d9929f`.
-- Frontend and backend work are in progress; FE has cleared its API-contract wait and is integrating guest routing in its own lane. Research protocol/dataset preparation is underway; benchmark implementation starts after both feature checkpoints are reviewed. No code is integrated yet.
+- Guest authorization and session-start foundations are implemented; the learner path, remaining guest AI routes, and end-to-end wiring are still in progress.
+- The research protocol and pinned CC0 synthetic OCR revision/checksum manifest are documented. No OCR benchmark, human quality review, or participant results have run.
