@@ -73,6 +73,18 @@ test("boarding pass keeps the goal, route, and planned time on a concise ticket"
   assert.match(markup, /<svg class="boarding-ticket__landscape" aria-hidden="true"/u);
 });
 
+test("boarding pass uses shared-trip wording only for synchronized group sessions", () => {
+  const synchronized = boardingTicket({ synchronizedTrip: true });
+  const legacy = boardingTicket({ synchronizedTrip: false });
+  const solo = boardingTicket({ mode: "solo", synchronizedTrip: false });
+
+  assert.match(synchronized, /Cùng chuyến/u);
+  assert.doesNotMatch(synchronized, /Cùng đoàn/u);
+  assert.match(legacy, /Cùng đoàn/u);
+  assert.match(solo, /Một mình/u);
+  assert.doesNotMatch(solo, /Cùng chuyến|Cùng đoàn/u);
+});
+
 test("pending AI guide review exposes a clearly primary confirmation and explicit discard", () => {
   const markup = renderToStaticMarkup(React.createElement(StudyGuideComposer, {
     disabled: false,

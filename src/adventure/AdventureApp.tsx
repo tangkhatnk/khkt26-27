@@ -2451,6 +2451,7 @@ function AdventureWorkspace() {
                     branch={journey?.branch}
                     carriageName={carriage?.name ?? "Toa Mây"}
                     mode={mode}
+                    synchronizedTrip={isSynchronizedTrip(selectedGroupTrip)}
                     tripCode={ticketCode?.id === ticketId ? ticketCode.value : undefined}
                   />
                   <div className="boarding-preparation">

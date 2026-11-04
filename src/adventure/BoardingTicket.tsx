@@ -14,6 +14,7 @@ type BoardingTicketProps = {
   branch: "mountain" | "coast" | undefined;
   carriageName: string;
   mode: "solo" | "group";
+  synchronizedTrip?: boolean;
   tripCode?: string;
 };
 
@@ -27,6 +28,7 @@ export function BoardingTicket({
   branch,
   carriageName,
   mode,
+  synchronizedTrip = false,
   tripCode,
 }: BoardingTicketProps) {
   const validStudyDuration = Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= 240;
@@ -73,7 +75,7 @@ export function BoardingTicket({
           </g>
         </svg>
         <span className="boarding-ticket__mode">
-          {mode === "group" ? "Cùng đoàn" : "Một mình"}
+          {mode === "group" ? (synchronizedTrip ? "Cùng chuyến" : "Cùng đoàn") : "Một mình"}
         </span>
       </header>
 
