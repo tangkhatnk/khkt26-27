@@ -554,6 +554,39 @@ it("replays and settles a bound synchronized legacy session after its fixed dead
   }
 });
 
+it("rejects a solo session claiming another member’s reserved trip session ID", async () => {
+  const sessionId = randomUUID();
+  const { world, groupId } = await seedLegacyTrip({
+    members: [otherUserId],
+    status: "departed",
+    participants: { [otherUserId]: { status: "bound", sessionId } },
+  });
+  const started = Date.now() - 60_000;
+  const ended = started + 30_000;
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/adventure/sessions",
+    headers,
+    payload: {
+      id: sessionId,
+      groupId: null,
+      goal: "Review the cell structure",
+      topic: "biology",
+      target: 60,
+      started,
+      ended,
+      segments: [{ start: started, end: ended, kind: "focus" }],
+    },
+  });
+  expect(response.statusCode).toBe(400);
+
+  const after = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+  expect(after[0]!.state.sessions[sessionId]).toBeUndefined();
+  expect(after[0]!.state.groups[groupId]).toEqual(world.groups[groupId]);
+  expect(after[0]!.state.people[otherUserId]).toEqual(world.people[otherUserId]);
+});
+
 it("keeps a bound synchronized member's leave and legacy settlement path", async () => {
   const startedAt = Date.now();
   const endsAt = startedAt + 60_000;
