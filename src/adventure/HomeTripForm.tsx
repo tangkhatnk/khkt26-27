@@ -25,7 +25,7 @@ function HomeTripFormView({ draftRef, topics, hasActiveTrip, onPrepare }: Props)
         đi một chặng xa.
       </h2>
       <p>
-        Mỗi phút tập trung nuôi lớn toa tàu và mở ra vùng đất mới.
+        Chọn mục tiêu và thời lượng phù hợp để bắt đầu buổi học.
       </p>
       <div className="ticket-divider" />
       <label className="field-label" htmlFor="quick-goal">
@@ -62,7 +62,7 @@ function HomeTripFormView({ draftRef, topics, hasActiveTrip, onPrepare }: Props)
         className="primary"
         onClick={() => onPrepare({ ...draftRef.current })}
       >
-        {hasActiveTrip ? "Tiếp tục chuyến đang học" : "Chuẩn bị lên tàu"} <span>→</span>
+        {hasActiveTrip ? "Tiếp tục chuyến đang học" : "Chuẩn bị buổi học"} <span>→</span>
       </button>
       <small className="ticket-footnote">
         ♧ Đi một mình cũng là một hành trình đẹp.
