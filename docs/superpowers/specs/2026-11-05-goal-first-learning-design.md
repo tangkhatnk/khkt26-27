@@ -90,7 +90,7 @@ Quiz chuẩn bị nền cho khách hoặc tài khoản bắt đầu ở trạng 
 
 ### Hợp đồng API kế hoạch
 
-Backend sở hữu schema và kiểu `StudyPlanRequest`/`StudyPlanResponse` trong `backend/src/studyPlanSchemas.ts`. Frontend chỉ nhập kiểu; bộ kiểm tra trạng thái cục bộ phải khớp cùng các giới hạn.
+Backend sở hữu các DTO TypeScript không phụ thuộc runtime trong `backend/src/studyPlanContracts.ts`; `backend/src/studyPlanSchemas.ts` kiểm tra và tái xuất đúng các kiểu `StudyPlanRequest`/`StudyPlanResponse`. Frontend chỉ nhập DTO; bộ kiểm tra trạng thái cục bộ phải khớp cùng các giới hạn.
 
 - Account: `POST /api/v1/study-plans`; khách: `POST /api/v1/ai/guest/study-plans`. Hai đường dùng cùng provider và schema, giữ cơ chế xác thực tương ứng, giới hạn tốc độ và `Cache-Control: no-store`.
 - Request strict, giới hạn body tối đa 256 KiB: `goal` chuỗi trim 3–500 ký tự; `topic` tùy chọn nhãn 1–100 ký tự; `level` tùy chọn chuỗi trim 1–100 ký tự; không có trường confidence. `preferredMinutes` số nguyên 1–240; `sourceText` tùy chọn có ít nhất 10 ký tự không trắng và tối đa 50.000 ký tự; `sourceFingerprint` tùy chọn SHA-256 hex 64 ký tự. Hai trường nguồn phải cùng có hoặc cùng vắng. Hash đúng byte UTF-8 của chuỗi nguồn được gửi, không trim hoặc biến đổi trước khi băm; máy chủ xác minh chuỗi đó.
