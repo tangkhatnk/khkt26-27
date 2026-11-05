@@ -29,6 +29,8 @@ export type ActiveTrip = {
   syncClock?: boolean;
   /** Server minus device clock offset sampled from an ordinary snapshot. */
   clockOffsetMs?: number;
+  /** Server minus device offset captured when a private guest AI session starts. */
+  serverAnchorOffsetMs?: number;
   started: number;
   lastAt: number;
   segments: Segment[];
@@ -57,9 +59,10 @@ export function isDeviceClockBehind(lastAt: number, readClock: () => number = Da
   return readClock() < lastAt;
 }
 
-export function tripClockNow(s: Pick<ActiveTrip, "syncClock" | "clockOffsetMs" | "lastAt">, clientNow: number): number {
-  if (!s.syncClock) return clientNow;
-  const converted = s.clockOffsetMs === undefined ? Number.NaN : serverTimeFromClientTime(clientNow, s.clockOffsetMs);
+export function tripClockNow(s: Pick<ActiveTrip, "syncClock" | "clockOffsetMs" | "serverAnchorOffsetMs" | "lastAt">, clientNow: number): number {
+  const offset = s.syncClock ? s.clockOffsetMs : s.serverAnchorOffsetMs;
+  if (!s.syncClock && s.serverAnchorOffsetMs === undefined) return clientNow;
+  const converted = offset === undefined ? Number.NaN : serverTimeFromClientTime(clientNow, offset);
   return Number.isFinite(converted) ? converted : s.lastAt;
 }
 
@@ -75,8 +78,8 @@ export function scheduledBreakSegmentsThrough(
     .filter((segment) => segment.end > segment.start);
 }
 
-/** Begin a bound session at the shared start without crediting work before local observation. */
-export function startSynchronizedSession(value: ActiveTrip, observedAt: number, foreground: boolean): ActiveTrip {
+/** Seed a server-timed session through local observation without crediting earlier work. */
+function startServerObservedSession(value: ActiveTrip, observedAt: number, foreground: boolean): ActiveTrip {
   const deadline = value.started + totalDuration(value) * 1000;
   const at = Math.max(value.started, Math.min(deadline, observedAt));
   const segments = scheduledBreakSegmentsThrough(value.started, value.target, value.breakPlan, at);
@@ -90,6 +93,16 @@ export function startSynchronizedSession(value: ActiveTrip, observedAt: number, 
       ? { observedAt: undefined, awayCounted: undefined }
       : { observedAt: at, awayCounted: true }),
   };
+}
+
+/** Begin a bound session at the shared start without crediting work before local observation. */
+export function startSynchronizedSession(value: ActiveTrip, observedAt: number, foreground: boolean): ActiveTrip {
+  return startServerObservedSession(value, observedAt, foreground);
+}
+
+/** Anchor guest focus at the fresh response time while retaining the original server deadline. */
+export function startGuestAnchoredSession(value: ActiveTrip, serverNow: number, foreground: boolean): ActiveTrip {
+  return startServerObservedSession(value, serverNow, foreground);
 }
 
 export function focused(s: ActiveTrip): number {

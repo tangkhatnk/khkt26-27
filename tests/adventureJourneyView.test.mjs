@@ -123,6 +123,83 @@ test("quiz generation exposes a distinct primary action", () => {
   assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
 });
 
+test("a saved private quiz grade remains visible when the guest credential is gone", () => {
+  const questionId = "123e4567-e89b-42d3-a456-426614174000";
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "guest",
+    session: { id: "session-a", topic: "biology", goal: "Review cells" },
+    draft: {
+      count: 1,
+      requestedCount: 1,
+      guestQuizId: "private-quiz-a",
+      questions: [{
+        id: questionId,
+        question: "Which structure stores genetic information?",
+        options: ["Cell wall", "Nucleus", "Ribosome", "Cytoplasm"],
+      }],
+      answers: { [questionId]: 1 },
+      guestGrade: {
+        score: 1,
+        total: 1,
+        feedback: [{
+          questionId,
+          question: "Which structure stores genetic information?",
+          options: ["Cell wall", "Nucleus", "Ribosome", "Cytoplasm"],
+          selected: 1,
+          correctIndex: 1,
+          correct: true,
+          explanation: "The nucleus contains most of the cell's genetic material.",
+          knowledgePoint: "Cell structure",
+        }],
+      },
+    },
+    canUseAI: false,
+    isGuest: true,
+    needsLogin: false,
+    onGenerate: async () => ({ questions: [], guestQuizId: "private-quiz-a" }),
+    onSaveDraft() {},
+    onGrade: async () => ({}),
+    onLogin() {},
+    onStartReview() {},
+  }));
+
+  assert.match(markup, /Điểm: 1\/1/u);
+  assert.match(markup, /The nucleus contains most of the cell&#x27;s genetic material\./u);
+  assert.doesNotMatch(markup, /hết hạn|Đăng nhập để tạo quiz AI/u);
+});
+
+test("an ungraded private quiz asks the learner to regenerate the expired deck", () => {
+  const questionId = "123e4567-e89b-42d3-a456-426614174001";
+  const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
+    ownerId: "guest",
+    session: { id: "session-b", topic: "biology", goal: "Review cells" },
+    draft: {
+      count: 1,
+      requestedCount: 1,
+      guestQuizId: "private-quiz-b",
+      questions: [{
+        id: questionId,
+        question: "Which structure stores genetic information?",
+        options: ["Cell wall", "Nucleus", "Ribosome", "Cytoplasm"],
+      }],
+      answers: {},
+    },
+    canUseAI: true,
+    isGuest: true,
+    needsLogin: false,
+    onGenerate: async () => ({ questions: [], guestQuizId: "private-quiz-b" }),
+    onSaveDraft() {},
+    onGrade: async () => ({}),
+    onLogin() {},
+    onStartReview() {},
+  }));
+
+  assert.match(markup, /Bộ câu hỏi này không còn gắn với phiên AI riêng tư hiện tại\. Hãy tạo lại bộ câu hỏi trước khi trả lời\./u);
+  assert.match(markup, /Tạo lại câu hỏi bằng AI/u);
+  assert.match(markup, /<fieldset disabled="">/u);
+  assert.doesNotMatch(markup, /Đăng nhập/u);
+});
+
 test("a skipped review stays closed after the session and offers an explicit opt-in", () => {
   const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
     ownerId: "owner-a",
@@ -226,7 +303,7 @@ test("corrected quiz metrics stay separate from the original grade feedback", ()
   assert.match(markup, /Original explanation\./u);
 });
 
-test("a corrected trip topic keeps the original quiz score and feedback visible", () => {
+test("a corrected session topic keeps the original quiz score and feedback visible", () => {
   const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
     ownerId: "owner-a",
     session: {
@@ -255,7 +332,7 @@ test("a corrected trip topic keeps the original quiz score and feedback visible"
     onStartReview: () => {},
   }));
 
-  assert.match(markup, /Chủ đề chuyến đã được hiệu chỉnh; điểm và phản hồi dưới đây vẫn là kết quả chấm ban đầu\./u);
+  assert.match(markup, /Chủ đề phiên học đã được hiệu chỉnh; điểm và phản hồi dưới đây vẫn là kết quả chấm ban đầu\./u);
   assert.match(markup, /Điểm chấm ban đầu: 0\/1/u);
   assert.match(markup, /Original feedback stays here\./u);
   assert.doesNotMatch(markup, /Điểm theo lịch sử đã điều chỉnh/u);

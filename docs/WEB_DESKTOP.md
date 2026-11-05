@@ -1,6 +1,14 @@
 # Viễn Du — web và Windows
 
-Ứng dụng Vite trên trình duyệt là trải nghiệm chính. Electron đóng gói cùng bản web đã build trong `dist/`; khách có thể học ngoại tuyến, còn tài khoản dùng API để đồng bộ và tham gia các chuyến học có kế hoạch.
+Ứng dụng Vite trên trình duyệt là trải nghiệm chính. Màn hình mặc định **Người bạn học** là lộ trình bài học ngắn theo khối lớp và môn, đi theo thứ tự mục tiêu, tài liệu, tập trung, truy hồi và đánh giá. Electron đóng gói cùng bản web đã build trong `dist/`.
+
+Học cá nhân, lộ trình bài học và OCR cục bộ dùng được khi không có tài khoản; tiến độ lộ trình được lưu trên thiết bị theo chủ sở hữu hiện tại và không nằm trong đồng bộ tài khoản. Nhật ký, lịch sử và báo cáo vẫn mở từ điều hướng chính. Tài khoản dùng cho đồng bộ tài khoản và chuyến học nhóm có chia sẻ mục tiêu, môn học, thời lượng kế hoạch; nguồn học và câu trả lời vẫn riêng tư.
+
+### AI khách không cần tài khoản
+
+AI là tùy chọn và chỉ chạy khi có mạng, backend có `GEMINI_API_KEY`, và người học chủ động chọn tác vụ AI. Đọc tài liệu yêu cầu xác nhận gửi nội dung. Máy chủ cấp credential khách ngẫu nhiên, lưu bản băm và giữ bộ câu hỏi, khóa đáp án, trạng thái bài tập, lời giải cùng phản hồi chi tiết trong Redis riêng theo credential; các bản ghi riêng tư hết hạn sau 7 ngày. Chúng không được chuyển vào tài khoản khi người học đăng nhập. Lịch sử ẩn danh chỉ nhận phần tóm tắt phiên được phép, không nhận prompt hoặc phản hồi chi tiết.
+
+Backend giới hạn cấp credential theo IP/toàn hệ thống, yêu cầu theo IP, đơn vị sử dụng theo credential và từng loại tác vụ, cùng một trần đơn vị toàn hệ thống. Bộ đếm Redis được đặt nguyên tử trước khi gọi nhà cung cấp; hết hạn mức trả `429`, Redis không dùng được thì guest AI bị từ chối. Các mặc định có thể chỉnh bằng `GUEST_AI_*` trong `backend/.env.example`; đơn vị này là mức sử dụng nội bộ, không phải số token được nhà cung cấp tính phí. `REDIS_URL` và `GEMINI_API_KEY` chỉ cấu hình trên backend, không đưa vào `VITE_*`.
 
 ## Chạy web
 
@@ -15,7 +23,7 @@ npm start
 
 Để xem bản production, dừng máy chủ phát triển trước vì preview cũng dùng cổng 8084 và giữ terminal mở:
 
-`npm run preview` chỉ phục vụ giao diện đã build trong `dist/`. Khi không cấu hình API riêng, các yêu cầu `/api/*` được chuyển tới `127.0.0.1:3000`. Để đăng nhập, đồng bộ và dùng AI trên preview, khởi động API trong một terminal riêng và giữ nó chạy:
+`npm run preview` chỉ phục vụ giao diện đã build trong `dist/`. Khi không cấu hình API riêng, các yêu cầu `/api/*` được chuyển tới `127.0.0.1:3000`. Khởi động API trong một terminal riêng để đăng nhập, đồng bộ, dùng AI tài khoản hoặc AI khách:
 
 ```bash
 npm --prefix backend run dev:local
@@ -52,7 +60,7 @@ npm --prefix backend run build
 npm --prefix backend start
 ```
 
-`GEMINI_API_KEY` chỉ nằm trên backend. Không có key thì các tính năng đọc tài liệu, tạo câu hỏi, bản ôn tập và bài tập bằng AI chưa dùng được; phiên học vẫn lưu bình thường, không thay bằng bộ câu hỏi có sẵn.
+`GEMINI_API_KEY` chỉ nằm trên backend. Không có key thì đọc tài liệu, tạo câu hỏi, bản ôn tập và bài tập bằng AI chưa dùng được; lộ trình, câu hỏi curated ngoại tuyến và phiên học thông thường vẫn hoạt động. Guest AI cũng cần `REDIS_URL` để lưu credential, quota và trạng thái riêng tư; Redis lỗi thì các yêu cầu guest AI bị từ chối. Điều chỉnh các biến `GUEST_AI_*` theo lưu lượng dự kiến; `GUEST_AI_GLOBAL_DAILY_UNITS` là trần đơn vị nội bộ, không phải hóa đơn token.
 
 ## Chạy thử bằng Electron
 
@@ -84,7 +92,7 @@ Lệnh này bỏ cả chỉnh sửa tài nguyên EXE, nên bản đóng gói ch�
 
 Electron dùng origin `viendu://app`, renderer sandbox, context isolation và CSP. Giao diện không có quyền Node hay IPC; cửa sổ ngoài bị chặn.
 
-## Quy tắc đã triển khai
+## Chi tiết luồng hành trình phụ
 
 - Thời gian gợi ý 15/25/45/60 phút và ô tùy chỉnh 1–240 phút tại ga chính lẫn tấm vé; chặn số thập phân và giá trị ngoài giới hạn.
 - Trang chủ chọn chủ đề, nhập nhanh mục tiêu và thời gian; bước chuẩn bị hiển thị vé tàu cùng lộ trình phiên học. Mục “Sửa vé” là thẻ chỉnh sửa nổi bật với biểu tượng, nhãn và nút mở/thu gọn; chủ đề đã chọn ở ga chính được giữ trên vé và khi bắt đầu phiên. Lịch nhiều lần nghỉ hiện tổng thời lượng, số chặng học và số lần nghỉ; mở “Xem lịch từng chặng” để xem thứ tự chi tiết.
@@ -111,17 +119,17 @@ Electron dùng origin `viendu://app`, renderer sandbox, context isolation và CS
 - Trạm dừng chân được chọn trước phiên: tối đa 10 lượt, mỗi lượt 1–30 phút, ít hơn số phút học. Giải lao tự chia đều và tự tiếp tục. Ví dụ 15 phút học và 1 lượt nghỉ 5 phút tạo lịch học 7:30 → nghỉ 5:00 → học 7:30. Đồng hồ hiển thị thời gian còn lại của chặng hiện tại, kèm số chặng và lượt nghỉ sắp tới; không đếm gộp cả hai chặng học. Tổng thời lượng cộng thêm giải lao; thời gian nghỉ không tạo XP hay xao nhãng và được ghi riêng trong nhật ký/lịch sử. Rời máy trong giờ học vẫn tính xao nhãng; rời trong giải lao rồi tiếp tục vắng khi học trở lại được tính một lần.
 - Hàng đợi offline có mã phiên cố định; retry không cấp trùng. Máy chủ kiểm tra thời gian, chồng phiên, quyền đoàn, cap 60 phút/ngày theo múi giờ đoàn, giữ phần lẻ và dư tại đích.
 - Trong một chuyến, mục tiêu, chủ đề và thời lượng kế hoạch được chia sẻ với thành viên; nguồn học, đề bài gửi AI, câu trả lời và log gián đoạn của từng người không được chia sẻ.
-- Tạo câu hỏi bằng AI là tùy chọn, chọn 1–30 câu từ chủ đề, mục tiêu và tài liệu của phiên. Câu trả lời đang làm được lưu theo tài khoản trên thiết bị. Kết quả và giải thích từng câu được chấm trên máy chủ và ghi một lần. Câu sai chỉ ra các kiến thức cần ôn trong bộ câu đã làm; có lựa chọn mở một phiên mới để ôn lại, giữ tài liệu và chủ đề. Kết quả cũ chỉ có điểm không thể dựng lại các câu sai.
+- Lộ trình mặc định dùng câu tự kiểm tra curated có thể làm ngoại tuyến. Trong luồng chuyến phụ, tạo quiz AI là tùy chọn, chọn 1–30 câu từ chủ đề, mục tiêu và nguồn đã xác nhận. Câu trả lời tài khoản lưu theo tài khoản trên thiết bị; quiz khách được chấm riêng theo credential Redis và không ghi vào `Session.quiz` hay lịch sử công khai. Quiz khách ở phần tổng kết vẫn có thể dùng sau phiên ngoại tuyến hoặc kết thúc sớm, không cần mốc bắt đầu AI. Câu sai chỉ ra kiến thức cần ôn; kết quả cũ chỉ có điểm thì không dựng lại được câu sai.
 - Nhật ký học tập hiển thị rõ số lần xao nhãng, tỷ lệ thời gian tập trung trên thời gian thực tế đã học, loại trừ giải lao và điểm câu hỏi riêng biệt. Nhãn mức tập trung dùng các ngưỡng mô tả 80% và 50%; không phải chẩn đoán hay điểm học lực chung.
 - Kinh nghiệm toa (XP) ghi nhận nỗ lực: 60 giây học hợp lệ = 1 XP, phần giây lẻ cộng dồn. Điểm câu hỏi không đổi XP; thời gian rời phiên không tạo XP.
-- Lịch sử chuyến đi tự động liệt kê các phiên đã lưu, kể cả phiên khách sau khi đồng bộ lên máy chủ. Bản ghi ẩn danh gồm mã chuyến và mã người học dạng HMAC, tóm tắt mục tiêu tối đa 200 ký tự, chủ đề, thời điểm bắt đầu/kết thúc, thời gian học và giải lao, loại thiết bị tổng quát, số lần xao nhãng và điểm quiz sau khi chấm. Tóm tắt được hiển thị tự động, vì vậy không đưa thông tin riêng tư vào mục tiêu. Lịch sử không gửi email, mã tài khoản, tài liệu hay câu trả lời chi tiết thành các trường riêng. Loại PC/iOS/Android/iPad/Tablet được ghi lúc bắt đầu phiên; phiên cũ không có loại thiết bị hiển thị “Chưa ghi nhận”. Không lưu chuỗi user-agent hoặc thông tin phần cứng chi tiết. Thời gian tập trung được tính từ các khoảng học hợp lệ; điểm quiz chỉ do máy chủ chấm. Có phân trang và CSV tối đa 10.000 phiên đã lưu.
+- Lịch sử chuyến đi tự động liệt kê các phiên đã lưu, kể cả phần tóm tắt phiên khách sau khi đồng bộ lên máy chủ. Bản ghi ẩn danh gồm mã chuyến và mã người học dạng HMAC, tóm tắt mục tiêu tối đa 200 ký tự, chủ đề, thời điểm bắt đầu/kết thúc, thời gian học và giải lao, loại thiết bị tổng quát, số lần xao nhãng và điểm phiên được phép lưu. Tóm tắt được hiển thị tự động, vì vậy không đưa thông tin riêng tư vào mục tiêu. Lịch sử không gửi email, mã tài khoản, tài liệu hoặc phản hồi chi tiết thành các trường riêng. Bộ AI khách, khóa đáp án và phản hồi riêng tư lưu trong Redis theo credential bảy ngày, không nằm trong bản ghi lịch sử. Có phân trang và CSV tối đa 10.000 phiên đã lưu.
 - Web Locks ngăn hai cửa sổ cùng sửa trạng thái cá nhân. Có xuất bản sao dữ liệu riêng.
 - Cảnh tàu dùng SVG 2D với nhiều lớp parallax, bánh xe, hơi nước và nhịp chuyển động nhẹ; dừng trong giải lao, khi rời phiên, ngoài viewport hoặc ẩn cửa sổ và hỗ trợ reduced motion. Bản đồ tự đưa vùng quanh tàu vào khung khi mở, giữ nguyên hình học tuyến và lớp sương che vùng chưa tới. Bộ đọc tài liệu tải riêng; ứng dụng không cần WebGL hay Three.js.
 - Danh tính tài khoản được giữ khi mở lại offline, yêu cầu đăng nhập lại trước khi đồng bộ nếu hết phiên. Đăng xuất dọn phiên đăng nhập kể cả khi mất mạng; dữ liệu hành trình vẫn tách theo chủ sở hữu. Dữ liệu lưu bị hỏng có màn hình xuất bản sao và khôi phục, không âm thầm ghi đè.
 
 ## Giới hạn phát hành cần biết
 
-Ứng dụng hỗ trợ học cá nhân và chuyến học có kế hoạch cho nhóm tối đa 6 người. Tạo/chia sẻ chuyến, đồng bộ tài khoản và các tính năng AI cần backend; tính năng AI cũng cần `GEMINI_API_KEY`. Chưa có học nhóm trực tiếp, và bản desktop không tự đóng ứng dụng khác trên máy.
+Ứng dụng hỗ trợ học cá nhân không cần tài khoản và chuyến học có kế hoạch cho nhóm tối đa 6 người. Tạo/chia sẻ chuyến và đồng bộ dữ liệu tài khoản cần đăng nhập cùng backend. AI tài khoản và AI khách đều cần backend trực tuyến, `GEMINI_API_KEY`, và hạn mức còn dùng; AI khách không cần tài khoản nhưng cần Redis để cấp credential, kiểm tra quota và giữ trạng thái riêng tư bảy ngày. Chưa có học nhóm trực tiếp, và bản desktop không tự đóng ứng dụng khác trên máy.
 
 Backend dùng aggregate JSONB có row lock để quyết toán thành viên và ledger trong giao dịch. Thiết kế này phù hợp pilot nhóm nhỏ; cần phân tách aggregate theo journey và lập chính sách lưu/xóa dữ liệu trước khi mở rộng quy mô. Kiểm chứng thời gian dựa trên tự khai báo, không phải chống gian lận tuyệt đối. Quiz AI live cần key; Windows installer cần thử trên máy Windows thật.
 

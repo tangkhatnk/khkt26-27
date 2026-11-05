@@ -96,9 +96,9 @@ function providerApiError(error: unknown, timedOut: boolean): ApiError {
   if (status === 429 || hasCode("RESOURCE_EXHAUSTED"))
     return new ApiError(429, "provider-quota-exceeded", "Gemini đã vượt hạn mức. Hãy kiểm tra hạn mức trong Google AI Studio rồi thử lại.");
   if (status === 404 || hasCode("NOT_FOUND"))
-    return new ApiError(502, "provider-model-unavailable", "Model Gemini đã chọn không khả dụng. Hãy đổi GEMINI_MODEL sang model hiện được hỗ trợ trong Google AI Studio.");
+    return new ApiError(502, "provider-model-unavailable", "Model Gemini tạo câu hỏi không khả dụng. Hãy kiểm tra GEMINI_QUESTION_MODEL.");
   if (status === 400)
-    return new ApiError(502, "provider-configuration-error", "Gemini từ chối cấu hình yêu cầu. Hãy kiểm tra GEMINI_MODEL và cấu hình đầu ra.");
+    return new ApiError(502, "provider-configuration-error", "Gemini từ chối cấu hình yêu cầu. Hãy kiểm tra GEMINI_QUESTION_MODEL và cấu hình đầu ra.");
   return new ApiError(503, "service-unavailable", "Gemini hiện không khả dụng. Vui lòng thử lại sau.");
 }
 
@@ -153,7 +153,7 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
   const controller = new AbortController();
   const deadline = Date.now() + GENERATION_TIMEOUT_MS;
   const timeout = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS);
-  const primaryModel = config.GEMINI_MODEL.trim();
+  const primaryModel = config.GEMINI_QUESTION_MODEL.trim();
   const fallbackModel = config.GEMINI_FALLBACK_MODEL.trim();
   const fallbackEnabled = Boolean(fallbackModel && fallbackModel !== primaryModel);
   const primaryBudgetMs = fallbackEnabled
@@ -208,7 +208,7 @@ export async function generateGeminiQuiz(input: GenerateQuizInput) {
     return response.text ?? "";
   };
   try {
-    let repairModel = config.GEMINI_MODEL;
+    let repairModel = config.GEMINI_QUESTION_MODEL;
     let text: string;
     try {
       text = await generateText(repairModel, undefined, primaryBudgetMs);

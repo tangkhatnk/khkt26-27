@@ -50,6 +50,7 @@ vi.mock("../src/gemini.js", () => ({
 import { generateGeminiQuiz } from "../src/gemini.js";
 vi.mock("../src/materialReading.js", () => ({
   readMaterialDocument: vi.fn().mockResolvedValue({text: "[Trang 1]\nCater for: phục vụ, đáp ứng"}),
+  summarizeMaterialText: vi.fn().mockResolvedValue({summary: "Tóm tắt tài liệu"}),
 }));
 import { readMaterialDocument } from "../src/materialReading.js";
 const pg = new PGlite();

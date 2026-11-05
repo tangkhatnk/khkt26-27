@@ -80,9 +80,9 @@ function providerApiError(error: unknown, timedOut: boolean): ApiError {
   if (status === 429 || hasCode("RESOURCE_EXHAUSTED"))
     return new ApiError(429, "provider-quota-exceeded", "Gemini đã vượt hạn mức. Hãy kiểm tra hạn mức trong Google AI Studio rồi thử lại.");
   if (status === 404 || hasCode("NOT_FOUND"))
-    return new ApiError(502, "provider-model-unavailable", "Model tạo tài liệu ôn tập không khả dụng. Hãy kiểm tra GEMINI_MODEL.");
+    return new ApiError(502, "provider-model-unavailable", "Model gia sư AI không khả dụng. Hãy kiểm tra GEMINI_TUTOR_MODEL.");
   if (status === 400)
-    return new ApiError(502, "provider-configuration-error", "Gemini từ chối cấu hình yêu cầu. Hãy kiểm tra GEMINI_MODEL và cấu hình đầu ra.");
+    return new ApiError(502, "provider-configuration-error", "Gemini từ chối cấu hình yêu cầu. Hãy kiểm tra GEMINI_TUTOR_MODEL và cấu hình đầu ra.");
   return new ApiError(503, "service-unavailable", "Gemini hiện không khả dụng. Vui lòng thử lại sau.");
 }
 
@@ -162,12 +162,12 @@ export async function generateStudyGuide(input: StudyGuideInput, callerSignal?: 
   let text: string;
   try {
     try {
-      text = await generateText(config.GEMINI_MODEL, PRIMARY_MODEL_TIMEOUT_MS);
+      text = await generateText(config.GEMINI_TUTOR_MODEL, PRIMARY_MODEL_TIMEOUT_MS);
     } catch (error) {
       if (callerSignal?.aborted) throw requestCancelledError();
       if (deadlineExpired || controller.signal.aborted) throw providerApiError(error, true);
       const fallbackModel = config.GEMINI_FALLBACK_MODEL.trim();
-      const primaryModel = config.GEMINI_MODEL.trim();
+      const primaryModel = config.GEMINI_TUTOR_MODEL.trim();
       const attemptTimedOut = error instanceof ModelAttemptTimeoutError;
       if ((!attemptTimedOut && !isProviderTimeoutError(error) && !isOverloadedProviderError(error)) ||
           !fallbackModel || fallbackModel === primaryModel)

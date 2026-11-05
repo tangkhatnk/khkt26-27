@@ -11,6 +11,7 @@ let vite;
 let helpers;
 let components;
 let client;
+let guestApi;
 let api;
 let StudyExerciseTextImportController;
 let emptyTextImport;
@@ -27,6 +28,7 @@ before(async () => {
   helpers = await vite.ssrLoadModule("/src/adventure/studyExercises.ts");
   components = await vite.ssrLoadModule("/src/adventure/StudyExercisePreparation.tsx");
   client = await vite.ssrLoadModule("/src/services/studyExercisesApi.ts");
+  guestApi = await vite.ssrLoadModule("/src/services/guestAiApi.ts");
   api = await vite.ssrLoadModule("/src/services/api.ts");
   ({ StudyExerciseTextImportController, EMPTY_STUDY_EXERCISE_TEXT_IMPORT: emptyTextImport } =
     await vite.ssrLoadModule("/src/adventure/studyExerciseTextImport.ts"));
@@ -475,7 +477,7 @@ test("solution presentation remains hidden during focus and until summary releas
   assert.equal(helpers.canRevealStudyExerciseSolutions("summary", "ready"), true);
 });
 
-test("guest preparation offers sign-in without rendering private source or a preparation form", () => {
+test("unauthenticated account preparation offers sign-in without exposing private source text", () => {
   const markup = renderToStaticMarkup(React.createElement(components.StudyExercisePreparation, {
     plannedSessionId: "session-a",
     authenticated: false,
@@ -554,6 +556,64 @@ test("API client uses owner-scoped preparation, session lookup, bind, invalidati
   }
 });
 
+test("guest exercise calls stay under the GuestAI route and cancel with the private request id", async () => {
+  const previousWindow = globalThis.window;
+  const previousStorage = globalThis.sessionStorage;
+  const previousFetch = globalThis.fetch;
+  const values = new Map();
+  const storage = {
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+  const calls = [];
+  globalThis.window = { location: { href: "http://localhost/" }, sessionStorage: storage };
+  globalThis.sessionStorage = storage;
+  guestApi.clearGuestAiCredential();
+  storage.setItem("viendu:guest-ai-credential:v1", JSON.stringify({
+    token: "opaque-guest-token",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }));
+  globalThis.fetch = async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    calls.push({
+      path,
+      method: init.method ?? "GET",
+      authorization: new Headers(init.headers).get("authorization"),
+      body: init.body,
+    });
+    const body = path.endsWith("/solution") ? solutions
+      : path.includes("/requests/") || path.endsWith("/bind") ? { ok: true }
+        : { ...preparation, id: "server-exercise-id", requestId: "request-a" };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const controller = new AbortController();
+    const result = await client.prepareStudyExercises({
+      requestId: "request-a", plannedSessionId: "session-a", mode: "provided", text: "Exact problem",
+    }, controller.signal, true);
+    await client.getStudyExercisesForSession("session-a", controller.signal, true);
+    await client.bindStudyExercises("session-a", controller.signal, true, result.id);
+    await client.invalidateStudyExercises("session-a", client.studyExerciseRequestId(result), controller.signal, true);
+    await client.requestStudyExerciseSolutions(result.id, controller.signal, true);
+
+    assert.equal(client.studyExerciseRequestId(result), "request-a");
+    assert.deepEqual(calls.map(call => call.method), ["POST", "GET", "POST", "DELETE", "POST"]);
+    assert.ok(calls.every(call => call.path.startsWith("/api/v1/ai/guest/study-exercises")));
+    assert.ok(calls.every(call => call.authorization === "GuestAI opaque-guest-token"));
+    assert.deepEqual(JSON.parse(calls[2].body), { exerciseId: "server-exercise-id" });
+    assert.match(calls[3].path, /\/session\/session-a\/requests\/request-a$/u);
+    assert.ok(calls.every(call => !call.path.startsWith("/api/v1/study-exercises")));
+  } finally {
+    guestApi.clearGuestAiCredential();
+    globalThis.fetch = previousFetch;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousStorage === undefined) delete globalThis.sessionStorage;
+    else globalThis.sessionStorage = previousStorage;
+  }
+});
+
 test("study exercise AI requests get the bounded AI timeout while reads and mutations keep the normal limit", () => {
   assert.equal(api.apiRequestTimeoutMs("/study-exercises"), 100_000);
   assert.equal(api.apiRequestTimeoutMs("/study-exercises/request-a/solution"), 100_000);
@@ -563,4 +623,6 @@ test("study exercise AI requests get the bounded AI timeout while reads and muta
   assert.equal(api.apiRequestTimeoutMs("/adventure"), 30_000);
   assert.equal(api.apiRequestTimeoutMs("/quizzes/generate"), 100_000);
   assert.equal(api.apiRequestTimeoutMs("/materials/read"), 115_000);
+  assert.equal(api.apiRequestTimeoutMs("/ai/guest/study-exercises"), 100_000);
+  assert.equal(api.apiRequestTimeoutMs("/ai/guest/study-exercises/session/session-a"), 30_000);
 });

@@ -234,6 +234,61 @@ test('late synchronized snapshots convert fast and slow device clocks and retain
   }
 });
 
+test('guest exercise timer follows its server start across positive and negative device skew', () => {
+  const started = 1_500_000;
+  const plan = { count: 1, seconds: 60 };
+  for (const deviceSkew of [240_000, -180_000]) {
+    const clientStart = started + deviceSkew;
+    const serverAnchorOffsetMs = estimateServerClockOffset(started, clientStart);
+    const anchored = {
+      ...trip(120),
+      started,
+      lastAt: started,
+      serverAnchorOffsetMs,
+      breakPlan: plan,
+    };
+    const serverAt = (elapsedMs) => serverTimeFromClientTime(clientStart + elapsedMs, serverAnchorOffsetMs);
+
+    assert.equal(serverAnchorOffsetMs, -deviceSkew);
+    assert.equal(focus.tripClockNow(anchored, clientStart + 10_000), started + 10_000);
+    const completed = tick(anchored, serverAt(200_000));
+    assert.equal(focused(completed), 120);
+    assert.equal(sessionEndAt(completed, serverAt(200_000)), started + 180_000);
+    assert.equal(elapsedSeconds(completed, serverAt(200_000)), 120);
+    assert.deepEqual(completed.segments.map(({ kind, start, end }) => [kind, start, end]), [
+      ['focus', started, started + 60_000],
+      ['break', started + 60_000, started + 120_000],
+      ['focus', started + 120_000, started + 180_000],
+    ]);
+  }
+});
+
+test('a delayed guest start replay keeps the earlier interval uncredited and the original deadline', () => {
+  const started = 2_500_000;
+  const serverNow = started + 75_000;
+  const clientReceive = serverNow + 240_000;
+  const offset = estimateServerClockOffset(serverNow, clientReceive);
+  const plan = { count: 1, seconds: 60 };
+  const replayed = focus.startGuestAnchoredSession({
+    ...trip(120),
+    started,
+    lastAt: started,
+    serverAnchorOffsetMs: offset,
+    breakPlan: plan,
+  }, serverNow, true);
+
+  assert.equal(offset, -240_000);
+  assert.equal(focused(replayed), 0);
+  assert.deepEqual(replayed.segments, [{ start: started + 60_000, end: serverNow, kind: 'break' }]);
+  assert.equal(focus.breakRemainingSeconds(replayed, serverNow), 45);
+  assert.equal(focus.tripClockNow(replayed, clientReceive + 10_000), serverNow + 10_000);
+
+  const finishedAtDeadline = tick(replayed, focus.tripClockNow(replayed, clientReceive + 105_000));
+  assert.equal(focused(finishedAtDeadline), 60);
+  assert.equal(sessionEndAt(finishedAtDeadline, focus.tripClockNow(replayed, clientReceive + 105_000)), started + 180_000);
+  assert.equal(elapsedSeconds(finishedAtDeadline, focus.tripClockNow(replayed, clientReceive + 105_000)), 120);
+});
+
 test('synchronized reconnect does not invent focus before observation and early end uses server time', () => {
   const started = 2_000_000;
   const observedAt = started + 30_000;

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Rea
 import { useBrowserView } from "./navigation";
 import { useAuthStore } from "@/store/authStore";
 import { getAuthGeneration, post, request } from "@/services/api";
+import { postGuestAi, startGuestAiSession } from "@/services/guestAiApi";
 import { summarizeReviewedMaterial } from "@/services/materialSummary";
+import { bindStudyExercises } from "@/services/studyExercisesApi";
 import { AuthForm } from "./AuthForm";
 import { AdminPanel } from "./AdminPanel";
 import { ProfilePanel } from "./ProfilePanel";
@@ -22,7 +24,7 @@ import { createStudyGuideReviewState, hasPendingStudyGuide as hasPendingGuideRev
 import { useStudyFullscreen } from "./useStudyFullscreen";
 import { FocusFullscreenRecovery } from "./FocusFullscreenRecovery";
 import { JourneyView } from "./JourneyView";
-import { TopDownScene } from "./TopDownScene";
+import { FocusStudyCompanion, SessionSummaryCompanion } from "./StudySessionPresentation";
 import { detectDeviceCategory } from "./device";
 import { explorationProgress } from "./exploration";
 import type { MaterialExtractionProgress } from "./materialExtraction";
@@ -43,6 +45,13 @@ import {
 } from "./StudyExercisePreparation";
 import { HomeTripForm } from "./HomeTripForm";
 import {
+  CuratedEvaluation,
+  CuratedEvaluationReceipt,
+  LearningPathHome,
+  LearningPathLessonDetail,
+  LearningPathRetryNotice,
+} from "./LearningPathView";
+import {
   canMarkSynchronizedTripReady,
   isSynchronizedTrip,
   shouldAutoResumeSynchronizedTrip,
@@ -57,6 +66,7 @@ import { QuizPrefetchCoordinator, quizPrefetchScopeKey, type QuizPrefetchScope }
 import { isCurrentQuizPrefetchRequest } from "./quizPrefetchPresentation";
 import {
   startStudyExerciseFocusIfAllowed,
+  isPersistedStudyExerciseSessionCompleted,
   studyExerciseSourcesForSession,
 } from "./studyExerciseSessionFlow";
 import { useStudyExerciseFlow } from "./useStudyExerciseFlow";
@@ -74,10 +84,31 @@ import { GuestHistorySync } from "./GuestHistorySync";
 import { SessionCorrectionNotice } from "./SessionCorrectionNotice";
 import { studyTopics } from "./topics";
 import {
+  CURATED_COURSES,
+  beginLessonRun,
+  completeLessonRun,
+  createLearningPathProgress,
+  finishLessonFocus,
+  interruptedLessonForSession,
+  lessonStates,
+  nextAvailableLesson,
+  selectLearningPathCourse,
+  selectPathLesson,
+  setLessonRunPlan,
+  setLessonRunPhase,
+} from "./learningPath";
+import {
+  dailyStudySummary,
+  difficultySuggestion,
+  durationSuggestion,
+  guestQuizResultsForDailySummary,
+  workedReviewLesson,
+} from "./learningPathInsights";
+import type { CuratedLesson } from "./curatedCurriculum";
+import {
   breakStatus,
   studyStageStatus,
   totalDuration,
-  tripSceneTiming,
   depart,
   elapsedSeconds,
   focused,
@@ -88,6 +119,7 @@ import {
   returnFromBackground,
   sessionEndAt,
   startSynchronizedSession,
+  startGuestAnchoredSession,
   tick,
   tripClockNow,
   type ActiveTrip,
@@ -109,7 +141,7 @@ import {
   type SynchronizedTripDraft,
   type SessionHistoryEntry,
 } from "./storage";
-import { canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidQuizDraft, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts, type QuizDraft, type QuizQuestion } from "./quizDrafts";
+import { canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidGuestQuizDeck, isValidGuestQuizGrade, isValidQuizAssessment, isValidQuizDraft, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts, type GuestQuizQuestion, type QuizDraft, type QuizQuestion } from "./quizDrafts";
 import { analyzeSession, hasSessionCorrections, knowledgeGaps, reviewPlan } from "./learning";
 import {
   localDayKey,
@@ -141,13 +173,11 @@ const stories = [
   "Bình minh lên trên những mái nhà. Mỗi nỗ lực nhỏ đã góp thành chuyến đi này.",
 ];
 const nav = [
-  { id: "station", icon: "⌂", label: "Ga chính" },
-  { id: "map", icon: "⌁", label: "Bản đồ hành trình" },
-  { id: "carriage", icon: "▣", label: "Toa của tôi" },
-  { id: "group", icon: "♧", label: "Chuyến đi chung" },
-  { id: "journal", icon: "▤", label: "Nhật ký học tập" },
-  { id: "experiments", icon: "◎", label: "Lịch sử chuyến đi" },
-  { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo" },
+  { id: "station", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 7.5 10 3l6.5 4.5v9h-13v-9Z"/><path d="M8 16.5v-5h4v5"/></svg>, label: "Lộ trình", mobileLabel: "Lộ trình" },
+  { id: "group", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="6" r="2.5"/><path d="M2.5 17v-1.5a4.5 4.5 0 0 1 9 0V17m1-11a2.5 2.5 0 1 1 0 5m2 2a4 4 0 0 1 3 4v.5"/></svg>, label: "Học cùng bạn", mobileLabel: "Học nhóm" },
+  { id: "journal", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5h12v15H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M7 7h7m-7 4h7m-7 4h4"/></svg>, label: "Nhật ký học tập", mobileLabel: "Nhật ký" },
+  { id: "experiments", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3v7l4 2.5M17 8a7.5 7.5 0 1 1-3-4"/><path d="M14 2.5h4v4"/></svg>, label: "Lịch sử phiên học", mobileLabel: "Lịch sử" },
+  { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo", mobileLabel: "Báo cáo" },
 ];
 const clock = (seconds: number) =>
   `${Math.floor(Math.max(0, seconds) / 60)
@@ -205,7 +235,7 @@ export default function AdventureApp() {
 }
 function AdventureWorkspace() {
   const [requestedView, setView] = useBrowserView();
-  const views = ["station", "map", "carriage", "group", "journal", "experiments", "report", "ticket", "focus", "summary", "account", "admin"];
+  const views = ["station", "lesson", "map", "carriage", "group", "journal", "experiments", "report", "ticket", "focus", "summary", "account", "admin"];
   const view = views.includes(requestedView) ? requestedView : "station";
   const { user, login, logout, offline: authOffline, needsLogin } = useAuthStore();
   const owner = user?.id ?? "guest";
@@ -243,6 +273,7 @@ function AdventureWorkspace() {
   const studyFullscreen = useStudyFullscreen(view === "focus" && hasActiveTrip);
   const [loaded, setLoaded] = useState(false),
     [exclusive, setExclusive] = useState(false);
+  const [showLearningGuide, setShowLearningGuide] = useState(false);
   const [storageError, setStorageError] = useState(false);
   const [clockSkewUnsupported, setClockSkewUnsupported] = useState(false);
   const [serverClockReady, setServerClockReady] = useState(false);
@@ -283,6 +314,7 @@ function AdventureWorkspace() {
   const [quizPrefetch] = useState(() => new QuizPrefetchCoordinator<QuizQuestion[]>());
   const [quizPrefetchUi, setQuizPrefetchUi] = useState<QuizPrefetchUiState | null>(null);
   const quizRequestGeneration = useRef(0);
+  const guestQuizRequest = useRef<AbortController | null>(null);
   const quizPrefetchSaved = useRef(new Set<string>());
   const quizPrefetchLifecycle = useRef({ generation: 0 });
   useEffect(() => {
@@ -412,6 +444,34 @@ function AdventureWorkspace() {
         }
         try {
           const value = readSaved(owner);
+          const pathRun = value.learningPath?.activeRun;
+          if (pathRun && pathRun.phase === "ticket" && !value.active) {
+            const runCourse = CURATED_COURSES.find((course) => course.id === pathRun.courseId);
+            const runLesson = runCourse?.lessons.find((lesson) => lesson.id === pathRun.lessonId && lesson.version === pathRun.lessonVersion);
+            if (runCourse && runLesson) {
+              setDraftTripId(pathRun.sessionId);
+              const draft = {
+                goal: `Học bài: ${runLesson.title}`,
+                topic: runCourse.subjectId,
+                minutes: Math.max(1, Math.floor((pathRun.target ?? runLesson.minutes * 60) / 60)),
+                breakCount: pathRun.breakPlan?.count ?? 0,
+                breakMinutes: pathRun.breakPlan ? pathRun.breakPlan.seconds / 60 : 5,
+              };
+              updateQuickTripDraft(quickTripDraft, draft);
+              setGoal(draft.goal);
+              setTopic(draft.topic);
+              setMinutes(draft.minutes);
+              setBreakCount(draft.breakCount);
+              setBreakMinutes(draft.breakMinutes);
+              setDocumentText(value.notes[pathRun.sessionId] ?? runLesson.content);
+              setMaterials(value.materials?.[pathRun.sessionId] ?? []);
+              setSources(value.sources?.[pathRun.sessionId] ?? [createMaterialSource(runLesson.id, {
+                name: `${runCourse.title} · ${runLesson.title}`,
+                text: runLesson.content,
+                source: "curated",
+              })]);
+            }
+          }
           if (value.active) {
             if (value.active.syncClock && value.active.clockOffsetMs !== undefined)
               serverClockOffsetMs.current = value.active.clockOffsetMs;
@@ -420,6 +480,7 @@ function AdventureWorkspace() {
           if (owner === "guest")
             value.snapshot = snapshot(value.local, owner, Date.now());
           if (commitRef.current(value)) {
+            setShowLearningGuide(false);
             workspaceLive.current = true;
             exclusiveLease.current = true;
             setLoaded(true);
@@ -732,10 +793,55 @@ function AdventureWorkspace() {
   const mapActive = active && !(mode === "group" && group) && active.groupId === null ? active : null;
   const mapProgress = explorationProgress(journey, mapActive ? focused(mapActive) : 0, mapActive?.target);
   const sessions = historySessions(saved, owner);
+  const learningPathProgress = saved.learningPath ?? createLearningPathProgress();
+  const selectedLearningCourse = CURATED_COURSES.find((course) => course.id === learningPathProgress.selectedCourseId) ?? CURATED_COURSES[0];
+  const learningPathCourse = CURATED_COURSES.find((course) => course.id === learningPathProgress.activeRun?.courseId) ?? selectedLearningCourse;
+  const learningPathStates = lessonStates(learningPathCourse, learningPathProgress);
+  const nextLearningLesson = nextAvailableLesson(learningPathCourse, learningPathProgress);
+  const learningDifficulty = difficultySuggestion(learningPathProgress, learningPathCourse.conceptId);
+  const learningReviewLesson = workedReviewLesson(learningPathProgress, learningPathCourse.conceptId);
+  const learningDuration = durationSuggestion(
+    sessions,
+    learningPathCourse.subjectId,
+    nextLearningLesson?.minutes ?? learningPathCourse.lessons[0].minutes,
+  );
+  const guestQuizGrades = guestQuizResultsForDailySummary(owner, sessions, saved.quizDrafts);
+  const guestQuizGradesBySession = new Map(guestQuizGrades.map((grade) => [grade.sessionId, grade]));
+  const learningDaily = dailyStudySummary(sessions, now, learningPathProgress.completed, guestQuizGrades);
+  const selectedPathLesson = learningPathProgress.activeRun
+    ? learningPathCourse.lessons.find((lesson) => lesson.id === learningPathProgress.activeRun?.lessonId &&
+      lesson.version === learningPathProgress.activeRun.lessonVersion)
+    : learningPathCourse.lessons.find((lesson) => lesson.id === learningPathProgress.selectedLessonId &&
+      lesson.version === learningPathProgress.selectedLessonVersion);
+  const selectedPathLessonState = selectedPathLesson
+    ? learningPathStates.find((item) => item.lesson.id === selectedPathLesson.id)?.status ?? "locked"
+    : "locked";
   const summarySessionId = summary?.id ?? (view === "summary" ? saved.summarySessionId : undefined);
   const summarySession = summarySessionId
     ? sessions.find((session) => session.id === summarySessionId && !removedIds.has(session.id)) ?? null
     : null;
+  useEffect(() => () => guestQuizRequest.current?.abort(), [owner, view, summarySessionId]);
+  const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
+    studyElapsedSeconds(
+      summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
+    ) >= summarySession.target));
+  const summaryCuratedEvaluation = summarySession
+    ? learningPathProgress.completed.find((evaluation) => evaluation.sessionId === summarySession.id)
+    : undefined;
+  const summaryInterruptedLesson = summarySession && !summaryCompleted
+    ? interruptedLessonForSession(learningPathProgress, summarySession.id)
+    : undefined;
+  const summaryLearningRun = summarySession && learningPathProgress.activeRun?.phase === "review" &&
+    learningPathProgress.activeRun.sessionId === summarySession.id
+    ? learningPathProgress.activeRun
+    : undefined;
+  const summaryLearningCourse = summaryLearningRun
+    ? CURATED_COURSES.find((course) => course.id === summaryLearningRun.courseId)
+    : summaryInterruptedLesson?.course;
+  const summaryLearningLesson = summaryLearningCourse && summaryLearningRun
+    ? summaryLearningCourse.lessons.find((lesson) => lesson.id === summaryLearningRun.lessonId &&
+      lesson.version === summaryLearningRun.lessonVersion)
+    : summaryInterruptedLesson?.lesson;
   const summaryMaterialSessionId = summarySession?.id;
   const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
     ? saved.sources?.[summaryMaterialSessionId] ?? []
@@ -827,15 +933,11 @@ function AdventureWorkspace() {
       cancelMaterialSummaryRequest(active.sessionId, active.sourceId);
   }, [owner, summarySessionId, summaryMaterialSources, cancelMaterialSummaryRequest]);
   const guestNotice = guestNoticeStatus ? guestPublicationNotice(guestNoticeStatus) : null;
-  const summaryCompleted = Boolean(summarySession && (summarySession.effectiveMetrics?.completed ??
-    studyElapsedSeconds(
-      summarySession.started, summarySession.target, summarySession.breakPlan, summarySession.ended,
-    ) >= summarySession.target));
   const isStudyExerciseOwnerWorkspaceCurrent = useCallback((ownerId: string, authGeneration: number, workspaceGeneration: number) => {
     const auth = useAuthStore.getState();
     return ownerRef.current === ownerId && getAuthGeneration() === authGeneration &&
       materialSummaryWorkspaceGeneration.current === workspaceGeneration && workspaceLive.current &&
-      auth.user?.id === ownerId && !auth.needsLogin;
+      !auth.needsLogin && (ownerId === "guest" ? !auth.user : auth.user?.id === ownerId);
   }, []);
   const isStudyExerciseRouteScopeCurrent = useCallback((
     ownerId: string,
@@ -845,8 +947,9 @@ function AdventureWorkspace() {
     const auth = useAuthStore.getState();
     const value = current.current;
     const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
+    const authMatchesOwner = ownerId === "guest" ? !auth.user : auth.user?.id === ownerId;
     if (ownerRef.current !== ownerId || !workspaceLive.current || viewRef.current !== targetView ||
-        auth.user?.id !== ownerId || auth.needsLogin || removed.has(sessionId)) return false;
+        !authMatchesOwner || auth.needsLogin || removed.has(sessionId)) return false;
     if (targetView === "ticket") return draftTripId === sessionId;
     if (targetView === "focus") return value.active?.id === sessionId && value.active.owner === ownerId;
     const session = historySessions(value, ownerId).find(item => item.id === sessionId);
@@ -856,16 +959,18 @@ function AdventureWorkspace() {
     historySessions(current.current, ownerId).some(session => session.id === sessionId && session.userId === ownerId), []);
   const isStudyExercisePersistedCompleted = useCallback((ownerId: string, sessionId: string) =>
     historySessions(current.current, ownerId).some(session =>
-      session.id === sessionId && session.userId === ownerId && session.effectiveMetrics?.completed === true), []);
+      session.id === sessionId && session.userId === ownerId &&
+        isPersistedStudyExerciseSessionCompleted(ownerId, session)), []);
   const studyExerciseFlow = useStudyExerciseFlow({
     ownerId: owner,
-    authenticated: owner !== "guest" && !!user && !needsLogin,
+    authenticated: owner === "guest" || (!!user && !needsLogin),
     needsLogin,
     online,
     loaded,
     exclusive,
     view,
     plannedSessionId: draftTripId,
+    guestExerciseSessions: saved.guestExerciseSessions ?? [],
     sources,
     activeSession: saved.active,
     summarySession,
@@ -919,12 +1024,14 @@ function AdventureWorkspace() {
     : null;
   async function generateMaterialSummary(sessionId: string, sourceId: string) {
     const ownerId = ownerRef.current;
+    const guest = ownerId === "guest";
     const auth = useAuthStore.getState();
     const value = current.current;
     const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
     const session = historySessions(value, ownerId).find((item) => item.id === sessionId);
     const source = value.sources?.[sessionId]?.find((item) => item.id === sourceId);
-    if (ownerId === "guest" || !auth.user || auth.user.id !== ownerId || auth.needsLogin ||
+    if ((!guest && (!auth.user || auth.user.id !== ownerId || auth.needsLogin)) ||
+        (guest && auth.user) || auth.needsLogin ||
         !workspaceLive.current || viewRef.current !== "summary" || value.summarySessionId !== sessionId ||
         removed.has(sessionId) || !session || session.userId !== ownerId || !source?.reviewed ||
         source.text.trim().length < 10 || source.text.length > 50_000) return;
@@ -971,7 +1078,7 @@ function AdventureWorkspace() {
       return materialSummaryRequest.current === active && !controller.signal.aborted &&
         ownerRef.current === ownerId && workspaceLive.current &&
         getAuthGeneration() === active.authGeneration &&
-        latestAuth.user?.id === ownerId && !latestAuth.needsLogin &&
+        (guest ? !latestAuth.user : latestAuth.user?.id === ownerId) && !latestAuth.needsLogin &&
         viewRef.current === "summary" && latest.summarySessionId === sessionId &&
         !latestRemoved.has(sessionId) && latestSession?.userId === ownerId &&
         latestSource?.reviewed === true && latestSource.text === active.sourceText &&
@@ -993,7 +1100,7 @@ function AdventureWorkspace() {
         });
         return;
       }
-      const result = await summarizeReviewedMaterial(active.sourceText, controller.signal);
+      const result = await summarizeReviewedMaterial(active.sourceText, controller.signal, guest);
       if (!isCurrent()) return;
       const latestSource = current.current.sources?.[sessionId]?.find((item) => item.id === sourceId);
       if (!latestSource || await fingerprintMaterialSourceText(latestSource.text) !== active.sourceFingerprint || !isCurrent()) return;
@@ -1315,6 +1422,158 @@ function AdventureWorkspace() {
     setBreakMinutes(draft.breakMinutes);
     go("ticket");
   };
+  function selectLearningCourse(courseId: string) {
+    const value = current.current;
+    const progress = selectLearningPathCourse(value.learningPath ?? createLearningPathProgress(), courseId);
+    if (progress !== value.learningPath) commit({ ...value, learningPath: progress });
+  }
+  function openLearningLesson(lesson: CuratedLesson) {
+    const course = CURATED_COURSES.find((item) => item.lessons.some((candidate) => candidate.id === lesson.id && candidate.version === lesson.version));
+    if (!course) return;
+    const value = current.current;
+    const progress = selectPathLesson(value.learningPath ?? createLearningPathProgress(), course, lesson);
+    if (commit({ ...value, learningPath: progress })) go("lesson");
+  }
+  function updateLearningPathPlan(target: number, count = breakCount, breakDuration = breakMinutes) {
+    const value = current.current;
+    const progress = value.learningPath;
+    const run = progress?.activeRun;
+    if (!progress || !run || run.sessionId !== draftTripIdRef.current || run.phase !== "ticket") return;
+    const breakPlan = count > 0 ? { count, seconds: breakDuration * 60 } : undefined;
+    const updated = setLessonRunPlan(progress, run.sessionId, target, breakPlan);
+    if (updated !== progress) commit({ ...value, learningPath: updated });
+  }
+  function startLearningLesson(lesson: CuratedLesson, minutesValue: number) {
+    const value = current.current;
+    if (studyGuideNeedsConfirmation) {
+      setError("Hãy xác nhận hoặc bỏ bản ôn tập AI trước khi bắt đầu chặng học.");
+      return;
+    }
+    if (value.active) {
+      go("focus");
+      setNotice("Hãy tiếp tục hoặc kết thúc phiên đang chạy trước khi bắt đầu bài học.");
+      return;
+    }
+    if (value.learningPath?.activeRun) {
+      resumeLearningPathRun();
+      return;
+    }
+    const course = CURATED_COURSES.find((item) => item.lessons.some((candidate) => candidate.id === lesson.id && candidate.version === lesson.version));
+    if (!course || !Number.isSafeInteger(minutesValue) || minutesValue < 5 || minutesValue > 25) return;
+    const sessionId = draftTripIdRef.current;
+    const replay = (value.learningPath?.completed ?? []).some((entry) =>
+      entry.lessonId === lesson.id && entry.lessonVersion === lesson.version,
+    );
+    const started = beginLessonRun(value.learningPath ?? createLearningPathProgress(course.id), course, lesson.id, sessionId, replay);
+    if (!started) {
+      setError("Bài học này chưa mở hoặc một chặng khác đang chờ tiếp tục.");
+      return;
+    }
+    const pathProgress = setLessonRunPlan(
+      setLessonRunPhase(started, sessionId, "ticket"),
+      sessionId,
+      minutesValue * 60,
+    );
+    if (!commit({ ...value, learningPath: pathProgress })) return;
+    const draft = {
+      goal: `Học bài: ${lesson.title}`,
+      topic: course.subjectId,
+      minutes: minutesValue,
+      breakCount: 0,
+      breakMinutes: 5,
+    };
+    updateQuickTripDraft(quickTripDraft, draft);
+    setDraftTripId(sessionId);
+    draftSessionIdsRef.current.solo = sessionId;
+    setMode("solo");
+    setGoal(draft.goal);
+    setTopic(draft.topic);
+    setMinutes(draft.minutes);
+    setBreakCount(0);
+    setBreakMinutes(5);
+    setDocumentText(lesson.content);
+    setMaterials([]);
+    setSources([createMaterialSource(lesson.id, {
+      name: `${course.title} · ${lesson.title}`,
+      text: lesson.content,
+      source: "curated",
+    })]);
+    setStudyInput("notes");
+    setSummary(null);
+    go("ticket");
+  }
+  function resumeLearningPathRun() {
+    const value = current.current;
+    const run = value.learningPath?.activeRun;
+    if (!run) {
+      if (value.active) go("focus");
+      return;
+    }
+    if (run.phase === "focus" && value.active?.id === run.sessionId) {
+      go("focus");
+      return;
+    }
+    if (run.phase === "review") {
+      const session = historySessions(value, ownerRef.current).find((item) => item.id === run.sessionId);
+      if (!session) {
+        setError("Không tìm thấy phiên đã lưu cho bài tự kiểm tra này. Hãy mở nhật ký học tập để xem dữ liệu trên thiết bị.");
+        return;
+      }
+      commit({ ...value, summarySessionId: session.id });
+      setSummary(session as Session);
+      go("summary");
+      return;
+    }
+    const course = CURATED_COURSES.find((item) => item.id === run.courseId);
+    const lesson = course?.lessons.find((item) => item.id === run.lessonId && item.version === run.lessonVersion);
+    if (!course || !lesson) {
+      setError("Phiên bản bài học đã thay đổi. Tiến độ cũ vẫn được giữ trong nhật ký.");
+      return;
+    }
+    const target = run.target ?? lesson.minutes * 60;
+    const draft = {
+      goal: `Học bài: ${lesson.title}`,
+      topic: course.subjectId,
+      minutes: target / 60,
+      breakCount: run.breakPlan?.count ?? 0,
+      breakMinutes: run.breakPlan ? run.breakPlan.seconds / 60 : 5,
+    };
+    updateQuickTripDraft(quickTripDraft, draft);
+    setDraftTripId(run.sessionId);
+    draftSessionIdsRef.current.solo = run.sessionId;
+    setMode("solo");
+    setGoal(draft.goal);
+    setTopic(draft.topic);
+    setMinutes(draft.minutes);
+    setBreakCount(draft.breakCount);
+    setBreakMinutes(draft.breakMinutes);
+    setDocumentText(value.notes[run.sessionId] ?? lesson.content);
+    setMaterials(value.materials?.[run.sessionId] ?? []);
+    setSources(value.sources?.[run.sessionId] ?? [createMaterialSource(lesson.id, {
+      name: `${course.title} · ${lesson.title}`,
+      text: lesson.content,
+      source: "curated",
+    })]);
+    setStudyInput("notes");
+    go("ticket", { preserveTicketPlan: true });
+  }
+  function dismissLearningGuide() {
+    const value = current.current;
+    const progress = value.learningPath ?? createLearningPathProgress();
+    if (commit({ ...value, learningPath: { ...progress, guideDismissed: true } })) setShowLearningGuide(false);
+  }
+  function completeCuratedEvaluation(sessionId: string, score: number, total: number, answers: Parameters<typeof completeLessonRun>[5]): boolean {
+    const value = current.current;
+    if (!value.learningPath?.activeRun || value.learningPath.activeRun.sessionId !== sessionId ||
+        value.learningPath.activeRun.phase !== "review") return false;
+    try {
+      const progress = completeLessonRun(value.learningPath, sessionId, score, total, Date.now(), answers);
+      return commit({ ...value, learningPath: progress });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Chưa lưu được kết quả tự kiểm tra.");
+      return false;
+    }
+  }
   async function mutation(path: string, body: unknown): Promise<Snapshot> {
     if (needsLogin) throw new Error("Đăng nhập lại để cập nhật nhóm hoặc đồng bộ trang trí.");
     const id = ownerRef.current;
@@ -1569,15 +1828,18 @@ function AdventureWorkspace() {
           target: number;
           groupId: string | null;
           observedAt?: number;
+          serverObservedAt?: number;
           endsAt?: number;
           breakPlan?: ActiveTrip["breakPlan"];
+          serverAnchored?: boolean;
+          serverAnchorOffsetMs?: number;
           syncClock?: boolean;
           clockOffsetMs?: number;
           snapshot?: Snapshot;
         }) => {
         const at = input.started;
         const observedAt = input.syncClock ? input.observedAt ?? input.started : input.started;
-        const breakPlan = resolveTripBreakPlan({
+        const breakPlan = input.serverAnchored ? input.breakPlan : resolveTripBreakPlan({
           synchronized,
           sharedPlan: input.breakPlan,
           localPlan: breakCount > 0 ? plannedBreaks : undefined,
@@ -1595,6 +1857,9 @@ function AdventureWorkspace() {
           deviceCategory: detectDeviceCategory(navigator.userAgent, navigator.maxTouchPoints),
           groupId: input.groupId,
           ...(input.syncClock ? { syncClock: true, clockOffsetMs: input.clockOffsetMs } : {}),
+          ...(input.serverAnchored && input.serverAnchorOffsetMs !== undefined
+            ? { serverAnchorOffsetMs: input.serverAnchorOffsetMs }
+            : {}),
           started: at,
           lastAt: at,
           segments: [],
@@ -1605,9 +1870,18 @@ function AdventureWorkspace() {
         if (input.syncClock)
           trip = startSynchronizedSession(trip, Math.min(input.endsAt ?? Number.POSITIVE_INFINITY, observedAt),
             !document.hidden && document.hasFocus());
+        else if (input.serverAnchored)
+          trip = startGuestAnchoredSession(trip, input.serverObservedAt ?? input.started,
+            !document.hidden && document.hasFocus());
         if (commit({
           ...current.current,
           ...(input.snapshot ? { snapshot: input.snapshot } : {}),
+          ...(current.current.learningPath?.activeRun?.sessionId === trip.id
+            ? { learningPath: setLessonRunPhase(current.current.learningPath, trip.id, "focus") }
+            : {}),
+          ...(input.serverAnchored && owner === "guest"
+            ? { guestExerciseSessions: [...new Set([...(current.current.guestExerciseSessions ?? []), trip.id])] }
+            : {}),
           active: trip,
           quizDrafts: updateQuizDrafts(current.current.quizDrafts, trip.id, initialQuizDraft),
         })) {
@@ -1621,11 +1895,64 @@ function AdventureWorkspace() {
           );
           setDraftTripId(nextDraftTripId);
           setSummary(null);
-          if (withExercises && owner !== "guest") onStudyExerciseFocusStarted(trip.id);
+          if (withExercises) onStudyExerciseFocusStarted(trip.id);
           setStudyExerciseStartPrompt(false);
           go("focus");
         }
         };
+        if (owner === "guest" && withExercises) {
+          const sessionId = draftTripId;
+          const ownerId = ownerRef.current;
+          const authGeneration = getAuthGeneration();
+          const workspaceGeneration = materialSummaryWorkspaceGeneration.current;
+          const isCurrent = () => ownerRef.current === ownerId && ownerId === "guest" &&
+            getAuthGeneration() === authGeneration && materialSummaryWorkspaceGeneration.current === workspaceGeneration &&
+            workspaceLive.current && viewRef.current === "ticket" && draftTripIdRef.current === sessionId &&
+            !current.current.active && isStudyExercisePreparationReadyForSession(sessionId);
+          if (tripStartInFlight.current) return;
+          tripStartInFlight.current = true;
+          void run(async () => {
+            try {
+              const exerciseId = studyExercisePreparation?.plannedSessionId === sessionId
+                ? studyExercisePreparation.id
+                : undefined;
+              if (!exerciseId) throw new Error("Bộ bài tập không còn sẵn sàng. Hãy chuẩn bị lại trước khi bắt đầu.");
+              await bindStudyExercises(sessionId, undefined, true, exerciseId);
+              if (!isCurrent()) return;
+              const started = await startGuestAiSession({
+                id: sessionId,
+                target: startTarget,
+                ...(startBreakPlan ? { breakPlan: startBreakPlan } : {}),
+              });
+              const clientReceivedAt = Date.now();
+              if (!isCurrent()) return;
+              if (started.sessionId !== sessionId || !Number.isSafeInteger(started.startedAt) ||
+                  started.startedAt <= 0 || !Number.isSafeInteger(started.serverNow) || started.serverNow < started.startedAt ||
+                  started.target !== startTarget ||
+                  JSON.stringify(started.breakPlan) !== JSON.stringify(startBreakPlan))
+                throw new Error("Máy chủ chưa xác nhận đúng thời lượng cho phiên AI riêng tư.");
+              const serverAnchorOffsetMs = estimateServerClockOffset(started.serverNow, clientReceivedAt);
+              if (serverAnchorOffsetMs === null)
+                throw new Error("Đồng hồ thiết bị lệch quá 24 giờ. Hãy đặt ngày và giờ tự động rồi thử lại.");
+              onStudyExerciseFocusStarted(sessionId);
+              beginFocus({
+                id: started.sessionId,
+                started: started.startedAt,
+                goal: startGoal,
+                topic: startTopic,
+                target: started.target,
+                groupId: null,
+                breakPlan: started.breakPlan,
+                serverAnchored: true,
+                serverAnchorOffsetMs,
+                serverObservedAt: started.serverNow,
+              });
+            } finally {
+              tripStartInFlight.current = false;
+            }
+          });
+          return;
+        }
         if (sharedTrip && group) {
           if (!user || needsLogin) {
             setError("Đăng nhập lại để bắt đầu phiên của chuyến.");
@@ -1809,6 +2136,8 @@ function AdventureWorkspace() {
     };
     const value = structuredClone(current.current);
     value.active = null;
+    if (value.learningPath?.activeRun?.sessionId === s.id)
+      value.learningPath = finishLessonFocus(value.learningPath, s);
     if (value.readyTripDrafts) delete value.readyTripDrafts[s.id];
     value.notes[s.id] = next.document;
     (value.materials ??= {})[s.id] = next.materials ?? [];
@@ -1917,7 +2246,8 @@ function AdventureWorkspace() {
   }
   async function readHandwriting(sourceId: string) {
     if (busy || materialRequest.current || view !== "ticket") return;
-    if (!user || needsLogin) { setError("Đăng nhập để đọc tài liệu bằng AI."); return; }
+    const guest = ownerRef.current === "guest";
+    if (!guest && (!user || needsLogin)) { setError("Đăng nhập lại để đọc tài liệu bằng AI."); return; }
     const file = originalFiles.current.get(sourceId);
     if (!file || file.size > 32 * 1024 * 1024) { setError("Hãy nhập lại tệp gốc, tối đa 32 MiB."); return; }
     const id = ownerRef.current;
@@ -1938,7 +2268,10 @@ function AdventureWorkspace() {
       const extension = file.name.split(".").pop()?.toLowerCase();
       const mimeType = extension === "pdf" ? "application/pdf" : extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
       const context = `${availableTopics.find(item => item.id === topic)?.name ?? topic}. Mục tiêu học: ${goal}`.slice(0, 1000);
-      const result = await request<{text:string;message?:string}>("/materials/read", {method:"POST",body:JSON.stringify({mimeType,data,recoverContext:true,context}),signal:controller.signal});
+      const requestBody = { mimeType, data, recoverContext: true, context };
+      const result = guest
+        ? await postGuestAi<{text:string;message?:string}>("/materials/read", requestBody, controller.signal)
+        : await request<{text:string;message?:string}>("/materials/read", {method:"POST",body:JSON.stringify(requestBody),signal:controller.signal});
       if (!isCurrent()) return;
       noteStudyExerciseSourceChange(draftTripId, sourceId);
       setSources((items) => items.map((source) => source.id === sourceId ? {...source,text:result.text,source:"ai-vision",requiresReview:true,reviewed:false} : source));
@@ -1949,18 +2282,21 @@ function AdventureWorkspace() {
   }
   async function generateStudyGuide(prompt: string): Promise<StudyGuideDraft | undefined> {
     if (busy || materialRequest.current || !workspaceLive.current || view !== "ticket" || materials.length || sources.length || documentText.trim()) return;
-    if (!user || needsLogin) { setError("Đăng nhập để tạo bản ôn tập bằng AI."); return; }
+    const guest = ownerRef.current === "guest";
+    if (!guest && (!user || needsLogin)) { setError("Đăng nhập lại để tạo bản ôn tập bằng AI."); return; }
     const id = ownerRef.current;
     const controller = new AbortController();
     materialRequest.current = controller;
     const isCurrent = () => workspaceLive.current && ownerRef.current === id && materialRequest.current === controller && !controller.signal.aborted;
     setBusy(true); setError(""); setNotice("");
     try {
-      const result = await request<StudyGuideDraft>("/materials/generate", {
-        method: "POST", signal: controller.signal,
-        body: JSON.stringify({ prompt, topic: availableTopics.find(item => item.id === topic)?.name ?? topic,
-          ...(goal.trim() ? { goal: goal.trim() } : {}) }),
-      });
+      const body = { prompt, topic: availableTopics.find(item => item.id === topic)?.name ?? topic,
+        ...(goal.trim() ? { goal: goal.trim() } : {}) };
+      const result = guest
+        ? await postGuestAi<StudyGuideDraft>("/materials/generate", body, controller.signal)
+        : await request<StudyGuideDraft>("/materials/generate", {
+            method: "POST", signal: controller.signal, body: JSON.stringify(body),
+          });
       if (!isCurrent()) return;
       studyGuideSource("validation", result);
       dispatchStudyGuideReview({ type: "generated", draft: result });
@@ -2018,18 +2354,65 @@ function AdventureWorkspace() {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  async function generateQuiz(session: SessionHistoryEntry, count: number): Promise<QuizQuestion[]> {
-    if (!user || needsLogin) throw new Error("Đăng nhập lại để tạo quiz AI.");
+  async function generateQuiz(session: SessionHistoryEntry, count: number): Promise<
+    { questions: QuizQuestion[] } | { questions: GuestQuizQuestion[]; guestQuizId: string }
+  > {
     const id = ownerRef.current;
     if (current.current.summarySessionId !== session.id)
       throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần ôn tập.");
+    if (id === "guest") {
+      const isCurrent = () => ownerRef.current === "guest" && workspaceLive.current &&
+        viewRef.current === "summary" && current.current.summarySessionId === session.id;
+      const buildPayload = () => {
+        if (!isCurrent()) throw new DOMException("Phiên học đã đổi.", "AbortError");
+        const value = current.current;
+        const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
+        const canonical = historySessions(value, "guest").find((item) => item.id === session.id && item.userId === "guest");
+        if (removed.has(session.id) || !canonical)
+          throw new Error("Phiên khách này không còn trên thiết bị. Hãy mở lại lịch sử rồi thử lại.");
+        const source = {
+          topic: canonical.topic,
+          goal: canonical.goal,
+          notes: value.notes[session.id] ?? "",
+          sources: value.sources?.[session.id] ?? [],
+          materials: value.materials?.[session.id] ?? [],
+        };
+        return buildQuizGenerationPayload(source, count);
+      };
+      const initial = buildPayload();
+      guestQuizRequest.current?.abort();
+      const controller = new AbortController();
+      guestQuizRequest.current = controller;
+      try {
+        const response = await postGuestAi<{
+          id: string;
+          plannedSessionId: string;
+          questions: GuestQuizQuestion[];
+        }>("/quizzes/generate", {
+          plannedSessionId: session.id,
+          ...initial,
+        }, controller.signal);
+        if (controller.signal.aborted || guestQuizRequest.current !== controller || !isCurrent())
+          throw new DOMException("Phiên học đã đổi.", "AbortError");
+        const latest = buildPayload();
+        if (quizGenerationSourceKey(latest) !== quizGenerationSourceKey(initial))
+          throw new DOMException("Nguồn học đã đổi.", "AbortError");
+        if (!isValidGuestQuizDeck(response) || response.plannedSessionId !== session.id ||
+            response.questions.length !== count)
+          throw new Error("AI chưa trả về đúng số câu hỏi riêng tư. Hãy thử tạo lại.");
+        return { guestQuizId: response.id, questions: response.questions };
+      } finally {
+        if (guestQuizRequest.current === controller) guestQuizRequest.current = null;
+      }
+    }
+    if (!user || needsLogin) throw new Error("Đăng nhập lại để tạo quiz AI.");
     await sync();
     if (ownerRef.current !== id || !workspaceLive.current ||
         current.current.summarySessionId !== session.id)
       throw new Error("Chuyến đã đổi trước khi quiz được tạo.");
     const canonical = resolveCurrentQuizSession(session.id);
     if (canonical.quiz)
-      throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
+      throw new Error("Phiên này đã có điểm. Hãy mở một phiên ôn tập mới để làm thêm câu hỏi.");
     const initial = buildQuizScope(canonical, count);
     const requestIdentity = {
       ownerId: id,
@@ -2051,13 +2434,13 @@ function AdventureWorkspace() {
         throw new Error("Chuyến đã đổi trước khi quiz được lưu.");
       const latest = resolveCurrentQuizSession(session.id);
       if (latest.quiz)
-        throw new Error("Chuyến này đã có điểm. Hãy mở một chuyến ôn tập mới để làm thêm câu hỏi.");
+        throw new Error("Phiên này đã có điểm. Hãy mở một phiên ôn tập mới để làm thêm câu hỏi.");
       if (quizPrefetchScopeKey(buildQuizScope(latest, count).scope) !== quizPrefetchScopeKey(initial.scope))
         throw new Error("Thông tin chuyến đã thay đổi. Hãy tạo lại câu hỏi theo dữ liệu mới.");
       setQuizPrefetchUi((previous) => isSameRequest(previous)
         ? { ...pendingState, status: "ready" }
         : previous);
-      return result;
+      return { questions: result };
     } catch (cause) {
       setQuizPrefetchUi((previous) => isSameRequest(previous)
         ? null
@@ -2094,6 +2477,8 @@ function AdventureWorkspace() {
   }
   function invalidateQuizForSourceEdit(ownerId: string, sessionId: string) {
     if (ownerRef.current !== ownerId || current.current.summarySessionId !== sessionId) return;
+    guestQuizRequest.current?.abort();
+    guestQuizRequest.current = null;
     quizPrefetch.cancelSession(ownerId, sessionId);
     quizPrefetchSaved.current.clear();
     setQuizPrefetchUi((state) => state?.ownerId === ownerId && state.sessionId === sessionId ? null : state);
@@ -2105,11 +2490,58 @@ function AdventureWorkspace() {
     return updateQuizDrafts(value.quizDrafts, sessionId,
       quizDraftFromQuestions([], isQuizCount(count) ? count : 3, correctionVersion));
   }
-  async function gradeQuiz(sessionId: string, answers: { id: string; selected: number }[]): Promise<Session> {
-    if (!user || needsLogin) throw new Error("Đăng nhập lại để chấm quiz.");
+  async function gradeQuiz(sessionId: string, answers: { id: string; selected: number }[]): Promise<
+    Session | { guestGrade: NonNullable<Session["quiz"]> }
+  > {
     const id = ownerRef.current;
     if (!workspaceLive.current || current.current.summarySessionId !== sessionId)
       throw new Error("Chuyến đã đổi. Hãy mở lại chuyến cần chấm.");
+    if (id === "guest") {
+      const draft = current.current.quizDrafts?.[sessionId];
+      if (!draft?.guestQuizId || draft.guestGrade || !draft.questions.length)
+        throw new Error("Không tìm thấy bộ câu hỏi riêng tư. Hãy tạo lại câu hỏi rồi thử chấm.");
+      const deck = draft.questions as GuestQuizQuestion[];
+      guestQuizRequest.current?.abort();
+      const controller = new AbortController();
+      guestQuizRequest.current = controller;
+      try {
+        const result = await postGuestAi<{
+          quizId: string;
+          score: number;
+          total: number;
+          questions: { id: string; selected: number; correct: boolean; correctAnswerIndex: number; explanation: string }[];
+        }>(`/quizzes/${encodeURIComponent(draft.guestQuizId)}/grade`, { answers }, controller.signal);
+        if (controller.signal.aborted || guestQuizRequest.current !== controller ||
+            ownerRef.current !== id || !workspaceLive.current || viewRef.current !== "summary" ||
+            current.current.summarySessionId !== sessionId)
+          throw new DOMException("Phiên học đã đổi.", "AbortError");
+        if (!isValidGuestQuizGrade(result, deck) || result.quizId !== draft.guestQuizId ||
+            answers.length !== deck.length || answers.some((answer) =>
+              result.questions.find((item) => item.id === answer.id)?.selected !== answer.selected))
+          throw new Error("Máy chủ chưa trả về kết quả chấm riêng tư hợp lệ.");
+        const feedback = result.questions.map((item) => {
+          const question = deck.find((candidate) => candidate.id === item.id);
+          if (!question) throw new Error("Không tìm thấy câu hỏi trong bộ riêng tư.");
+          return {
+            questionId: item.id,
+            question: question.question,
+            options: question.options,
+            selected: item.selected,
+            correctIndex: item.correctAnswerIndex,
+            correct: item.correct,
+            explanation: item.explanation,
+            knowledgePoint: question.knowledgePoint ?? "Nội dung chuyến học",
+          };
+        });
+        const guestGrade = { score: result.score, total: result.total, feedback };
+        if (!isValidQuizAssessment(guestGrade))
+          throw new Error("Máy chủ chưa trả về kết quả chấm riêng tư hợp lệ.");
+        return { guestGrade };
+      } finally {
+        if (guestQuizRequest.current === controller) guestQuizRequest.current = null;
+      }
+    }
+    if (!user || needsLogin) throw new Error("Đăng nhập lại để chấm quiz.");
     // Prefetched questions can be answered before the finished trip finishes uploading.
     await sync();
     if (ownerRef.current !== id || !workspaceLive.current ||
@@ -2161,9 +2593,6 @@ function AdventureWorkspace() {
     setMode("solo");
     go("ticket");
   }
-  const progress = journey
-    ? Math.min(100, (journey.remaining / journey.threshold) * 100)
-    : 0;
   return (
     <div className="adventure" ref={studyFullscreen.ref}>
       <aside className="sidebar">
@@ -2175,26 +2604,25 @@ function AdventureWorkspace() {
             go("station");
           }}
         >
-          <span className="brand-icon">▥</span>
+          <span className="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M5 27V6l11 11L27 6v21" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 22h12" stroke="#8fc09a" strokeWidth="2" strokeLinecap="round"/></svg></span>
           <span>
             viễn du<small>HỌC TẬP · KHÁM PHÁ</small>
           </span>
         </a>
-        <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
+          <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
         <nav aria-label="Điều hướng chính">
           {nav.map((n) => {
-            const label = n.id === "group" && group && !isSynchronizedTrip(group.trip)
-              ? "Đoàn tàu"
-              : n.label;
             return (
               <button
                 key={n.id}
                 className={view === n.id ? "nav active" : "nav"}
+                data-mobile-label={n.mobileLabel}
                 aria-current={view === n.id ? "page" : undefined}
+                aria-label={n.label}
                 onClick={() => go(n.id)}
               >
                 <span aria-hidden="true">{n.icon}</span>
-                {label}
+                {n.label}
                 {n.id === "station" && <i />}
               </button>
             );
@@ -2229,6 +2657,9 @@ function AdventureWorkspace() {
               {nav.find((n) => n.id === view)?.label ??
                 (
                   {
+                    lesson: "Bài học",
+                    map: "Bản đồ hành trình",
+                    carriage: "Toa của tôi",
                     ticket: "Vé học",
                     focus: "Chuyến đang chạy",
                     summary: "Thành quả",
@@ -2309,130 +2740,56 @@ function AdventureWorkspace() {
             <>
               {view === "station" && (
                 <>
-                  <div className="page-heading">
-                    <div>
-                      <div className="eyebrow">
-                        CHƯƠNG 01 · THEO DẤU BÌNH MINH
-                      </div>
-                      <h1>
-                        Một hành trình mới,
-                        <br />
-                        bắt đầu từ hôm nay<span className="orange">.</span>
-                      </h1>
-                      <p>
-                        Dành một khoảng lặng cho việc học. Để toa tàu đưa bạn đi
-                        xa.
-                      </p>
-                    </div>
-                    <div className="date-chip">
-                      ◷{" "}
-                      <span>
-                        {new Date(now).toLocaleDateString("vi-VN", {
-                          weekday: "long",
-                          day: "numeric",
-                          month: "long",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="dashboard-grid">
-                    <section className="hero-card">
-                      <div className="hero-label">
-                        <span className="pill">
-                          ✦ HÀNH TRÌNH CỦA{" "}
-                          {mode === "group" && group
-                            ? isSynchronizedTrip(group.trip) ? "CHUYẾN ĐI CHUNG" : "ĐOÀN"
-                            : "BẠN"}
-                        </span>
-                        <span className="chapter">
-                          0{(journey?.station ?? 0) + 1} / 05
-                        </span>
-                      </div>
-                      <JourneyView
-                        journey={journey}
-                        carriages={trainCars}
-                        ownId={owner}
-                      />
-                      <div className="hero-caption">
-                        <div>
-                          <span className="eyebrow">BẠN ĐANG Ở</span>
-                          <h2>{stations[journey?.station ?? 0]}</h2>
-                          <p>{stories[journey?.station ?? 0]}</p>
-                        </div>
-                        <button
-                          className="round-button"
-                          aria-label="Xem bản đồ"
-                          onClick={() => go("map")}
-                        >
-                          ↗
-                        </button>
-                      </div>
-                      <div className="journey-progress">
-                        <div>
-                          <span>
-                            {journey?.station === 4
-                              ? "Đã đến đích · phần dư được giữ lại"
-                              : `Trạm tiếp theo: ${stations[(journey?.station ?? 0) + 1]}`}
-                          </span>
-                          <strong>
-                            {Math.floor((journey?.remaining ?? 0) / 60)} /{" "}
-                            {Math.floor((journey?.threshold ?? 1800) / 60)} phút
-                          </strong>
-                        </div>
-                        <progress max="100" value={progress} />
-                      </div>
-                    </section>
-                    <HomeTripForm
-                      draftRef={quickTripDraft}
-                      topics={availableTopics}
-                      hasActiveTrip={Boolean(active)}
-                      onPrepare={onPrepareQuickTrip}
-                    />
-                  </div>
-                  <div className="stat-row">
-                    <Stat
-                      icon="◷"
-                      label="PHÚT ĐÃ TẬP TRUNG"
-                      value={`${minutesTotal}`}
-                      detail="Từng phút đều có ý nghĩa"
-                    />
-                    <Stat
-                      icon="▤"
-                      label="CHUYẾN ĐÃ LƯU"
-                      value={`${sessions.length}`}
-                      detail="Gồm cả những chặng ngắn"
-                    />
-                    <Stat
-                      icon="⚑"
-                      label="TRẠM ĐÃ KHÁM PHÁ"
-                      value={`${(carriage?.journey.station ?? 0) + 1} / 5`}
-                      detail="Một thế giới đang chờ bạn"
-                    />
-                  </div>
-                  <div className="section-heading">
-                    <h2>Hành trình là của bạn</h2>
-                    <span>Từng bước nhỏ, mỗi ngày</span>
-                  </div>
-                  <div className="feature-row">
-                    <button className="feature" onClick={() => go("carriage")}>
-                      <span className="feature-icon peach">▣</span>
-                      <div>
-                        <h3>Một toa mang dấu ấn riêng</h3>
-                        <p>Đổi màu, đặt tên và lưu những kỷ niệm.</p>
-                      </div>
-                      <span>↗</span>
-                    </button>
-                    <button className="feature" onClick={() => go("group")}>
-                      <span className="feature-icon green">♧</span>
-                      <div>
-                        <h3>Cùng bạn bè đi xa hơn</h3>
-                        <p>Nối toa. Khác lịch học, chung điểm đến.</p>
-                      </div>
-                      <span>↗</span>
-                    </button>
-                  </div>
+                  <LearningPathHome
+                    courses={CURATED_COURSES}
+                    course={learningPathCourse}
+                    progress={learningPathProgress}
+                    lessonStates={learningPathStates}
+                    nextLesson={nextLearningLesson}
+                    reviewLesson={learningReviewLesson}
+                    daily={learningDaily}
+                    difficulty={learningDifficulty}
+                    duration={learningDuration}
+                    guideOpen={showLearningGuide}
+                    existingSessionGoal={active?.goal}
+                    ownGoalForm={
+                      <details className="learning-own-goal">
+                        <summary>Chuẩn bị buổi học theo mục tiêu riêng</summary>
+                        <HomeTripForm
+                          draftRef={quickTripDraft}
+                          topics={availableTopics}
+                          hasActiveTrip={Boolean(active)}
+                          onPrepare={onPrepareQuickTrip}
+                        />
+                      </details>
+                    }
+                    onSelectCourse={selectLearningCourse}
+                    onOpenLesson={openLearningLesson}
+                    onResume={resumeLearningPathRun}
+                    onResumeExistingSession={() => go("focus")}
+                    onOpenGuide={() => setShowLearningGuide(true)}
+                    onDismissGuide={dismissLearningGuide}
+                    onNavigate={go}
+                  />
                 </>
               )}
+              {view === "lesson" && (selectedPathLesson ? (
+                <LearningPathLessonDetail
+                  course={learningPathCourse}
+                  lesson={selectedPathLesson}
+                  status={selectedPathLessonState}
+                  active={learningPathProgress.activeRun?.lessonId === selectedPathLesson.id &&
+                    learningPathProgress.activeRun.lessonVersion === selectedPathLesson.version}
+                  replay={selectedPathLessonState === "completed"}
+                  difficulty={learningDifficulty}
+                  duration={learningDuration}
+                  onBack={() => go("station")}
+                  onStart={(minutesValue) => startLearningLesson(selectedPathLesson, minutesValue)}
+                  onResume={resumeLearningPathRun}
+                />
+              ) : (
+                <Empty title="Bài học không còn trong lộ trình" text="Tiến độ cũ vẫn được giữ trong nhật ký. Hãy chọn một bài hiện có để tiếp tục." action="Mở lộ trình" onClick={() => go("station")} />
+              ))}
               {view === "ticket" && (
                 <>
                   <Heading
@@ -2466,8 +2823,8 @@ function AdventureWorkspace() {
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "ai"}>
                         {!materials.length && !sources.length && !documentText.trim() ? <StudyGuideComposer
-                          disabled={busy || privateTripDraftLocked} canGenerate={Boolean(user && !needsLogin && online)}
-                          unavailableReason={!online ? "Kết nối mạng để tạo bản ôn tập bằng AI." : "Đăng nhập để tạo bản ôn tập bằng API Google AI Studio."}
+                          disabled={busy || privateTripDraftLocked} canGenerate={owner === "guest" ? online && !authOffline : Boolean(user && !needsLogin && online)}
+                          unavailableReason={!online || authOffline ? "Kết nối mạng để tạo bản ôn tập bằng AI." : owner === "guest" ? "Nội dung gửi AI được giữ riêng trong phiên khách." : "Đăng nhập để tạo bản ôn tập bằng API Google AI Studio."}
                           review={studyGuideReview} onReviewAction={dispatchStudyGuideReview}
                           onGenerate={generateStudyGuide} onCancel={() => materialRequest.current?.abort()} onUse={acceptStudyGuide}
                           onDiscard={discardStudyGuideDraft} onDownload={downloadStudyGuide}
@@ -2482,7 +2839,7 @@ function AdventureWorkspace() {
                           <input type="checkbox" checked={preferAiReading} disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} onChange={(e) => setPreferAiReading(e.target.checked)} aria-describedby="material-ai-help" />
                         <span>Ưu tiên dùng AI để đọc PDF/ảnh</span>
                       </label>
-                      <p id="material-ai-help" className="material-hint">Thông thường, ứng dụng đọc chữ trên thiết bị. Với ảnh/PDF khó đọc, AI dùng chính API Google AI Studio (Gemini) đã tích hợp. Tệp chỉ được gửi khi bạn bấm “Đọc bằng AI”; cần đăng nhập.</p>
+                      <p id="material-ai-help" className="material-hint">Thông thường, ứng dụng đọc chữ trên thiết bị. Với ảnh/PDF khó đọc, AI dùng chính API Google AI Studio (Gemini) đã tích hợp. Tệp chỉ được gửi khi bạn bấm “Đọc bằng AI”; phiên khách không cần tài khoản.</p>
                       <label className="file-label">
                         Chọn tệp tài liệu
                         <input
@@ -2524,7 +2881,7 @@ function AdventureWorkspace() {
                       {!active && <StudyExercisePreparationEditor
                         key={`${owner}:${draftTripId}`}
                         plannedSessionId={draftTripId}
-                        authenticated={owner !== "guest" && !!user && !needsLogin}
+                        authenticated={owner === "guest" || (!!user && !needsLogin)}
                         sources={sources}
                         preparation={studyExercisePreparation?.plannedSessionId === draftTripId ? studyExercisePreparation : null}
                         disabled={busy || privateTripDraftLocked || !online || authOffline || !loaded || !exclusive}
@@ -2574,6 +2931,7 @@ function AdventureWorkspace() {
                           onChange={(value) => {
                             updateQuickTripDraft(quickTripDraft, { minutes: value });
                             setMinutes(value);
+                            updateLearningPathPlan(value * 60);
                           }}
                           breakCount={breakCount}
                           breakMinutes={breakMinutes}
@@ -2582,10 +2940,12 @@ function AdventureWorkspace() {
                           onBreakCountChange={(value) => {
                             if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakCount: value });
                             setBreakCount(value);
+                            updateLearningPathPlan(minutes * 60, value, breakMinutes);
                           }}
                           onBreakMinutesChange={(value) => {
                             if (!selectedGroupTrip) updateQuickTripDraft(quickTripDraft, { breakMinutes: value });
                             setBreakMinutes(value);
+                            updateLearningPathPlan(minutes * 60, breakCount, value);
                           }}
                         />
                       </TicketEditor>
@@ -2771,73 +3131,39 @@ function AdventureWorkspace() {
                     )}
                     <div className="focus-heading">
                       <span className="pill">
-                        {active.groupId
-                          ? "ĐỒNG HÀNH BẤT ĐỒNG BỘ"
-                          : "CHUYẾN CÁ NHÂN"}
+                        {active.groupId ? "BUỔI HỌC CÙNG BẠN" : "BUỔI HỌC CÁ NHÂN"}
                       </span>
                       <h1>{active.goal}</h1>
-                      {ticketCode?.id === active.id && <span className="pill">Mã chuyến {ticketCode.value}</span>}
+                      {ticketCode?.id === active.id && <span className="pill">Mã phiên {ticketCode.value}</span>}
                       <p>
-                        {rest ? "Dừng chân một chút. Chuyến sẽ tự tiếp tục sau giải lao." : active.state === "away"
+                        {rest ? "Giải lao một chút. Phiên sẽ tự tiếp tục sau giờ nghỉ." : active.state === "away"
                           ? "Đồng hồ vẫn chạy. Khoảng thời gian bạn rời đi không được cộng vào thời gian học."
                           : "Không vội vàng. Chỉ cần hiện diện ở đây."}
                       </p>
                     </div>
                     <section className="focus-card">
                       <div className="focus-phase-label">
-                        {rest ? `Trạm dừng chân ${rest.index}/${rest.count}` : `Chặng học ${(studyStage?.index ?? 0) + 1}/${studyStage?.count ?? 1}`}
+                        {rest ? `Nghỉ giải lao ${rest.index}/${rest.count}` : `Lượt học ${(studyStage?.index ?? 0) + 1}/${studyStage?.count ?? 1}`}
                       </div>
                       <FlipClock seconds={rest ? rest.remainingSeconds : studyStage?.remainingSeconds ?? active.target - elapsedSeconds(active, displayAt)}
-                        label={rest ? "Giải lao còn lại" : "Chặng học còn lại"}
+                        label={rest ? "Giải lao còn lại" : "Lượt học còn lại"}
                         motionAllowed={active.state === "focus" || active.state === "reconnecting"} />
                       <p className="focus-next" role="status">
                         {rest
-                          ? `Tự tiếp tục chặng học ${rest.index + 1}/${rest.count + 1} lúc ${new Date(rest.endsAt).toLocaleTimeString("vi-VN", {hour: "2-digit", minute: "2-digit", second: "2-digit"})}`
+                          ? `Tự tiếp tục lượt học ${rest.index + 1}/${rest.count + 1} lúc ${new Date(rest.endsAt).toLocaleTimeString("vi-VN", {hour: "2-digit", minute: "2-digit", second: "2-digit"})}`
                           : studyStage && studyStage.index < studyStage.count - 1
-                            ? `Tiếp theo: giải lao ${clock(active.breakPlan?.seconds ?? 0)}`
-                            : "Chặng cuối · chuyến hoàn tất khi đồng hồ về 00:00"}
+                            ? `Tiếp theo: nghỉ ${clock(active.breakPlan?.seconds ?? 0)}`
+                            : "Lượt cuối · phiên học hoàn tất khi đồng hồ về 00:00"}
                       </p>
-                      {active.breakPlan && active.breakPlan.count > 0 && <p className="focus-plan-total">{active.target / 60} phút học + {active.breakPlan.count * active.breakPlan.seconds / 60} phút nghỉ · tổng chuyến {totalDuration(active) / 60} phút</p>}
-                      <div className="timer-label">
-                        {Math.floor(focused(active) / 60)} PHÚT ĐÃ HỌC ·{" "}
-                        {Math.round((focused(active) / active.target) * 100)}%
-                        CHUYẾN ĐI
-                        <br />
-                        {active.distractions ?? 0} LẦN XAO NHÃNG
-                      </div>
-                      <JourneyView
-                        journey={
-                          active.groupId && group?.id === active.groupId
-                            ? group.journey
-                            : personalJourney
-                        }
-                        carriages={
-                          active.groupId && group?.id === active.groupId
-                            ? group.members
-                            : [
-                                {
-                                  id: owner,
-                                  name: carriage?.name ?? "Toa Mây",
-                                  color: carriage?.color ?? "#398575",
-                                },
-                              ]
-                        }
-                        ownId={owner}
-                        fog={active.state === "away" && !rest}
-                        draftSeconds={active.groupId ? 0 : focused(active)}
+                      {active.breakPlan && active.breakPlan.count > 0 && <p className="focus-plan-total">{active.target / 60} phút học + {active.breakPlan.count * active.breakPlan.seconds / 60} phút nghỉ · tổng thời lượng {totalDuration(active) / 60} phút</p>}
+                      <FocusStudyCompanion
+                        state={active.state}
+                        resting={Boolean(rest)}
+                        focusedSeconds={focused(active)}
                         targetSeconds={active.target}
-                        focusState={rest ? "break" : active.state}
-                        restStop={rest ? {index:rest.index,count:rest.count} : null}
-                        upcomingRestStop={!rest && studyStage && active.breakPlan && studyStage.index < active.breakPlan.count
-                          ? { index: studyStage.index + 1, count: active.breakPlan.count, remainingSeconds: Math.max(0, (studyStage.endsAt - displayAt) / 1000) }
-                          : null}
-                        sessionTiming={tripSceneTiming(active, displayAt)}
-                        motionAllowed={active.state === "focus" || active.state === "reconnecting"}
-                        reconnect={active.reconnect}
+                        distractions={active.distractions ?? 0}
                       />
-                      {active.groupId && <p className="overhead-hint">{active.syncClock
-                        ? "Bản đồ chuyến đi chung mở thêm vùng sau khi máy chủ xác nhận phần đóng góp của phiên này."
-                        : "Bản đồ đoàn mở thêm vùng sau khi máy chủ xác nhận phần đóng góp của phiên này."}</p>}
+                      {active.groupId && <p className="overhead-hint">Tiến độ nhóm cập nhật sau khi máy chủ xác nhận thời gian học của từng người.</p>}
                       <div className="focus-controls">
                         <ThemeToggle />
                         <div className="study-fullscreen-control">
@@ -2857,7 +3183,7 @@ function AdventureWorkspace() {
                           <button disabled={!online || busy} onClick={() => void run(sync)}>Cập nhật tiến độ</button>
                         </div>}
                         <button disabled={deviceClockBehind} onClick={() => setConfirm("finish")}>
-                          Kết thúc và lưu
+                          Kết thúc và lưu phiên
                         </button>
                       </div>
                     </section>
@@ -3520,6 +3846,8 @@ function AdventureWorkspace() {
                       {sessions.map((s) => {
                         const analysis = analyzeSession(s);
                         const gaps = knowledgeGaps(s.quiz);
+                        const privateGuestGrade = owner === "guest" ? guestQuizGradesBySession.get(s.id) : undefined;
+                        const curatedResult = learningPathProgress.completed.find((evaluation) => evaluation.sessionId === s.id);
                         return (
                           <button
                             key={s.id}
@@ -3551,10 +3879,15 @@ function AdventureWorkspace() {
                                 <span>{s.correctionFlags?.quizResult
                                   ? `Điểm theo lịch sử đã chỉnh: ${s.effectiveMetrics?.quizScore === null || s.effectiveMetrics?.quizTotal === null
                                     ? "chưa ghi nhận" : `${s.effectiveMetrics?.quizScore}/${s.effectiveMetrics?.quizTotal}`}`
-                                  : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
-                                <span>{s.quiz?.feedback
-                                  ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
-                                  : analysis.knowledgeLabel}</span>
+                                  : privateGuestGrade
+                                    ? `Điểm quiz riêng: ${privateGuestGrade.score}/${privateGuestGrade.total}`
+                                    : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
+                                <span>{privateGuestGrade
+                                  ? "Xem đáp án trong tổng kết"
+                                  : s.quiz?.feedback
+                                    ? gaps.length ? `${gaps.length} nội dung cần ôn lại` : "Chưa ghi nhận câu sai trong bộ này"
+                                    : analysis.knowledgeLabel}</span>
+                                {curatedResult && <span>Bài tự kiểm tra đã lưu riêng: {curatedResult.score}/{curatedResult.total}</span>}
                                 <small>{analysis.focusExplanation}</small>
                               </div>
                             </div>
@@ -3596,28 +3929,27 @@ function AdventureWorkspace() {
                   <>
                     <Heading
                       kicker="MỖI PHÚT ĐỀU CÓ Ý NGHĨA"
-                      title="Thêm một chặng đường đáng nhớ."
+                      title="Phiên học đã được lưu."
                       text={summarySession.goal}
                     />
-                    <div className="summary-arrival">
-                      <TopDownScene
-                        carriages={[{
-                          id: owner,
-                          name: carriage?.name ?? "Toa của bạn",
-                          color: carriage?.color ?? "#398575",
-                        }]}
-                        ownId={owner}
-                        running={false}
-                        fogStrength={0}
-                        motionAllowed={false}
-                        arrival={{
-                          label: summaryCompleted
-                            ? "Đã đến ga cuối của chuyến học."
-                            : "Chuyến dừng sớm · thành quả vẫn được giữ.",
-                          completed: summaryCompleted,
-                        }}
+                    {summaryCuratedEvaluation ? (
+                      <CuratedEvaluationReceipt evaluation={summaryCuratedEvaluation} />
+                    ) : summaryLearningLesson && summaryLearningCourse && summaryLearningRun ? (
+                      <CuratedEvaluation
+                        lesson={summaryLearningLesson}
+                        conceptId={summaryLearningCourse.conceptId}
+                        onSubmit={(score, total, answers) => completeCuratedEvaluation(summarySession.id, score, total, answers)}
                       />
-                    </div>
+                    ) : summaryInterruptedLesson ? (
+                      <LearningPathRetryNotice
+                        lessonTitle={summaryInterruptedLesson.lesson.title}
+                        onRetry={() => openLearningLesson(summaryInterruptedLesson.lesson)}
+                      />
+                    ) : null}
+                    <SessionSummaryCompanion
+                      completed={summaryCompleted}
+                      focusedSeconds={summaryAnalysis!.focusedSeconds}
+                    />
                     <SessionCorrectionNotice
                       correctionFlags={summarySession.correctionFlags}
                       recordedEnd={date(summarySession.ended)}
@@ -3631,9 +3963,9 @@ function AdventureWorkspace() {
                       />
                       <Stat
                         icon="✦"
-                        label="KINH NGHIỆM TOA"
+                        label="NỖ LỰC HỌC"
                         value={`${Math.floor(summaryAnalysis!.focusedSeconds / 60)} XP`}
-                        detail="1 phút tập trung = 1 XP · XP ghi nhận nỗ lực, không đo mức độ thành thạo"
+                        detail="XP ghi nhận thời gian tập trung, không đo mức độ thành thạo"
                       />
                       <Stat
                         icon="↗"
@@ -3653,11 +3985,10 @@ function AdventureWorkspace() {
                       />
                     </div>
                     <section className="panel">
-                      <h2>Mang kiến thức theo chuyến đi</h2>
-                      {!!saved.materials?.[summarySession.id]?.length && <details className="material-history"><summary>Tài liệu của chuyến · {saved.materials[summarySession.id].length} tệp</summary><ul className="material-list">{saved.materials[summarySession.id].map((file, i) => <li key={`${i}:${file.name}`}><strong>{file.name}</strong><span>{file.message}</span></li>)}</ul></details>}
+                      <h2>Ôn tập phiên học</h2>
+                      {!!saved.materials?.[summarySession.id]?.length && <details className="material-history"><summary>Tài liệu của phiên · {saved.materials[summarySession.id].length} tệp</summary><ul className="material-list">{saved.materials[summarySession.id].map((file, i) => <li key={`${i}:${file.name}`}><strong>{file.name}</strong><span>{file.message}</span></li>)}</ul></details>}
                       <p>
-                        Ôn lại một chút trước khi nghỉ. Làm sau cũng được; phần
-                        học của bạn đã được lưu.
+                        Bạn có thể xem lại câu hỏi và tài liệu. Phần học của bạn đã được lưu.
                       </p>
                       {!!saved.materials?.[summarySession.id]?.length && !saved.sources?.[summarySession.id]?.length && <div className="info-box"><p>Tài liệu này được lưu bằng phiên bản cũ. Khôi phục bản chép đã lưu hoặc dán nội dung đúng, rồi xác nhận làm nguồn câu hỏi.</p><button onClick={() => {const value = current.current;if(value.summarySessionId !== summarySession.id) return;invalidateQuizForSourceEdit(owner, summarySession.id);commitRef.current({...value,sources:{...value.sources,[summarySession.id]:[recoveredMaterialSource(value.notes[summarySession.id] ?? "",value.materials?.[summarySession.id] ?? [])]},quizDrafts:emptyQuizDraftForSourceEdit(value,summarySession.id)});}}>Khôi phục / nhập bản chép tài liệu cũ</button></div>}
                       {(saved.sources?.[summarySession.id] ?? []).map((source) => {
@@ -3677,12 +4008,14 @@ function AdventureWorkspace() {
                         const summaryError = ui?.status === "failed" && ui.sourceFingerprint === sourceFingerprint
                           ? ui.error
                           : "";
-                        const canGenerateSummary = !!user && !needsLogin && owner !== "guest" && online &&
+                        const canGenerateSummary = (owner === "guest" || (!!user && !needsLogin)) && online &&
                           !authOffline && loaded && exclusive && workspaceLive.current;
-                        const summaryUnavailableReason = !user || needsLogin || owner === "guest"
-                          ? "Đăng nhập để tạo tóm tắt tài liệu."
+                        const summaryUnavailableReason = owner !== "guest" && (!user || needsLogin)
+                          ? "Đăng nhập lại để tạo tóm tắt tài liệu."
                           : !online || authOffline
                             ? "Kết nối mạng để tạo tóm tắt tài liệu."
+                            : owner === "guest"
+                              ? "Tóm tắt được lưu riêng trên thiết bị này."
                             : !loaded || !exclusive || !workspaceLive.current
                               ? "Mở hành trình trên thiết bị này để tạo tóm tắt."
                               : "";
@@ -3735,7 +4068,8 @@ function AdventureWorkspace() {
                         draft={saved.quizDrafts?.[summarySession.id]}
                         prefetchStatus={summaryQuizPrefetch?.status}
                         prefetchError={summaryQuizPrefetch?.message}
-                        canUseAI={!!user && !needsLogin}
+                        canUseAI={owner === "guest" ? online && !authOffline : !!user && !needsLogin && online && !authOffline}
+                        isGuest={owner === "guest"}
                         needsLogin={needsLogin}
                         onGenerate={(count) => generateQuiz(summarySession, count)}
                         onSaveDraft={(draft) => saveQuizDraft(owner, summarySession.id, draft)}
@@ -3751,13 +4085,16 @@ function AdventureWorkspace() {
                         onRequestSolution={() => void loadSummaryStudyExerciseSolutions()}
                         onCancelSolution={cancelStudyExerciseSolutionRequest}
                       />}
-                      {summaryExerciseAvailability && <p className="study-exercises__error" role="alert">{summaryExerciseAvailability}</p>}
+                      {summaryExerciseAvailability && <div className="study-exercises__error" role="alert">
+                        <p>{summaryExerciseAvailability}</p>
+                        {owner === "guest" && /không còn|hết hạn/iu.test(summaryExerciseAvailability) && <button type="button" onClick={() => { selectSoloMode(); go("ticket"); }}>Mở vé cho buổi học mới</button>}
+                      </div>}
                     </section>
                     {owner === "guest" && <section className="panel">
-                      <h2>Lịch sử chuyến đi</h2>
+                      <h2>Lịch sử phiên học</h2>
                       <p>Phiên học đã lưu sẽ xuất hiện tự động trong lịch sử chung sau khi đồng bộ với máy chủ.</p>
                       <p role={guestPublication[summarySession.id]?.status === "suppression-failed" ? "alert" : "status"}>{guestPublication[summarySession.id]?.status === "suppression-failed"
-                        ? guestPublication[summarySession.id].message ?? "Máy chủ đã gỡ chuyến này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại."
+                        ? guestPublication[summarySession.id].message ?? "Máy chủ đã gỡ phiên này nhưng thiết bị chưa lưu trạng thái. Hãy thử lại."
                         : saved.guestPublished?.includes(summarySession.id)
                           ? "Phiên khách đã được máy chủ lưu và sẽ xuất hiện trong lịch sử tự động."
                         : guestPublication[summarySession.id]?.status === "save-failed"
@@ -3765,16 +4102,16 @@ function AdventureWorkspace() {
                           : guestPublication[summarySession.id]?.status === "sending"
                             ? "Đang đồng bộ phiên đã lưu với máy chủ."
                             : guestPublication[summarySession.id]?.status === "failed"
-                              ? `Chuyến vẫn lưu trên thiết bị; chưa đồng bộ được với máy chủ. ${guestPublication[summarySession.id].message ?? ""}`
+                              ? `Phiên vẫn lưu trên thiết bị; chưa đồng bộ được với máy chủ. ${guestPublication[summarySession.id].message ?? ""}`
                               : "Phiên khách đã lưu trên thiết bị; lịch sử chung sẽ cập nhật sau khi đồng bộ."}</p>
                     </section>}
                     <div className="choice-row">
-                      <button onClick={() => go("experiments")}>Xem lịch sử chuyến đi →</button>
+                      <button onClick={() => go("experiments")}>Xem lịch sử phiên học →</button>
                       {owner !== "guest" && saved.pending.some(session => session.id === summarySession.id) &&
                         <button disabled={busy || !online || needsLogin} onClick={() => void run(sync)}>Thử đồng bộ lại</button>}
                     </div>
                     <button className="primary" onClick={() => go("station")}>
-                      Trở về ga chính →
+                      Về lộ trình →
                     </button>
                   </>
                 ) : (

@@ -13,7 +13,7 @@ test("public report is reachable from navigation and registered on the API app",
   ]);
 
   assert.match(adventure, /import \{ PublicReport \} from "\.\/PublicReport"/u);
-  assert.match(adventure, /\{ id: "report"[\s\S]*?label: "Báo cáo" \}/u);
+  assert.match(adventure, /\{ id: "report"[\s\S]*?label: "Báo cáo", mobileLabel: "Báo cáo" \}/u);
   assert.match(adventure, /const views = \[[^\]]*"report"/u);
   assert.match(adventure, /view === "report" && <PublicReport \/>/u);
   assert.match(adventure, /view === "experiments" && <ExperimentResults \/>/u);

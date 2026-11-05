@@ -7,10 +7,38 @@ import {
   loadStudyExercisePreparationWithCurrentSources,
   loadStudyExerciseSolutionsAfterSync,
   matchStudyExercisePreparationSource,
+  isPersistedStudyExerciseSessionCompleted,
   studyExerciseSourcesForSession,
   startStudyExerciseFocusIfAllowed,
   shouldInvalidateStudyExerciseForSourceChange,
 } from "../src/adventure/studyExerciseSessionFlow.ts";
+
+test("account exercise solutions require server completion while guests may use full local timing evidence", () => {
+  const localFullSession = {
+    started: 1_000,
+    ended: 601_000,
+    target: 600,
+    segments: [],
+  };
+  const serverCompletedSession = {
+    ...localFullSession,
+    effectiveMetrics: { completed: true },
+  };
+  const serverIncompleteSession = {
+    ...localFullSession,
+    effectiveMetrics: { completed: false },
+  };
+  const guestEarlyEnd = { ...localFullSession, ended: 301_000 };
+  const guestInvalidBreakPlan = { ...localFullSession, breakPlan: { count: 1, seconds: 0 } };
+
+  assert.equal(isPersistedStudyExerciseSessionCompleted("account-a", localFullSession), false);
+  assert.equal(isPersistedStudyExerciseSessionCompleted("account-a", serverCompletedSession), true);
+  assert.equal(isPersistedStudyExerciseSessionCompleted("account-a", serverIncompleteSession), false);
+  assert.equal(isPersistedStudyExerciseSessionCompleted("guest", localFullSession), true);
+  assert.equal(isPersistedStudyExerciseSessionCompleted("guest", guestEarlyEnd), false);
+  assert.equal(isPersistedStudyExerciseSessionCompleted("guest", guestInvalidBreakPlan), false);
+  assert.equal(isPersistedStudyExerciseSessionCompleted("guest", serverIncompleteSession), false);
+});
 
 test("rehydrated generated sets match reviewed local source hashes and tolerate unavailable local source", async () => {
   const preparation = { mode: "generated", sourceFingerprint: "hash-original" };

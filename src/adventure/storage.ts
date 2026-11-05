@@ -1,6 +1,11 @@
 import { isValidBreakPlan } from "../../backend/src/adventure/domain.ts";
 import { validMaterialSources, type MaterialSource } from "./materialSources.ts";
 import type { ActiveTrip } from "./focus";
+import {
+  createLearningPathProgress,
+  normalizeLearningPathProgress,
+  type LearningPathProgress,
+} from "./learningPath.ts";
 import { isDeviceCategory } from "./device.ts";
 import { isQuizCount, isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
 import {
@@ -36,6 +41,8 @@ export type Saved = {
   sources?: Record<string, MaterialSource[]>;
   materials?: Record<string, NonNullable<ActiveTrip["materials"]>>;
   guestPublished?: string[];
+  /** Guest sessions whose private exercise deck was bound before focus began. */
+  guestExerciseSessions?: string[];
   /** Owner-local tombstone memory, including authenticated 410 responses for guest trips. */
   removedSessionIds?: string[];
   quizDrafts?: Record<string, QuizDraft>;
@@ -43,6 +50,8 @@ export type Saved = {
   materialSummaries?: Record<string, Record<string, MaterialSummaryCacheEntry>>;
   /** Owner-local private study plan for a member who has marked ready. */
   readyTripDrafts?: Record<string, SynchronizedTripDraft>;
+  /** Curated lesson progress stays on this owner-local device record. */
+  learningPath?: LearningPathProgress;
 };
 export const MAX_MATERIAL_SUMMARY_CACHE_ENTRIES = 20;
 export const MAX_MATERIAL_SUMMARY_LENGTH = 4_000;
@@ -111,7 +120,9 @@ export const emptySaved = (): Saved => ({
   materials: {},
   sources: {},
   guestPublished: [],
+  guestExerciseSessions: [],
   quizDrafts: {},
+  learningPath: createLearningPathProgress(),
 });
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -235,6 +246,7 @@ function validSaved(v: unknown): v is Saved {
       (v.guestPublished !== undefined && (!Array.isArray(v.guestPublished) ||
         !v.guestPublished.every((id) => typeof id === "string" && id.length > 0) ||
         new Set(v.guestPublished).size !== v.guestPublished.length)) ||
+      (v.guestExerciseSessions !== undefined && !validRemovedSessionIds(v.guestExerciseSessions)) ||
       (v.removedSessionIds !== undefined && !validRemovedSessionIds(v.removedSessionIds)) ||
       (v.quizDrafts !== undefined && !isValidQuizDraftMap(v.quizDrafts)) ||
       (v.materialSummaries !== undefined && !validMaterialSummaries(v.materialSummaries)) ||
@@ -255,6 +267,7 @@ function validSaved(v: unknown): v is Saved {
         (a.deviceCategory !== undefined && !isDeviceCategory(a.deviceCategory)) ||
         (a.syncClock !== undefined && typeof a.syncClock !== "boolean") ||
         (a.clockOffsetMs !== undefined && (!Number.isSafeInteger(a.clockOffsetMs) || Math.abs(Number(a.clockOffsetMs)) > 24 * 60 * 60 * 1000)) ||
+        (a.serverAnchorOffsetMs !== undefined && (!Number.isSafeInteger(a.serverAnchorOffsetMs) || Math.abs(Number(a.serverAnchorOffsetMs)) > 24 * 60 * 60 * 1000)) ||
         (a.distractions !== undefined && !count(a.distractions)) ||
         (a.breakPlan !== undefined && !isValidBreakPlan(a.breakPlan,a.target)) ||
         (a.awayCounted !== undefined && typeof a.awayCounted !== "boolean") ||
@@ -300,6 +313,7 @@ export function suppressRemovedSessions(saved: Saved, sessionIds: readonly strin
     local: { ...saved.local, sessions: localSessions },
     snapshot,
     removedSessionIds,
+    guestExerciseSessions: saved.guestExerciseSessions?.filter((id) => !removed.has(id)),
     quizDrafts,
     ...(materialSummaries === undefined ? {} : { materialSummaries }),
     ...(saved.summarySessionId && removed.has(saved.summarySessionId) ? { summarySessionId: undefined } : {}),
@@ -342,7 +356,10 @@ export function readSaved(owner: string): Saved {
     throw new Error(
       "Dữ liệu đã lưu không hợp lệ. Hãy xuất bản sao trước khi xóa dữ liệu trình duyệt.",
     );
-  return value;
+  return {
+    ...value,
+    learningPath: normalizeLearningPathProgress(value.learningPath),
+  };
 }
 export function writeSaved(owner: string, value: Saved) {
   localStorage.setItem(`train-adventure:v1:${owner}`, JSON.stringify(value));

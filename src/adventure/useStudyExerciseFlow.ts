@@ -5,10 +5,12 @@ import {
   invalidateStudyExercises,
   prepareStudyExercises,
   requestStudyExerciseSolutions,
+  studyExerciseRequestId,
   type StudyExercisePreparationInput,
   type StudyExercisePreparationResponse,
   type StudyExerciseSolutionResponse,
 } from "../services/studyExercisesApi.ts";
+import { hasGuestAiCredential } from "../services/guestAiApi.ts";
 import type { MaterialSource } from "./materialSources.ts";
 import {
   fingerprintStudyExerciseSourceText,
@@ -72,6 +74,7 @@ export type StudyExerciseFlowOptions = {
   exclusive: boolean;
   view: string;
   plannedSessionId: string;
+  guestExerciseSessions: readonly string[];
   sources: readonly MaterialSource[];
   activeSession: FocusSessionSource;
   summarySession: SummarySessionSource;
@@ -195,7 +198,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     };
     try {
       const loaded = await loadStudyExercisePreparationWithCurrentSources({
-        load: () => getStudyExercisesForSession(input.sessionId, input.controller.signal),
+        load: () => getStudyExercisesForSession(input.sessionId, input.controller.signal, input.ownerId === "guest"),
         isCurrent,
         getSources: () => input.targetView === "summary" ? summarySourcesRef.current : input.sources,
         match: (preparation, sources) => matchStudyExercisePreparationSource({
@@ -207,13 +210,14 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
       });
       if (!loaded) return;
       const { preparation: stored, sourceMatch } = loaded;
-      if (skippedRequests.current.has(stored.id)) {
-        void invalidateStudyExercises(input.sessionId, stored.id).catch(() => {});
+      const storedRequestId = studyExerciseRequestId(stored);
+      if (skippedRequests.current.has(storedRequestId) || skippedRequests.current.has(stored.id)) {
+        void invalidateStudyExercises(input.sessionId, storedRequestId, undefined, input.ownerId === "guest").catch(() => {});
         return;
       }
       if (stored.mode === "generated" &&
           (sessionSourceRevisions.current.get(input.sessionId) ?? 0) !== input.sourceRevision) {
-        void invalidateStudyExercises(input.sessionId, stored.id).catch(() => {});
+        void invalidateStudyExercises(input.sessionId, storedRequestId, undefined, input.ownerId === "guest").catch(() => {});
         return;
       }
       if (sourceMatch.status === "mismatch") {
@@ -222,18 +226,26 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
           sessionId: input.sessionId,
           message: "Nguồn đã lưu không còn khớp với bộ câu hỏi. Hãy dùng nguồn đã kiểm tra trước khi tạo bộ mới.",
         });
-        void invalidateStudyExercises(input.sessionId, stored.id).catch(() => {});
+        void invalidateStudyExercises(input.sessionId, storedRequestId, undefined, input.ownerId === "guest").catch(() => {});
         return;
       }
       setPreparation(stored, sourceMatch.status === "matched"
         ? { preparationId: stored.id, sourceId: sourceMatch.sourceId, textFingerprint: sourceMatch.textFingerprint }
         : null);
     } catch (reason) {
-      if (!input.controller.signal.aborted && !hasHttpStatus(reason, 404) && isCurrent())
+      if (!input.controller.signal.aborted && isCurrent())
         setAvailabilityMessage({
           ownerId: input.ownerId,
           sessionId: input.sessionId,
-          message: "Chưa tải được bộ bài tập riêng tư. Kết nối lại rồi mở lại phiên học.",
+          message: input.ownerId === "guest" && hasHttpStatus(reason, 404)
+            ? input.targetView === "summary"
+              ? "Bộ bài tập AI riêng tư không còn trong phiên này. Hãy mở vé để chuẩn bị lại bộ bài cho buổi học tiếp theo."
+              : "Bộ bài tập AI riêng tư không còn trong phiên này. Hãy tiếp tục hoặc kết thúc phiên hiện tại, rồi mở vé để chuẩn bị lại bộ bài."
+            : input.ownerId === "guest" && hasHttpStatus(reason, 401)
+              ? input.targetView === "summary"
+                ? "Phiên AI riêng tư đã hết hạn. Kết quả đã lưu vẫn còn; hãy mở vé cho buổi học mới để tạo bộ bài khác."
+                : "Phiên AI riêng tư đã hết hạn. Bạn có thể tiếp tục phiên này; sau khi kết thúc, mở vé để chuẩn bị lại bộ bài."
+            : "Chưa tải được bộ bài tập riêng tư. Kết nối lại rồi mở lại phiên học.",
         });
     }
   }, [setPreparation]);
@@ -242,7 +254,8 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
   const activeSessionOwner = options.activeSession?.owner;
   useEffect(() => {
     const current = optionsRef.current;
-    if (current.view !== "focus" || !current.activeSession || current.ownerId === "guest" ||
+    if (current.view !== "focus" || !current.activeSession ||
+        (current.ownerId === "guest" && !current.guestExerciseSessions.includes(current.activeSession.id)) ||
         !current.authenticated || current.needsLogin || !current.online || !current.loaded || !current.exclusive) return;
     const ownerId = current.ownerId;
     const sessionId = current.activeSession.id;
@@ -253,7 +266,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     const controller = new AbortController();
     loadController.current?.abort();
     loadController.current = controller;
-    void bindStudyExercises(sessionId, controller.signal).catch(() => {});
+    if (ownerId !== "guest") void bindStudyExercises(sessionId, controller.signal).catch(() => {});
     if (preparationRef.current?.plannedSessionId !== sessionId) {
       void hydrate({
         ownerId,
@@ -277,7 +290,8 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
   useEffect(() => {
     const current = optionsRef.current;
     const sessionId = current.summarySession?.id;
-    if (current.view !== "summary" || !sessionId || current.ownerId === "guest" || !current.authenticated ||
+    if (current.view !== "summary" || !sessionId ||
+        (current.ownerId === "guest" && !current.guestExerciseSessions.includes(sessionId)) || !current.authenticated ||
         current.needsLogin || !current.online || !current.loaded || !current.exclusive) return;
     const ownerId = current.ownerId;
     boundSessions.current.add(sessionId);
@@ -335,7 +349,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     options.loaded, options.exclusive, summarySessionId, setSolutionUi]);
 
   const onInvalidate = useCallback((plannedSessionId: string, requestId: string) =>
-    invalidateStudyExercises(plannedSessionId, requestId), []);
+    invalidateStudyExercises(plannedSessionId, requestId, undefined, optionsRef.current.ownerId === "guest"), []);
 
   const onPrepare = useCallback(async (
     input: StudyExercisePreparationInput,
@@ -344,8 +358,8 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
   ): Promise<StudyExercisePreparationResponse> => {
     const current = optionsRef.current;
     const ownerId = current.ownerId;
-    if (ownerId === "guest" || !current.authenticated || current.needsLogin || input.plannedSessionId !== current.plannedSessionId)
-      throw new Error("Đăng nhập và mở lại vé để chuẩn bị bài tập riêng tư.");
+    if ((ownerId !== "guest" && !current.authenticated) || current.needsLogin || input.plannedSessionId !== current.plannedSessionId)
+      throw new Error("Hãy mở lại vé để chuẩn bị bài tập riêng tư.");
 
     const request: PendingStudyExerciseRequest = {
       ownerId,
@@ -369,7 +383,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     setStartPromptVisible(false);
 
     try {
-      const result = await prepareStudyExercises(input, request.controller.signal);
+      const result = await prepareStudyExercises(input, request.controller.signal, ownerId === "guest");
       const selectedSource = sourceScope
         ? sourcesRef.current.find(source => source.id === sourceScope.sourceId) ?? null
         : null;
@@ -393,7 +407,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
             currentOptions.isRouteScopeCurrent(ownerId, input.plannedSessionId, "ticket") &&
             !skippedRequests.current.has(input.requestId) && sourceCurrent;
         },
-        invalidate: () => invalidateStudyExercises(input.plannedSessionId, input.requestId),
+        invalidate: () => invalidateStudyExercises(input.plannedSessionId, studyExerciseRequestId(result), undefined, ownerId === "guest"),
       });
       setPreparation(accepted, sourceScope ? { preparationId: accepted.id, ...sourceScope } : null);
       return accepted;
@@ -414,10 +428,11 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     pendingRequest.controller.abort();
     pendingRef.current = null;
     setPending(null);
-    void invalidateStudyExercises(pendingRequest.plannedSessionId, pendingRequest.requestId).catch(() => {});
+    void invalidateStudyExercises(pendingRequest.plannedSessionId, pendingRequest.requestId, undefined, pendingRequest.ownerId === "guest").catch(() => {});
   }, []);
 
   const noteSourceChange = useCallback((plannedSessionId: string, sourceId: string) => {
+    if (plannedSessionId !== optionsRef.current.plannedSessionId) return;
     const storedPreparation = preparationRef.current;
     const sourceScope = sourceScopeRef.current;
     const pendingRequest = pendingRef.current;
@@ -444,7 +459,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
       pendingRef.current = null;
       setPending(null);
       sourceInvalidationLookups.current.add(key);
-      void invalidateStudyExercises(plannedSessionId, pendingRequest.requestId).catch(() => {});
+      void invalidateStudyExercises(plannedSessionId, pendingRequest.requestId, undefined, pendingRequest.ownerId === "guest").catch(() => {});
       setAvailabilityMessage({
         ownerId: pendingRequest.ownerId,
         sessionId: plannedSessionId,
@@ -456,7 +471,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
       if (!sourceScope || sourceScope.sourceId === sourceId) {
         setPreparation(null);
         sourceInvalidationLookups.current.add(key);
-        void invalidateStudyExercises(plannedSessionId, storedPreparation.id).catch(() => {});
+        void invalidateStudyExercises(plannedSessionId, studyExerciseRequestId(storedPreparation), undefined, optionsRef.current.ownerId === "guest").catch(() => {});
         setAvailabilityMessage({
           ownerId: optionsRef.current.ownerId,
           sessionId: plannedSessionId,
@@ -466,17 +481,18 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
       return;
     }
     if (storedPreparation?.plannedSessionId === plannedSessionId || pendingRequest?.plannedSessionId === plannedSessionId ||
-        optionsRef.current.ownerId === "guest" || !optionsRef.current.authenticated || optionsRef.current.needsLogin ||
+        !optionsRef.current.authenticated || optionsRef.current.needsLogin ||
         sourceInvalidationLookups.current.has(key)) return;
     const current = optionsRef.current;
     const ownerId = current.ownerId;
+    if (ownerId === "guest" && !hasGuestAiCredential()) return;
     const authGeneration = current.getAuthGeneration();
     const workspaceGeneration = current.getWorkspaceGeneration();
     sourceInvalidationLookups.current.add(key);
-    void getStudyExercisesForSession(plannedSessionId).then(stored => {
+    void getStudyExercisesForSession(plannedSessionId, undefined, ownerId === "guest").then(stored => {
       const latest = optionsRef.current;
       if (!latest.isOwnerWorkspaceCurrent(ownerId, authGeneration, workspaceGeneration) || stored.mode !== "generated") return;
-      void invalidateStudyExercises(plannedSessionId, stored.id).catch(() => {});
+      void invalidateStudyExercises(plannedSessionId, studyExerciseRequestId(stored), undefined, ownerId === "guest").catch(() => {});
     }).catch(() => {});
   }, [setPreparation]);
 
@@ -488,7 +504,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     const stored = preparationRef.current;
     if (stored?.plannedSessionId !== sessionId) return;
     setPreparation(null);
-    void invalidateStudyExercises(sessionId, stored.id).catch(() => {});
+    void invalidateStudyExercises(sessionId, studyExerciseRequestId(stored), undefined, optionsRef.current.ownerId === "guest").catch(() => {});
   }, [setPreparation]);
 
   const isReadyForSession = useCallback((sessionId: string) => {
@@ -516,7 +532,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     const stored = preparationRef.current;
     const ownerId = current.ownerId;
     const sessionId = current.summarySession?.id;
-    if (!stored || !sessionId || stored.plannedSessionId !== sessionId || ownerId === "guest" ||
+    if (!stored || !sessionId || stored.plannedSessionId !== sessionId ||
         !current.authenticated || current.needsLogin || !current.online || !current.loaded || !current.exclusive) return;
     const authGeneration = current.getAuthGeneration();
     const workspaceGeneration = current.getWorkspaceGeneration();
@@ -552,7 +568,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
         sync: () => syncRef.current(),
         isScopeCurrent,
         isPersistedCompleted,
-        load: () => requestStudyExerciseSolutions(stored.id, controller.signal),
+        load: () => requestStudyExerciseSolutions(stored.id, controller.signal, ownerId === "guest"),
         onRejected: clearLoading,
       });
       if (!isScopeCurrent()) {
@@ -579,7 +595,8 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     : null;
   const summarySourceCurrent = summaryPreparation?.mode !== "generated" ||
     isSourceCurrent(summaryPreparation, summaryPreparation.plannedSessionId, summarySourceScope, options.summarySources);
-  const summaryPersistedCompleted = options.summarySession?.effectiveMetrics?.completed === true;
+  const summaryPersistedCompleted = Boolean(options.summarySession &&
+    options.isPersistedCompleted(options.ownerId, options.summarySession.id));
   const summarySolutionUi = solutionUi?.ownerId === options.ownerId &&
     solutionUi.sessionId === summarySessionId && solutionUi.preparationId === summaryPreparation?.id
     ? solutionUi
@@ -596,7 +613,7 @@ export function useStudyExerciseFlow(options: StudyExerciseFlowOptions) {
     const request = pendingRef.current;
     if (request) {
       request.controller.abort();
-      void invalidateStudyExercises(request.plannedSessionId, request.requestId).catch(() => {});
+      void invalidateStudyExercises(request.plannedSessionId, request.requestId, undefined, request.ownerId === "guest").catch(() => {});
     }
     loadController.current?.abort();
     solutionController.current?.abort();

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QuizRequestGuard, canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
+import { QuizRequestGuard, canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidGuestQuizDeck, isValidGuestQuizGrade, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
 
 const question = {
   id: "123e4567-e89b-42d3-a456-426614174000",
@@ -21,6 +21,48 @@ test("valid quiz drafts survive the same JSON round trip used by local storage",
   assert.equal(isValidQuizDraft(JSON.parse(JSON.stringify(draft))), true);
   assert.equal(isValidQuizDraft({ count: 3, questions: [], answers: {} }), true);
   assert.equal(isValidQuizDraftMap(JSON.parse(JSON.stringify({ sessionA: draft }))), true);
+});
+
+test("guest decks keep answer keys on the server while private grades remain valid in the local draft", () => {
+  const deck = {
+    id: "123e4567-e89b-42d3-a456-426614174100",
+    plannedSessionId: "123e4567-e89b-42d3-a456-426614174101",
+    questions: [
+      { id: "123e4567-e89b-42d3-a456-426614174102", question: "Which cell part stores DNA?", options: ["Nucleus", "Ribosome", "Membrane", "Wall"], knowledgePoint: "Cell structure" },
+    ],
+  };
+  const grade = {
+    quizId: deck.id,
+    score: 1,
+    total: 1,
+    questions: [{ id: deck.questions[0].id, selected: 0, correct: true, correctAnswerIndex: 0, explanation: "The nucleus contains most cellular DNA." }],
+  };
+
+  assert.equal(isValidGuestQuizDeck(deck), true);
+  assert.equal(isValidGuestQuizGrade(grade, deck.questions), true);
+  const draft = {
+    count: 1,
+    questions: deck.questions,
+    answers: { [deck.questions[0].id]: 0 },
+    guestQuizId: deck.id,
+    guestGrade: {
+      score: 1,
+      total: 1,
+      feedback: [{
+        questionId: deck.questions[0].id,
+        question: deck.questions[0].question,
+        options: deck.questions[0].options,
+        selected: 0,
+        correctIndex: 0,
+        correct: true,
+        explanation: grade.questions[0].explanation,
+        knowledgePoint: "Cell structure",
+      }],
+    },
+  };
+  assert.equal(isValidQuizDraft(JSON.parse(JSON.stringify(draft))), true);
+  assert.equal(isValidQuizDraft({ ...draft, guestQuizId: undefined }), false);
+  assert.equal(isValidGuestQuizDeck({ ...deck, questions: [{ ...deck.questions[0], correctAnswerIndex: 0 }] }), false);
 });
 
 test("quiz panel adopts the current saved draft and selected count without retaining edited-source questions", () => {
