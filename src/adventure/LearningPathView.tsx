@@ -213,10 +213,6 @@ export function LearningPathHome({
                   <p>Tập trung đủ thời gian rồi tự kiểm tra để mở bài kế tiếp.</p>
                 </aside>}
                 <div className="learning-route__node-wrap">
-                  {firstAvailable && <span className="learning-route__start-marker">
-                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v10m-4-4 4 4 4-4" /></svg>
-                    Bắt đầu
-                  </span>}
                   <button
                     type="button"
                     className={`learning-route__node is-${status}${milestone ? " is-milestone" : ""}`}
@@ -224,6 +220,10 @@ export function LearningPathHome({
                     disabled={status === "locked" || (Boolean(active) && status !== "current")}
                     onClick={() => status === "current" && active ? onResume() : onOpenLesson(lesson)}
                   >
+                    {firstAvailable && <span className="learning-route__start-marker">
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v10m-4-4 4 4 4-4" /></svg>
+                      Bắt đầu
+                    </span>}
                     <span className="learning-route__node-number">{String(index + 1).padStart(2, "0")}</span>
                     <RouteNodeIcon status={status} milestone={milestone} />
                   </button>
