@@ -3,11 +3,28 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const adventureApp = await readFile(new URL("../src/adventure/AdventureApp.tsx", import.meta.url), "utf8");
-const finishStart = adventureApp.indexOf("function finish() {");
-const finishEnd = adventureApp.indexOf("\n  useEffect(() => {\n    finishRef.current", finishStart);
-const finish = finishStart >= 0 && finishEnd > finishStart
-  ? adventureApp.slice(finishStart, finishEnd)
-  : "";
+
+function extractFinish(source) {
+  const normalizedSource = source.replace(/\r\n?/gu, "\n");
+  const finishStart = normalizedSource.indexOf("function finish() {");
+  const finishEnd = normalizedSource.indexOf("\n  useEffect(() => {\n    finishRef.current", finishStart);
+  return finishStart >= 0 && finishEnd > finishStart
+    ? normalizedSource.slice(finishStart, finishEnd)
+    : "";
+}
+
+const finish = extractFinish(adventureApp);
+
+test("finish wiring extraction accepts CRLF source checkouts", () => {
+  const lfAdventureApp = adventureApp.replace(/\r\n?/gu, "\n");
+  const crlfAdventureApp = adventureApp.replace(/\r?\n/gu, "\r\n");
+  const expectedFinish = "const s: Session = {";
+  const lfFinish = extractFinish(lfAdventureApp);
+  const crlfFinish = extractFinish(crlfAdventureApp);
+
+  assert.ok(lfFinish.includes(expectedFinish));
+  assert.ok(crlfFinish.includes(expectedFinish));
+});
 
 test("the real focus finish path applies scheduled-duration eligibility before lesson review", () => {
   assert.ok(finish.includes("const s: Session = {"));
