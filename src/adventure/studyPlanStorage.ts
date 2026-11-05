@@ -4,10 +4,34 @@ import {
   type StudyOnboardingProgress,
   type StudySurvey,
 } from "./studyOnboardingModel.ts";
+import { validMaterialSources, type MaterialSource } from "./materialSources.ts";
 import type { QuickTripDraft } from "./quickTripDraft.ts";
 
 export const STUDY_PLAN_STORAGE_VERSION = 1 as const;
 export const MAX_LOCAL_STUDY_PLANS = 50;
+export const MAX_LOCAL_STUDY_WORKSPACE_DRAFTS = 12;
+
+export type StudyWorkspaceMaterial = {
+  sourceId?: string;
+  name: string;
+  size: number;
+  type: string;
+  status: string;
+  message: string;
+};
+
+export type StudyWorkspaceDraftIdentity = {
+  sessionId: string;
+  planId: string | null;
+  stepId: string | null;
+};
+
+export type StudyWorkspaceDraft = StudyWorkspaceDraftIdentity & {
+  notes: string;
+  sources: MaterialSource[];
+  materials: StudyWorkspaceMaterial[];
+  updatedAt: number;
+};
 
 export type StudyPlanStep = {
   id: string;
@@ -37,11 +61,15 @@ export type SavedStudyPlan = {
   verificationNote?: string;
 };
 
+export type StudyPlanStepContentPatch = Partial<Pick<StudyPlanStep, "action" | "outcome" | "check">>;
+
 export type StudyPlanDraft = Omit<StudySurvey, "preferredMinutes"> & { preferredMinutes: number } & {
   breakCount: number;
   breakMinutes: number;
   selectedPlanId: string | null;
   selectedStepId: string | null;
+  /** Stable local candidate when the learner has not selected a plan step. */
+  candidateSessionId: string;
   quizPrefetch: { enabled: boolean; sourceConsent: boolean };
 };
 
@@ -50,6 +78,7 @@ export type StudyPlanStorage = {
   onboarding: StudyOnboardingProgress;
   draft: StudyPlanDraft;
   plans: SavedStudyPlan[];
+  workspaceDrafts: StudyWorkspaceDraft[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -75,6 +104,7 @@ export function createStudyPlanDraft(survey: Partial<StudySurvey> = {}): StudyPl
     breakMinutes: 5,
     selectedPlanId: null,
     selectedStepId: null,
+    candidateSessionId: crypto.randomUUID(),
     quizPrefetch: { enabled: false, sourceConsent: false },
   };
 }
@@ -87,6 +117,7 @@ export function createStudyPlanStorage(options: { legacyActivity?: boolean } = {
     onboarding,
     draft: createStudyPlanDraft(onboarding.survey),
     plans: [],
+    workspaceDrafts: [],
   };
 }
 
@@ -154,10 +185,86 @@ function normalizedDraft(value: unknown): StudyPlanDraft {
       ? value.selectedPlanId as string | null : fallback.selectedPlanId,
     selectedStepId: value.selectedStepId === null || isText(value.selectedStepId, 100, 1)
       ? value.selectedStepId as string | null : fallback.selectedStepId,
+    candidateSessionId: isText(value.candidateSessionId, 200, 1)
+      ? value.candidateSessionId : fallback.candidateSessionId,
     quizPrefetch: isRecord(value.quizPrefetch) && typeof value.quizPrefetch.enabled === "boolean" &&
       typeof value.quizPrefetch.sourceConsent === "boolean"
       ? { enabled: value.quizPrefetch.enabled, sourceConsent: value.quizPrefetch.sourceConsent }
       : fallback.quizPrefetch,
+  };
+}
+
+function validWorkspaceDraft(value: unknown): value is StudyWorkspaceDraft {
+  if (!isRecord(value) || !isText(value.sessionId, 200, 1) ||
+      !(value.planId === null || isText(value.planId, 100, 1)) ||
+      !(value.stepId === null || isText(value.stepId, 100, 1)) ||
+      (value.planId === null) !== (value.stepId === null) ||
+      typeof value.notes !== "string" || value.notes.length > 50_000 ||
+      !validMaterialSources(value.sources) || !Array.isArray(value.materials) || value.materials.length > 10 ||
+      !value.materials.every((item) => isRecord(item) &&
+        (item.sourceId === undefined || isText(item.sourceId, 200, 1)) &&
+        isText(item.name, 500, 1) && Number.isFinite(item.size) && Number(item.size) >= 0 &&
+        isText(item.type, 200) && isText(item.status, 100) && isText(item.message, 2_000)) ||
+      !isTimestamp(value.updatedAt)) return false;
+  const sourceLength = value.sources.reduce((total, source) => total + source.name.length + source.text.length + 12, 0);
+  return sourceLength <= 50_000;
+}
+
+function workspaceDraftMatchesPlan(draft: StudyWorkspaceDraft, plans: readonly SavedStudyPlan[]): boolean {
+  if (draft.planId === null) return draft.stepId === null;
+  const plan = plans.find((item) => item.id === draft.planId);
+  const step = plan?.steps.find((item) => item.id === draft.stepId);
+  return step?.plannedSessionId === draft.sessionId;
+}
+
+export function selectedStudyWorkspaceIdentity(storage: StudyPlanStorage): StudyWorkspaceDraftIdentity {
+  const plan = storage.plans.find((item) => item.id === storage.draft.selectedPlanId);
+  const step = plan?.steps.find((item) => item.id === storage.draft.selectedStepId);
+  if (plan && step) return { sessionId: step.plannedSessionId, planId: plan.id, stepId: step.id };
+  return { sessionId: storage.draft.candidateSessionId, planId: null, stepId: null };
+}
+
+export function saveStudyWorkspaceDraft(storage: StudyPlanStorage, draft: StudyWorkspaceDraft): StudyPlanStorage {
+  if (!validWorkspaceDraft(draft))
+    throw new Error("Nội dung vượt giới hạn lưu của buổi học. Hãy rút ngắn ghi chú hoặc gỡ bớt tài liệu.");
+  if (!workspaceDraftMatchesPlan(draft, storage.plans))
+    throw new Error("Bản nội dung buổi học không khớp với bước đã chọn.");
+  const workspaceDrafts = [...storage.workspaceDrafts.filter((item) => item.sessionId !== draft.sessionId), draft]
+    .slice(-MAX_LOCAL_STUDY_WORKSPACE_DRAFTS);
+  return { ...storage, workspaceDrafts };
+}
+
+export function findStudyWorkspaceDraft(
+  storage: StudyPlanStorage,
+  identity: StudyWorkspaceDraftIdentity,
+): StudyWorkspaceDraft | undefined {
+  return storage.workspaceDrafts.find((draft) => draft.sessionId === identity.sessionId &&
+    draft.planId === identity.planId && draft.stepId === identity.stepId &&
+    workspaceDraftMatchesPlan(draft, storage.plans));
+}
+
+export function applyStudyPlanStepPatch(
+  storage: StudyPlanStorage,
+  stepId: string,
+  patch: StudyPlanStepContentPatch,
+  updatedAt: number,
+): StudyPlanStorage | null {
+  const allowedFields = new Set(["action", "outcome", "check"]);
+  const patchEntries = Object.entries(patch);
+  if (!stepId || !isTimestamp(updatedAt) || patchEntries.length === 0 ||
+      patchEntries.some(([field, value]) => !allowedFields.has(field) || typeof value !== "string")) return null;
+  const plan = storage.plans.find((item) => item.id === storage.draft.selectedPlanId);
+  const selectedStep = plan?.steps.find((step) => step.id === storage.draft.selectedStepId && step.id === stepId);
+  if (!plan || !selectedStep) return null;
+  const updatedPlan = {
+    ...plan,
+    updatedAt,
+    steps: plan.steps.map((step) => step.id === stepId ? { ...step, ...patch } : step),
+  };
+  if (!validStudyPlan(updatedPlan)) return null;
+  return {
+    ...storage,
+    plans: storage.plans.map((item) => item.id === plan.id ? updatedPlan : item),
   };
 }
 
@@ -175,6 +282,12 @@ export function normalizeStudyPlanStorage(
   const plans = Array.isArray(value.plans)
     ? value.plans.filter(validStudyPlan).slice(-MAX_LOCAL_STUDY_PLANS)
     : [];
+  const workspaceDraftValues = Array.isArray(value.workspaceDrafts)
+    ? value.workspaceDrafts.filter(validWorkspaceDraft).filter((draft) => workspaceDraftMatchesPlan(draft, plans))
+    : [];
+  const workspaceDraftBySession = new Map<string, StudyWorkspaceDraft>();
+  for (const draft of workspaceDraftValues) workspaceDraftBySession.set(draft.sessionId, draft);
+  const workspaceDrafts = [...workspaceDraftBySession.values()].slice(-MAX_LOCAL_STUDY_WORKSPACE_DRAFTS);
   const planIds = new Set(plans.map((plan) => plan.id));
   if (draft.selectedPlanId && !planIds.has(draft.selectedPlanId)) {
     draft.selectedPlanId = null;
@@ -184,7 +297,7 @@ export function normalizeStudyPlanStorage(
     draft.selectedStepId = plans.find((plan) => plan.id === draft.selectedPlanId)?.selectedStepId ?? null;
   }
 
-  return { version: STUDY_PLAN_STORAGE_VERSION, onboarding, draft, plans };
+  return { version: STUDY_PLAN_STORAGE_VERSION, onboarding, draft, plans, workspaceDrafts };
 }
 
 export function hasLegacyStudyActivity(value: unknown): boolean {

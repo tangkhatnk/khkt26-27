@@ -27,7 +27,7 @@ after(async () => {
   await vite?.close();
 });
 
-function markup(progress) {
+function markup(progress, props = {}) {
   return renderToStaticMarkup(React.createElement(StudyOnboarding, {
     progress,
     topics: [
@@ -35,6 +35,7 @@ function markup(progress) {
       { id: "chemistry", name: "Hóa học" },
     ],
     onProgressChange: () => {},
+    ...props,
   }));
 }
 
@@ -98,4 +99,18 @@ test("paused tutorial can be reopened to the preserved step, while completion ex
   progress = reduceStudyOnboardingProgress(progress, { type: "onboarding/resume" });
   assert.equal(progress.tutorialStep, 1);
   assert.equal(progress.survey.goal, "Ôn phản ứng hóa học");
+});
+
+test("reopened tutorial uses the live valid draft goal when its legacy survey goal is empty", () => {
+  const progress = createStudyOnboardingProgress();
+  progress.phase = "tutorial";
+  progress.tutorialStep = 0;
+  const view = markup(progress, {
+    currentDraft: { ...progress.survey, goal: "Ôn cấu trúc tế bào" },
+    currentDuration: 25,
+  });
+
+  assert.match(view, /Đã xem mục tiêu/u);
+  assert.doesNotMatch(view, /class="primary" type="button" disabled=""[^>]*>Đã xem mục tiêu/u);
+  assert.match(view, /Mục tiêu: Ôn cấu trúc tế bào/u);
 });

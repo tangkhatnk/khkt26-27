@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readSaved, writeSaved } from "../src/adventure/storage.ts";
 import { createLearningPathProgress } from "../src/adventure/learningPath.ts";
-import { createStudyPlanStorage, normalizeStudyPlanStorage, updateStudyPlanDraftFromQuickTrip } from "../src/adventure/studyPlanStorage.ts";
+import {
+  createStudyPlanStorage,
+  applyStudyPlanStepPatch,
+  findStudyWorkspaceDraft,
+  normalizeStudyPlanStorage,
+  saveStudyWorkspaceDraft,
+  selectedStudyWorkspaceIdentity,
+  updateStudyPlanDraftFromQuickTrip,
+} from "../src/adventure/studyPlanStorage.ts";
 import { reopenStudyOnboardingFromDraft } from "../src/adventure/studyOnboardingModel.ts";
 
 function withLocalStorage(callback) {
@@ -140,6 +148,35 @@ test("plan drafts remain scoped to the existing owner-specific Saved record", ()
   });
 });
 
+test("workspace draft candidate and material stay inside their owner record across reload", () => {
+  withLocalStorage(() => {
+    const guest = readSaved("guest");
+    const candidateSessionId = "guest-candidate-before-start";
+    const storage = {
+      ...guest.studyPlanStorage,
+      draft: { ...guest.studyPlanStorage.draft, candidateSessionId },
+    };
+    const withWorkspace = saveStudyWorkspaceDraft(storage, {
+      sessionId: candidateSessionId,
+      planId: null,
+      stepId: null,
+      notes: "Ghi chú ôn tập chỉ lưu trên thiết bị này.",
+      sources: [{ id: "source-guest", name: "Ghi chú.txt", text: "Nội dung đã trích xuất và đang chờ kiểm tra.", source: "embedded-text", requiresReview: true, reviewed: false }],
+      materials: [{ sourceId: "source-guest", name: "Ghi chú.txt", size: 48, type: "text/plain", status: "extracted", message: "Đã đọc trên thiết bị." }],
+      updatedAt: 3_000,
+    });
+    writeSaved("guest", { ...guest, studyPlanStorage: withWorkspace });
+
+    const guestReload = readSaved("guest");
+    const identity = selectedStudyWorkspaceIdentity(guestReload.studyPlanStorage);
+    const studentReload = readSaved("student-a");
+
+    assert.equal(identity.sessionId, candidateSessionId);
+    assert.deepEqual(findStudyWorkspaceDraft(guestReload.studyPlanStorage, identity)?.sources[0], withWorkspace.workspaceDrafts[0].sources[0]);
+    assert.equal(findStudyWorkspaceDraft(studentReload.studyPlanStorage, identity), undefined);
+  });
+});
+
 test("reopening onboarding uses the edited goal and duration while preserving private legacy material and grades", () => {
   withLocalStorage(() => {
     const storage = createStudyPlanStorage({ legacyActivity: true });
@@ -264,6 +301,107 @@ test("one-step local manual plans remain readable while generated plans require 
   const restored = normalizeStudyPlanStorage({ ...base, plans: [manual] });
 
   assert.deepEqual(restored.plans.map((plan) => plan.id), ["manual-plan"]);
+});
+
+test("workspace material drafts restore only for the exact owner-local plan step and candidate", () => {
+  const storage = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-private",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-one",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt được hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm được điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const selected = {
+    ...storage,
+    draft: { ...storage.draft, selectedPlanId: plan.id, selectedStepId: "step-one" },
+    plans: [plan],
+  };
+  const firstStepDraft = {
+    sessionId: "candidate-one",
+    planId: "plan-private",
+    stepId: "step-one",
+    notes: "Ý chính: màng tế bào điều hòa trao đổi chất.",
+    sources: [{ id: "source-one", name: "Ghi chú.txt", text: "Nội dung đã nhập nhưng chưa xác nhận.", source: "embedded-text", requiresReview: true, reviewed: false }],
+    materials: [{ sourceId: "source-one", name: "Ghi chú.txt", size: 42, type: "text/plain", status: "extracted", message: "Đã đọc trên thiết bị." }],
+    updatedAt: 2_000,
+  };
+  const saved = saveStudyWorkspaceDraft(selected, firstStepDraft);
+  const restored = normalizeStudyPlanStorage(saved);
+
+  assert.equal(restored.draft.selectedPlanId, "plan-private");
+  assert.equal(restored.draft.selectedStepId, "step-one");
+  assert.deepEqual(findStudyWorkspaceDraft(restored, {
+    sessionId: "candidate-one", planId: "plan-private", stepId: "step-one",
+  }), firstStepDraft);
+  assert.equal(findStudyWorkspaceDraft(restored, {
+    sessionId: "candidate-one", planId: "plan-private", stepId: "step-two",
+  }), undefined);
+  assert.equal(restored.workspaceDrafts[0].sources[0].reviewed, false);
+  assert.equal(restored.workspaceDrafts[0].materials[0].name, "Ghi chú.txt");
+});
+
+test("workspace draft bounds reject oversized notes with a recoverable message", () => {
+  const storage = createStudyPlanStorage({ legacyActivity: true });
+  assert.throws(() => saveStudyWorkspaceDraft(storage, {
+    sessionId: storage.draft.candidateSessionId,
+    planId: null,
+    stepId: null,
+    notes: "x".repeat(50_001),
+    sources: [],
+    materials: [],
+    updatedAt: 4_000,
+  }), /Nội dung vượt giới hạn lưu/u);
+});
+
+test("selected plan step patches save bounded content without changing duration or candidate", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-edit",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-edit",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-edit", plannedSessionId: "candidate-edit", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-other", plannedSessionId: "candidate-other", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-last", plannedSessionId: "candidate-last", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const storage = {
+    ...base,
+    draft: { ...base.draft, selectedPlanId: plan.id, selectedStepId: plan.selectedStepId, candidateSessionId: "candidate-edit", preferredMinutes: 90 },
+    plans: [plan],
+  };
+  const updated = applyStudyPlanStepPatch(storage, "step-edit", {
+    action: "Giải một ví dụ cụ thể",
+    outcome: "Nêu được chức năng qua ví dụ",
+    check: "Tự giải thích bằng lời mình",
+  }, 2_000);
+
+  assert.ok(updated);
+  assert.equal(updated.draft.preferredMinutes, 90);
+  assert.equal(updated.draft.candidateSessionId, "candidate-edit");
+  assert.equal(updated.plans[0].steps[0].action, "Giải một ví dụ cụ thể");
+  assert.equal(applyStudyPlanStepPatch(storage, "step-other", { action: "Nội dung khác hợp lệ" }, 2_000), null);
+  assert.equal(applyStudyPlanStepPatch(storage, "step-edit", { action: "x" }, 2_000), null);
 });
 
 test("explicit null clears optional level, confidence, and selected plan fields", () => {

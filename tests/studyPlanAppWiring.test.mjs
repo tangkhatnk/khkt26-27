@@ -1,0 +1,115 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createStudyPlanStorage, updateStudyPlanDraftFromQuickTrip } from "../src/adventure/studyPlanStorage.ts";
+import { createQuickTripDraft, updateQuickTripDraft } from "../src/adventure/quickTripDraft.ts";
+
+const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+
+function normalizedApp(source) {
+  return source.replace(/\r\n?/gu, "\n");
+}
+
+test("planner generation and step selection update the synchronous draft before unrelated edits", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const generateStart = app.indexOf("const planId = crypto.randomUUID()");
+  const generateEnd = app.indexOf('setStudyPlanStatus("ready")', generateStart);
+  const generation = app.slice(generateStart, generateEnd);
+  const selectStart = app.indexOf("function selectStudyPlanStep(stepId: string)");
+  const persistStart = app.indexOf("function persistQuickTripStudyDraft", selectStart);
+  const selection = app.slice(selectStart, persistStart);
+
+  assert.notEqual(generateStart, -1);
+  assert.notEqual(generateEnd, -1);
+  assert.match(generation, /updateQuickTripDraft\(quickTripDraft,[\s\S]*?selectedPlanId: planId,[\s\S]*?selectedStepId: steps\[0\]\.id/u);
+  assert.match(generation, /saveStudyWorkspaceDraft\(nextStorage,[\s\S]*?notes: documentText,[\s\S]*?sources,[\s\S]*?materials/u);
+  assert.match(selection, /updateQuickTripDraft\(quickTripDraft,[\s\S]*?selectedPlanId: plan\.id,[\s\S]*?selectedStepId: stepId/u);
+  assert.match(selection, /setDraftTripId\(plannedSessionId\)/u);
+  assert.match(selection, /draftSessionIdsRef\.current\.solo = plannedSessionId/u);
+  assert.doesNotMatch(selection, /setMinutes\(/u);
+
+  const quick = { current: createQuickTripDraft({
+    goal: "Mục tiêu cũ", selectedPlanId: "plan-old", selectedStepId: "step-old",
+  }) };
+  updateQuickTripDraft(quick, { selectedPlanId: "plan-new", selectedStepId: "step-one" });
+  updateQuickTripDraft(quick, { selectedPlanId: "plan-new", selectedStepId: "step-two" });
+  updateQuickTripDraft(quick, { minutes: 90 });
+  const persisted = updateStudyPlanDraftFromQuickTrip(
+    createStudyPlanStorage({ legacyActivity: true }).draft,
+    quick.current,
+    "Sinh học",
+  );
+  assert.equal(persisted.selectedPlanId, "plan-new");
+  assert.equal(persisted.selectedStepId, "step-two");
+  assert.equal(persisted.preferredMinutes, 90);
+});
+
+test("unstarted notes and extracted sources are saved and restored for the exact workspace candidate", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const loadStart = app.indexOf("const value = readSaved(owner)");
+  const legacyStart = app.indexOf("if (pathRun && (pathRun.phase", loadStart);
+  const load = app.slice(loadStart, legacyStart);
+  const saveStart = app.indexOf("function persistStudyWorkspaceDraft(");
+  const saveEnd = app.indexOf("function updateQuizPrefetchPreference", saveStart);
+  const save = app.slice(saveStart, saveEnd);
+  const switchStart = app.indexOf("function selectStudyPlanStep(stepId: string)");
+  const switchEnd = app.indexOf("function persistQuickTripStudyDraft", switchStart);
+  const switchStep = app.slice(switchStart, switchEnd);
+
+  assert.notEqual(loadStart, -1);
+  assert.notEqual(legacyStart, -1);
+  assert.match(load, /selectedStudyWorkspaceIdentity\(/u);
+  assert.match(load, /findStudyWorkspaceDraft\(/u);
+  assert.match(load, /setDraftTripId\(workspaceIdentity\.sessionId\)/u);
+  assert.match(load, /setDocumentText\(workspaceDraft\?\.notes \?\? ""\)/u);
+  assert.match(load, /setSources\(structuredClone\(workspaceDraft\?\.sources \?\? \[\]\)\)/u);
+  assert.match(load, /setMaterials\(structuredClone\(workspaceDraft\?\.materials \?\? \[\]\)\)/u);
+  assert.match(save, /saveStudyWorkspaceDraft\(/u);
+  assert.match(save, /notes: changes\.notes \?\? documentText/u);
+  assert.match(save, /sources: changes\.sources \?\? sources/u);
+  assert.match(save, /materials: changes\.materials \?\? materials/u);
+  assert.match(save, /if \(!saved\) return false/u);
+  assert.match(save, /catch \(error\)[\s\S]*?setError\(error instanceof Error[\s\S]*?return false;/u);
+  assert.match(switchStep, /saveStudyWorkspaceDraft\(/u);
+  assert.match(switchStep, /findStudyWorkspaceDraft\(/u);
+  assert.match(switchStep, /setDocumentText\(targetDraft\?\.notes \?\? ""\)/u);
+  assert.match(switchStep, /setSources\(structuredClone\(targetDraft\?\.sources \?\? \[\]\)\)/u);
+  assert.match(switchStep, /setMaterials\(structuredClone\(targetDraft\?\.materials \?\? \[\]\)\)/u);
+  const acceptStart = app.indexOf("function acceptStudyGuide(");
+  const acceptEnd = app.indexOf("function discardStudyGuideDraft", acceptStart);
+  const accept = app.slice(acceptStart, acceptEnd);
+  assert.match(accept, /if \(!persistStudyWorkspaceDraft\(\{ notes: nextNotes, sources: nextSources, materials: nextMaterials \}\)\) return;/u);
+  assert.ok(accept.indexOf("persistStudyWorkspaceDraft") < accept.indexOf("setSources(nextSources)"));
+  assert.match(accept, /if \(mode === "replace"\)[\s\S]*?setDocumentText\(nextNotes\)/u);
+});
+
+test("inactive legacy review runs hydrate the current draft and ticket recovery binds private content to its candidate", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const loadStart = app.indexOf("const value = readSaved(owner)");
+  const recoveryStart = app.indexOf("if (pathRun && (pathRun.phase", loadStart);
+  const migrationStart = app.indexOf("const runCourse = CURATED_COURSES.find", recoveryStart);
+  const migrationEnd = app.indexOf("if (value.active)", migrationStart);
+  const hydration = app.slice(loadStart, recoveryStart);
+  const migration = app.slice(migrationStart, migrationEnd);
+
+  assert.match(hydration, /if \(!value\.active && \(!pathRun \|\| pathRun\.phase === "review"\)\)/u);
+  assert.match(migration, /candidateSessionId: pathRun\.sessionId/u);
+  assert.match(migration, /saveStudyWorkspaceDraft\(/u);
+  assert.match(migration, /planId: null,[\s\S]*?stepId: null,[\s\S]*?notes: recoveredText,[\s\S]*?sources: recoveredSources,[\s\S]*?materials: recoveredMaterials/u);
+});
+
+test("step editor save returns the actual owner-local commit result", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const saveStart = app.indexOf("function saveStudyPlanStep(");
+  const saveEnd = app.indexOf("function persistStudyWorkspaceDraft", saveStart);
+  const save = app.slice(saveStart, saveEnd);
+
+  assert.notEqual(saveStart, -1);
+  assert.match(save, /applyStudyPlanStepPatch\(/u);
+  assert.match(save, /commit\(\{ \.\.\.value, studyPlanStorage: nextStorage \}\)/u);
+  assert.match(save, /if \(!commit\([\s\S]*?\)\) return false/u);
+  assert.match(save, /return true;/u);
+  assert.match(app, /onSaveStep=\{saveStudyPlanStep\}/u);
+});

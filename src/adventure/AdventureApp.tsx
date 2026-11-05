@@ -48,8 +48,16 @@ import { StudyOnboarding } from "./StudyOnboarding";
 import { StudyJournal } from "./StudyJournal.tsx";
 import { buildStudyJournalEntries, buildStudyJournalSources } from "./studyJournal.ts";
 import { canShowStudyOnboarding, completeStudyOnboardingRetrievalChoice, reopenStudyOnboardingFromDraft, syncStudySurveyWithCurrentDraft, type StudyOnboardingProgress } from "./studyOnboardingModel.ts";
-import { createStudyPlanStorage, updateStudyPlanDraftFromQuickTrip } from "./studyPlanStorage.ts";
-import { StudyPlanWorkspace } from "./StudyPlanWorkspace";
+import {
+  applyStudyPlanStepPatch,
+  createStudyPlanStorage,
+  findStudyWorkspaceDraft,
+  saveStudyWorkspaceDraft,
+  selectedStudyWorkspaceIdentity,
+  updateStudyPlanDraftFromQuickTrip,
+  type StudyPlanStorage,
+} from "./studyPlanStorage.ts";
+import { StudyPlanWorkspace, type StudyPlanStepPatch } from "./StudyPlanWorkspace";
 import { buildStudyPlanRequest, generateStudyPlan } from "@/services/studyPlanApi";
 import { isCurrentStudyPlanRequest } from "./studyPlanFlow";
 import {
@@ -518,28 +526,35 @@ function AdventureWorkspace() {
         try {
           const value = readSaved(owner);
           const pathRun = value.learningPath?.activeRun;
-          if (!value.active && !pathRun) {
-            const draft = value.studyPlanStorage?.draft;
-            if (draft) {
-              const quickDraft = {
-                goal: draft.goal,
-                topic: draft.topicId,
-                topicLabel: draft.topicLabel,
-                minutes: draft.preferredMinutes,
-                breakCount: draft.breakCount,
-                breakMinutes: draft.breakMinutes,
-                level: draft.level,
-                confidence: draft.confidence,
-                selectedPlanId: draft.selectedPlanId,
-                selectedStepId: draft.selectedStepId,
-              };
-              updateQuickTripDraft(quickTripDraft, quickDraft);
-              setGoal(draft.goal);
-              setTopic(draft.topicId);
-              setMinutes(draft.preferredMinutes);
-              setBreakCount(draft.breakCount);
-              setBreakMinutes(draft.breakMinutes);
-            }
+          if (!value.active && (!pathRun || pathRun.phase === "review")) {
+            const storage = value.studyPlanStorage ?? createStudyPlanStorage();
+            const draft = storage.draft;
+            const quickDraft = {
+              goal: draft.goal,
+              topic: draft.topicId,
+              topicLabel: draft.topicLabel,
+              minutes: draft.preferredMinutes,
+              breakCount: draft.breakCount,
+              breakMinutes: draft.breakMinutes,
+              level: draft.level,
+              confidence: draft.confidence,
+              selectedPlanId: draft.selectedPlanId,
+              selectedStepId: draft.selectedStepId,
+            };
+            const workspaceIdentity = selectedStudyWorkspaceIdentity(storage);
+            const workspaceDraft = findStudyWorkspaceDraft(storage, workspaceIdentity);
+            updateQuickTripDraft(quickTripDraft, quickDraft);
+            setGoal(draft.goal);
+            setTopic(draft.topicId);
+            setMinutes(draft.preferredMinutes);
+            setBreakCount(draft.breakCount);
+            setBreakMinutes(draft.breakMinutes);
+            setDraftTripId(workspaceIdentity.sessionId);
+            draftSessionIdsRef.current.solo = workspaceIdentity.sessionId;
+            setDocumentText(workspaceDraft?.notes ?? "");
+            setSources(structuredClone(workspaceDraft?.sources ?? []));
+            setMaterials(structuredClone(workspaceDraft?.materials ?? []));
+            originalFiles.current.clear();
           }
           if (pathRun && (pathRun.phase === "lesson" || pathRun.phase === "ticket") && !value.active) {
             const runCourse = CURATED_COURSES.find((course) => course.id === pathRun.courseId);
@@ -559,20 +574,6 @@ function AdventureWorkspace() {
                 selectedStepId: null,
               };
               const topicLabel = studyTopics.find((item) => item.id === runCourse.subjectId)?.name ?? runCourse.subjectId;
-              const studyStorage = value.studyPlanStorage ?? createStudyPlanStorage({ legacyActivity: true });
-              value.studyPlanStorage = {
-                ...studyStorage,
-                draft: {
-                  ...updateStudyPlanDraftFromQuickTrip(studyStorage.draft, draft, topicLabel),
-                  quizPrefetch: { ...studyStorage.draft.quizPrefetch, sourceConsent: false },
-                },
-              };
-              updateQuickTripDraft(quickTripDraft, { ...draft, topicLabel });
-              setGoal(draft.goal);
-              setTopic(draft.topic);
-              setMinutes(draft.minutes);
-              setBreakCount(draft.breakCount);
-              setBreakMinutes(draft.breakMinutes);
               const recoveredText = value.notes[pathRun.sessionId] ?? runLesson.content;
               const recoveredMaterials = value.materials?.[pathRun.sessionId] ?? [];
               const recoveredSources = value.sources?.[pathRun.sessionId] ?? [createMaterialSource(runLesson.id, {
@@ -580,6 +581,30 @@ function AdventureWorkspace() {
                 text: runLesson.content,
                 source: "curated",
               })];
+              const studyStorage = value.studyPlanStorage ?? createStudyPlanStorage({ legacyActivity: true });
+              const recoveredStorage = {
+                ...studyStorage,
+                draft: {
+                  ...updateStudyPlanDraftFromQuickTrip(studyStorage.draft, draft, topicLabel),
+                  candidateSessionId: pathRun.sessionId,
+                  quizPrefetch: { ...studyStorage.draft.quizPrefetch, sourceConsent: false },
+                },
+              };
+              value.studyPlanStorage = saveStudyWorkspaceDraft(recoveredStorage, {
+                sessionId: pathRun.sessionId,
+                planId: null,
+                stepId: null,
+                notes: recoveredText,
+                sources: recoveredSources,
+                materials: recoveredMaterials,
+                updatedAt: Date.now(),
+              });
+              updateQuickTripDraft(quickTripDraft, { ...draft, topicLabel });
+              setGoal(draft.goal);
+              setTopic(draft.topic);
+              setMinutes(draft.minutes);
+              setBreakCount(draft.breakCount);
+              setBreakMinutes(draft.breakMinutes);
               value.notes = { ...value.notes, [pathRun.sessionId]: recoveredText };
               value.materials = { ...value.materials, [pathRun.sessionId]: recoveredMaterials };
               value.sources = { ...value.sources, [pathRun.sessionId]: recoveredSources };
@@ -2410,8 +2435,11 @@ function AdventureWorkspace() {
       }
       for (const [sourceId, file] of originals) originalFiles.current.set(sourceId, file);
       revokeQuizPrefetchSourceConsent();
-      setSources((current) => [...current, ...importedSources]);
-      setMaterials((current) => [...current, ...imported]);
+      const nextSources = [...sources, ...importedSources];
+      const nextMaterials = [...materials, ...imported];
+      setSources(nextSources);
+      setMaterials(nextMaterials);
+      if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
       setNotice("Đã giữ nguồn tài liệu riêng với ghi chú. Kiểm tra kết quả đọc trước khi tạo câu hỏi.");
     } catch (e) {
       if (isCurrent()) setError(e instanceof Error ? e.message : "Không đọc được tài liệu.");
@@ -2456,8 +2484,11 @@ function AdventureWorkspace() {
       if (!isCurrent()) return;
       noteStudyExerciseSourceChange(draftTripId, sourceId);
       revokeQuizPrefetchSourceConsent();
-      setSources((items) => items.map((source) => source.id === sourceId ? {...source,text:result.text,source:"ai-vision",requiresReview:true,reviewed:false} : source));
-      setMaterials((items) => items.map((item) => item.sourceId === sourceId ? {...item,status:result.text ? "extracted" : "empty",message:result.message ?? "AI đã đọc. Hãy kiểm tra từ vựng, nghĩa và các chỗ [không rõ]."} : item));
+      const nextSources = sources.map((source) => source.id === sourceId ? {...source,text:result.text,source:"ai-vision",requiresReview:true,reviewed:false} : source);
+      const nextMaterials = materials.map((item) => item.sourceId === sourceId ? {...item,status:result.text ? "extracted" : "empty",message:result.message ?? "AI đã đọc. Hãy kiểm tra từ vựng, nghĩa và các chỗ [không rõ]."} : item);
+      setSources(nextSources);
+      setMaterials(nextMaterials);
+      if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
       setNotice("AI đã đọc tệp và đề xuất khôi phục chỗ mờ khi có đủ ngữ cảnh. Kiểm tra các chỗ [suy luận] hoặc [không rõ] trước khi xác nhận.");
     } catch(e) { if (isCurrent()) setError(e instanceof Error ? e.message : "Không đọc được tài liệu."); }
     finally { if (materialRequest.current === controller) { materialRequest.current = null; if(workspaceLive.current && ownerRef.current === id) {setBusy(false);setMaterialProgress(null);} } }
@@ -2510,15 +2541,16 @@ function AdventureWorkspace() {
       }
       for (const existing of sources) noteStudyExerciseSourceChange(draftTripId, existing.id);
       revokeQuizPrefetchSourceConsent();
+      const nextNotes = mode === "replace" ? "" : documentText;
+      const nextSources = mode === "replace" ? [reviewed] : [...sources, reviewed];
+      const nextMaterials = mode === "replace" ? [material] : [...materials, material];
+      if (!persistStudyWorkspaceDraft({ notes: nextNotes, sources: nextSources, materials: nextMaterials })) return;
       if (mode === "replace") {
         originalFiles.current.clear();
-        setDocumentText("");
-        setSources([reviewed]);
-        setMaterials([material]);
-      } else {
-        setSources([...sources, reviewed]);
-        setMaterials([...materials, material]);
+        setDocumentText(nextNotes);
       }
+      setSources(nextSources);
+      setMaterials(nextMaterials);
       dispatchStudyGuideReview({ type: "discard" });
       setError("");
       setNotice(mode === "replace"
@@ -2923,10 +2955,11 @@ function AdventureWorkspace() {
 
       const now = Date.now();
       const planId = crypto.randomUUID();
-      const steps = response.steps.map((step) => ({
+      const firstStepSessionId = scope.selectedPlanId ? crypto.randomUUID() : draftTripId;
+      const steps = response.steps.map((step, index) => ({
         ...step,
         id: crypto.randomUUID(),
-        plannedSessionId: crypto.randomUUID(),
+        plannedSessionId: index === 0 ? firstStepSessionId : crypto.randomUUID(),
         preferredMinutes: scope.minutes,
       }));
       const topicLabel = ticketTopicName;
@@ -2956,20 +2989,40 @@ function AdventureWorkspace() {
         level: scope.level.trim(),
         selectedPlanId: planId,
         selectedStepId: steps[0].id,
+        candidateSessionId: steps[0].plannedSessionId,
       };
+      let nextStorage: StudyPlanStorage = {
+        ...storage,
+        draft: studyDraft,
+        plans: [...storage.plans.filter((entry) => entry.id !== planId), plan].slice(-50),
+      };
+      nextStorage = saveStudyWorkspaceDraft(nextStorage, {
+        sessionId: steps[0].plannedSessionId,
+        planId,
+        stepId: steps[0].id,
+        notes: documentText,
+        sources,
+        materials,
+        updatedAt: now,
+      });
       studyPlanRequest.current = null;
       studyPlanResetSuppression.current = true;
       if (!commit({
         ...current.current,
-        studyPlanStorage: {
-          ...storage,
-          draft: studyDraft,
-          plans: [...storage.plans.filter((entry) => entry.id !== planId), plan].slice(-50),
-        },
+        studyPlanStorage: nextStorage,
       })) {
         studyPlanResetSuppression.current = false;
         throw new Error("Không lưu được bản nháp lộ trình trên thiết bị này.");
       }
+      updateQuickTripDraft(quickTripDraft, {
+        goal: requestBody.goal,
+        topic: scope.topic,
+        topicLabel,
+        minutes: scope.minutes,
+        level: scope.level.trim(),
+        selectedPlanId: planId,
+        selectedStepId: steps[0].id,
+      });
       cancelPendingStudyExerciseForStart(draftTripId);
       invalidateStudyExercisePreparationForSession(draftTripId);
       setDraftTripId(steps[0].plannedSessionId);
@@ -2983,12 +3036,90 @@ function AdventureWorkspace() {
       if (studyPlanRequest.current === controller) studyPlanRequest.current = null;
     }
   }
+  function saveStudyPlanStep(stepId: string, patch: StudyPlanStepPatch): boolean {
+    const value = current.current;
+    const storage = value.studyPlanStorage;
+    if (!storage || value.active || mode !== "solo") {
+      setError("Không thể lưu bước học trong phiên đang chạy hoặc chuyến nhóm.");
+      return false;
+    }
+    const identity = selectedStudyWorkspaceIdentity(storage);
+    if (identity.stepId !== stepId || identity.sessionId !== draftTripIdRef.current) {
+      setError("Bước học đã thay đổi. Hãy mở lại bước hiện tại rồi lưu lại.");
+      return false;
+    }
+    const nextStorage = applyStudyPlanStepPatch(storage, stepId, patch, Date.now());
+    if (!nextStorage) {
+      setError("Mỗi nội dung bước học cần từ 3 đến 400 ký tự. Hãy kiểm tra rồi lưu lại.");
+      return false;
+    }
+    if (!commit({ ...value, studyPlanStorage: nextStorage })) return false;
+    setError("");
+    return true;
+  }
+  function persistStudyWorkspaceDraft(
+    changes: Partial<{ notes: string; sources: MaterialSource[]; materials: MaterialInfo[] }> = {},
+  ): boolean {
+    const value = current.current;
+    if (!loaded || !exclusive || value.active || mode !== "solo" || !isStudyWorkspaceView(view)) return true;
+    let storage = value.studyPlanStorage ?? createStudyPlanStorage();
+    const selectedIdentity = selectedStudyWorkspaceIdentity(storage);
+    if (selectedIdentity.planId && selectedIdentity.sessionId !== draftTripIdRef.current) {
+      setError("Bản nháp nội dung không còn khớp với bước đang chọn. Hãy mở lại bước trước khi chỉnh sửa.");
+      return false;
+    }
+    const identity = selectedIdentity.planId
+      ? selectedIdentity
+      : { ...selectedIdentity, sessionId: draftTripIdRef.current };
+    if (!identity.planId && storage.draft.candidateSessionId !== identity.sessionId) {
+      storage = { ...storage, draft: { ...storage.draft, candidateSessionId: identity.sessionId } };
+    }
+    try {
+      const nextStorage = saveStudyWorkspaceDraft(storage, {
+        ...identity,
+        notes: changes.notes ?? documentText,
+        sources: changes.sources ?? sources,
+        materials: changes.materials ?? materials,
+        updatedAt: Date.now(),
+      });
+      const saved = commit({ ...value, studyPlanStorage: nextStorage });
+      if (!saved) return false;
+      setError("");
+      return true;
+    } catch (error) {
+      setError(error instanceof Error
+        ? error.message
+        : "Không lưu được nội dung buổi học trên thiết bị.");
+      return false;
+    }
+  }
   function selectStudyPlanStep(stepId: string) {
-    const storage = current.current.studyPlanStorage;
-    const plan = storage?.plans.find((entry) => entry.id === storage.draft.selectedPlanId);
-    if (!storage || current.current.active || !plan || plan.selectedStepId === stepId) return;
+    const currentStorage = current.current.studyPlanStorage;
+    if (!currentStorage || current.current.active || mode !== "solo") return;
+    let storage = currentStorage;
+    const plan = currentStorage.plans.find((entry) => entry.id === currentStorage.draft.selectedPlanId);
+    if (!plan || plan.selectedStepId === stepId) return;
+    if (busy || materialRequest.current || studyGuideNeedsConfirmation) {
+      setError("Hãy kết thúc thao tác nội dung đang mở trước khi đổi bước học.");
+      return;
+    }
     const selectedStep = plan.steps.find((step) => step.id === stepId);
     if (!selectedStep) return;
+    const currentIdentity = selectedStudyWorkspaceIdentity(storage);
+    if (currentIdentity.planId && currentIdentity.sessionId === draftTripIdRef.current) {
+      try {
+        storage = saveStudyWorkspaceDraft(storage, {
+          ...currentIdentity,
+          notes: documentText,
+          sources,
+          materials,
+          updatedAt: Date.now(),
+        });
+      } catch {
+        setError("Không thể lưu nội dung của bước hiện tại. Hãy kiểm tra dung lượng rồi thử lại.");
+        return;
+      }
+    }
     const usedSessionIds = new Set(historySessions(current.current, ownerRef.current).map((session) => session.id));
     const plannedSessionId = usedSessionIds.has(selectedStep.plannedSessionId)
       ? crypto.randomUUID()
@@ -2999,18 +3130,33 @@ function AdventureWorkspace() {
       updatedAt: Date.now(),
       steps: plan.steps.map((step) => step.id === stepId ? { ...step, plannedSessionId } : step),
     };
+    const nextStorage = {
+      ...storage,
+      draft: {
+        ...storage.draft,
+        selectedPlanId: plan.id,
+        selectedStepId: stepId,
+        candidateSessionId: plannedSessionId,
+        quizPrefetch: { ...storage.draft.quizPrefetch, sourceConsent: false },
+      },
+      plans: storage.plans.map((entry) => entry.id === plan.id ? nextPlan : entry),
+    };
+    const targetIdentity = { sessionId: plannedSessionId, planId: plan.id, stepId };
+    const targetDraft = findStudyWorkspaceDraft(nextStorage, targetIdentity);
     if (!commit({
       ...current.current,
-      studyPlanStorage: {
-        ...storage,
-        draft: { ...storage.draft, selectedStepId: stepId },
-        plans: storage.plans.map((entry) => entry.id === plan.id ? nextPlan : entry),
-      },
+      studyPlanStorage: nextStorage,
     })) return;
+    updateQuickTripDraft(quickTripDraft, { selectedPlanId: plan.id, selectedStepId: stepId });
     cancelPendingStudyExerciseForStart(draftTripId);
     invalidateStudyExercisePreparationForSession(draftTripId);
     setDraftTripId(plannedSessionId);
     draftSessionIdsRef.current.solo = plannedSessionId;
+    setDocumentText(targetDraft?.notes ?? "");
+    setSources(structuredClone(targetDraft?.sources ?? []));
+    setMaterials(structuredClone(targetDraft?.materials ?? []));
+    originalFiles.current.clear();
+    setError("");
   }
   function persistQuickTripStudyDraft(changes: Partial<QuickTripDraft>) {
     const draft = "minutes" in changes
@@ -3281,6 +3427,7 @@ function AdventureWorkspace() {
                     onGeneratePlan={requestStudyPlanFromWorkspace}
                     onCancelPlan={cancelStudyPlanRequest}
                     onSelectStep={selectStudyPlanStep}
+                    onSaveStep={saveStudyPlanStep}
                     sourceAvailable={hasStudyPlanSource}
                     sourceReviewed={Boolean(sourceForStudyPlan?.reviewed)}
                     includeSource={includeStudyPlanSource}
@@ -3320,7 +3467,11 @@ function AdventureWorkspace() {
                         />
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "notes"}>
-                        <StudyNotesInput value={documentText} onChange={(text) => { revokeQuizPrefetchSourceConsent(); setDocumentText(text); }} disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} hasDocuments={Boolean(materials.length || sources.length)} />
+                        <StudyNotesInput value={documentText} onChange={(text) => {
+                          revokeQuizPrefetchSourceConsent();
+                          setDocumentText(text);
+                          persistStudyWorkspaceDraft({ notes: text });
+                        }} disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} hasDocuments={Boolean(materials.length || sources.length)} />
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "files"}>
                       <h3 className="material-title">Tài liệu học tập</h3>
@@ -3355,12 +3506,37 @@ function AdventureWorkspace() {
                       </div>
                       {sources.map((source) => <details className="material-source" key={source.id} open={!source.reviewed}>
                         <summary>{source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra nội dung"}</summary>
-                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy || privateTripDraftLocked} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => {noteStudyExerciseSourceChange(draftTripId, source.id);revokeQuizPrefetchSourceConsent();setSources((items) => items.map((item) => item.id === source.id ? editMaterialSourceText(item, text) : item));}} />
+                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy || privateTripDraftLocked} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => {
+                          noteStudyExerciseSourceChange(draftTripId, source.id);
+                          revokeQuizPrefetchSourceConsent();
+                          const nextSources = sources.map((item) => item.id === source.id ? editMaterialSourceText(item, text) : item);
+                          setSources(nextSources);
+                          persistStudyWorkspaceDraft({ sources: nextSources });
+                        }} />
                         <div className="choice-row">
-                          <MaterialSourceReviewButton disabled={busy || privateTripDraftLocked || source.text.trim().length < 10} onClick={() => { try { const reviewed = reviewMaterialSource(source, source.text); noteStudyExerciseSourceChange(draftTripId, source.id); revokeQuizPrefetchSourceConsent(); setSources((items) => items.map((item) => item.id === source.id ? reviewed : item)); setError(""); } catch(e) { setError(e instanceof Error ? e.message : "Không xác nhận được tài liệu."); } }} />
+                          <MaterialSourceReviewButton disabled={busy || privateTripDraftLocked || source.text.trim().length < 10} onClick={() => {
+                            try {
+                              const reviewed = reviewMaterialSource(source, source.text);
+                              noteStudyExerciseSourceChange(draftTripId, source.id);
+                              revokeQuizPrefetchSourceConsent();
+                              const nextSources = sources.map((item) => item.id === source.id ? reviewed : item);
+                              if (!persistStudyWorkspaceDraft({ sources: nextSources })) return;
+                              setSources(nextSources);
+                              setError("");
+                            } catch(e) { setError(e instanceof Error ? e.message : "Không xác nhận được tài liệu."); }
+                          }} />
                           {source.source !== "ai-generated" && <button disabled={busy || tutorialActive || privateTripDraftLocked || !originalFiles.current.has(source.id) || !/\.(pdf|png|jpe?g|webp)$/i.test(source.name)} onClick={() => void readHandwriting(source.id)}>Đọc bằng AI · gửi tệp này</button>}
                           {source.source === "ai-generated" && <button disabled={busy || privateTripDraftLocked} onClick={() => downloadStudyGuide({title:source.name.replace(/\.txt$/i, ""),text:source.text})}>Tải bản ôn tập (.txt)</button>}
-                          <button disabled={busy || privateTripDraftLocked} onClick={() => { originalFiles.current.delete(source.id); noteStudyExerciseSourceChange(draftTripId, source.id); revokeQuizPrefetchSourceConsent(); setSources((items) => items.filter((item) => item.id !== source.id)); setMaterials((items) => items.filter((file) => source.covers ? !source.covers.includes(file.name) : file.sourceId !== source.id)); }}>Gỡ tài liệu</button>
+                          <button disabled={busy || privateTripDraftLocked} onClick={() => {
+                            originalFiles.current.delete(source.id);
+                            noteStudyExerciseSourceChange(draftTripId, source.id);
+                            revokeQuizPrefetchSourceConsent();
+                            const nextSources = sources.filter((item) => item.id !== source.id);
+                            const nextMaterials = materials.filter((file) => source.covers ? !source.covers.includes(file.name) : file.sourceId !== source.id);
+                            if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
+                            setSources(nextSources);
+                            setMaterials(nextMaterials);
+                          }}>Gỡ tài liệu</button>
                         </div>
                         {source.source !== "ai-generated" && !originalFiles.current.has(source.id) && <small>Muốn đọc lại bằng AI, hãy nhập lại tệp gốc.</small>}
                       </details>)}

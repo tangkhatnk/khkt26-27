@@ -38,18 +38,21 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
   onGuideControl?: (control: StudyTutorialControl) => boolean | void;
   onSourceChoice?: (choice: StudySourceChoice) => void;
 }) {
+  const tutorialSurvey = progress.phase === "tutorial" && currentDraft
+    ? syncStudySurveyWithCurrentDraft(
+        progress.survey,
+        currentDraft,
+        currentDuration ?? currentDraft.preferredMinutes ?? NaN,
+      )
+    : progress.survey;
   const dispatch = (action: Parameters<typeof reduceStudyOnboardingProgress>[1]) => {
-    const liveProgress = progress.phase === "tutorial" && currentDraft
-      ? { ...progress, survey: syncStudySurveyWithCurrentDraft(
-          progress.survey,
-          currentDraft,
-          currentDuration ?? currentDraft.preferredMinutes ?? NaN,
-        ) }
+    const liveProgress = progress.phase === "tutorial"
+      ? { ...progress, survey: tutorialSurvey }
       : progress;
     onProgressChange(reduceStudyOnboardingProgress(liveProgress, action));
   };
   const options = topics.length ? topics : FALLBACK_TOPICS;
-  const topicLabel = options.find((topic) => topic.id === progress.survey.topicId)?.name ?? progress.survey.topicLabel;
+  const topicLabel = options.find((topic) => topic.id === tutorialSurvey.topicId)?.name ?? tutorialSurvey.topicLabel;
   const surveyChange = (changes: Partial<StudySurvey>) => dispatch({
     type: "survey/change",
     changes: { ...changes, ...(changes.topicId ? {
@@ -122,7 +125,7 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
 
   const step = progress.tutorialStep;
   const action = (control: "goal" | "duration", label: string) => <button className="primary" type="button"
-    disabled={control === "goal" ? progress.survey.goal.trim().length < 3 : control === "duration" &&
+    disabled={control === "goal" ? tutorialSurvey.goal.trim().length < 3 : control === "duration" &&
       (currentDuration !== undefined
         ? !Number.isSafeInteger(currentDuration) || currentDuration < 1 || currentDuration > 240
         : progress.survey.preferredMinutes === null || !Number.isSafeInteger(progress.survey.preferredMinutes) ||
@@ -170,6 +173,6 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
       <button type="button" onClick={() => dispatch({ type: "tutorial/previous" })}>{step === 0 ? "Sửa khảo sát" : "Quay lại"}</button>
       <button type="button" className="study-onboarding__quiet-action" onClick={() => dispatch({ type: "onboarding/pause" })}>Tạm dừng</button>
     </div>
-    <p className="study-onboarding__selected">Mục tiêu: {progress.survey.goal} · {topicLabel} · {progress.survey.preferredMinutes} phút</p>
+    <p className="study-onboarding__selected">Mục tiêu: {tutorialSurvey.goal} · {topicLabel} · {tutorialSurvey.preferredMinutes} phút</p>
   </section>;
 }
