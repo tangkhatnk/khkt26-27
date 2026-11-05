@@ -226,13 +226,10 @@ export function adventureRoutes(
       const participant = trip.participants[req.userId];
       if (!participant || !group.members.includes(req.userId))
         throw new ApiError(403, "forbidden", "Bạn không thuộc chuyến này.");
-      if (participant.sessionId !== sessionId) {
-        if (participant.status === "ready" || participant.status === "not-ready")
-          retiredGroupMutation();
-        throw new ApiError(409, "conflict", "Chuyến đã được liên kết với phiên khác.");
-      }
       if (participant.status !== "bound" && participant.status !== "completed")
-        throw new ApiError(409, "conflict", "Phiên này chưa được liên kết với chuyến.");
+        retiredGroupMutation();
+      if (participant.sessionId !== sessionId)
+        throw new ApiError(409, "conflict", "Chuyến đã được liên kết với phiên khác.");
       if (isSessionRemoved(world, sessionId))
         throw new ApiError(410, "session-removed", "Phiên học này đã được quản trị viên gỡ khỏi lịch sử.");
 

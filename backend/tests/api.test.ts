@@ -297,13 +297,33 @@ it("retires new group mutations with authenticated 410 responses", async () => {
   expect(state[0]!.state.invites).toEqual({});
 });
 
-it("does not bind a new session from an existing legacy trip", async () => {
+it("does not bind a new session from an existing not-ready trip", async () => {
   const { world, groupId } = await seedLegacyTrip({
     members: [userId],
+    mode: "synchronized",
     status: "waiting",
-    participants: { [userId]: { status: "ready" } },
+    participants: { [userId]: { status: "not-ready" } },
   });
   const sessionId = randomUUID();
+  const response = await app.inject({
+    method: "POST", url: "/api/v1/adventure/trip/start", headers,
+    payload: { groupId, sessionId },
+  });
+  expect(response.statusCode).toBe(410);
+  expect(response.json().type).toContain("feature-retired");
+  const after = await db.$queryRaw<{ state: World }[]>`SELECT state FROM adventure_state WHERE id = 1`;
+  expect(after[0]!.state.groups[groupId]).toEqual(world.groups[groupId]);
+  expect(after[0]!.state.sessions[sessionId]).toBeUndefined();
+});
+
+it("retires a new start even when a ready member repeats their reserved session ID", async () => {
+  const sessionId = randomUUID();
+  const { world, groupId } = await seedLegacyTrip({
+    members: [userId],
+    mode: "synchronized",
+    status: "waiting",
+    participants: { [userId]: { status: "ready", sessionId } },
+  });
   const response = await app.inject({
     method: "POST", url: "/api/v1/adventure/trip/start", headers,
     payload: { groupId, sessionId },
