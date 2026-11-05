@@ -113,3 +113,30 @@ test("step editor save returns the actual owner-local commit result", async () =
   assert.match(save, /return true;/u);
   assert.match(app, /onSaveStep=\{saveStudyPlanStep\}/u);
 });
+
+test("selected-step source controls keep private summaries inside the workspace request scope", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const sourceStart = app.indexOf("{sources.map((source) =>");
+  const sourceEnd = app.indexOf("{!!materials.length", sourceStart);
+  const workspaceSources = app.slice(sourceStart, sourceEnd);
+  const requestStart = app.indexOf("async function generateMaterialSummary(");
+  const requestEnd = app.indexOf("const resolveCurrentQuizSession", requestStart);
+  const request = app.slice(requestStart, requestEnd);
+  const responseStart = request.indexOf("const isCurrent = () => {");
+  const responseEnd = request.indexOf("setMaterialSummaryUi({", responseStart);
+  const responseGuard = request.slice(responseStart, responseEnd);
+
+  assert.notEqual(sourceStart, -1);
+  assert.notEqual(sourceEnd, -1);
+  assert.match(workspaceSources, /<MaterialSummaryControl/u);
+  assert.match(workspaceSources, /generateMaterialSummary\(draftTripId, source\.id, targetView\)/u);
+  assert.doesNotMatch(workspaceSources, /PublicMaterialSummaryControl/u);
+  assert.match(request, /targetView: MaterialSummaryScope\["view"\]/u);
+  assert.match(request, /context\.draftTripId === sessionId/u);
+  assert.match(request, /selectedPlanId === active\.planId/u);
+  assert.match(request, /selectedStepId === active\.stepId/u);
+  assert.match(request, /canRequestMaterialSummary\(/u);
+  assert.match(request, /onboarding\.phase === "complete"/u);
+  assert.match(responseGuard, /canApplyMaterialSummaryResponse\(/u);
+  assert.doesNotMatch(responseGuard, /hasEligibleAccess\(/u);
+});

@@ -29,7 +29,7 @@ import { detectDeviceCategory } from "./device";
 import { explorationProgress } from "./exploration";
 import type { MaterialExtractionProgress } from "./materialExtraction";
 import { createMaterialSource, editMaterialSourceText, reviewMaterialSource, recoveredMaterialSource, quizSourceText, validateStudyGuideAppend, type MaterialSource } from "./materialSources";
-import { cachedMaterialSummary, fingerprintMaterialSourceText, isCurrentMaterialSummaryScope, type MaterialSummaryScope } from "./materialSummary";
+import { cachedMaterialSummary, canApplyMaterialSummaryResponse, canRequestMaterialSummary, fingerprintMaterialSourceText, type MaterialSummaryScope } from "./materialSummary";
 import {
   eligiblePublicMaterialSummaryCandidates,
   type PublicMaterialSummaryCandidate,
@@ -238,6 +238,9 @@ type ActiveMaterialSummaryRequest = {
   sourceText: string;
   sourceFingerprint: string;
   requestGeneration: number;
+  view: MaterialSummaryScope["view"];
+  planId: string | null;
+  stepId: string | null;
 };
 function hasHttpStatus(error: unknown, expected: number): boolean {
   return typeof error === "object" && error !== null && "status" in error &&
@@ -1027,6 +1030,16 @@ function AdventureWorkspace() {
   const summaryMaterialSources = useMemo(() => view === "summary" && summaryMaterialSessionId
     ? saved.sources?.[summaryMaterialSessionId] ?? []
     : [], [view, saved.sources, summaryMaterialSessionId]);
+  const materialSummaryTargetView: MaterialSummaryScope["view"] | null = view === "summary"
+    ? "summary"
+    : isStudyWorkspaceView(view) ? view as "station" | "ticket" : null;
+  const materialSummaryTargetSessionId = materialSummaryTargetView === "summary"
+    ? summaryMaterialSessionId
+    : materialSummaryTargetView ? draftTripId : undefined;
+  const materialSummaryTargetSources = useMemo(() => materialSummaryTargetView === "summary"
+    ? summaryMaterialSources
+    : materialSummaryTargetView ? sources : [],
+  [materialSummaryTargetView, summaryMaterialSources, sources]);
   const renderAuthGeneration = getAuthGeneration();
   const publicSummaryScope = useMemo<PublicMaterialSummaryScope>(() => ({
     ownerId: owner,
@@ -1087,12 +1100,12 @@ function AdventureWorkspace() {
   }, []);
   useEffect(() => {
     let cancelled = false;
-    if (view !== "summary" || !summarySessionId || summaryMaterialSources.length === 0) {
+    if (!materialSummaryTargetView || !materialSummaryTargetSessionId || materialSummaryTargetSources.length === 0) {
       setMaterialSummaryFingerprints({});
       return () => { cancelled = true; };
     }
-    void Promise.all(summaryMaterialSources.filter((source) => source.reviewed).map(async (source) => [
-      JSON.stringify([summarySessionId, source.id]),
+    void Promise.all(materialSummaryTargetSources.filter((source) => source.reviewed).map(async (source) => [
+      JSON.stringify([materialSummaryTargetSessionId, source.id]),
       { text: source.text, fingerprint: await fingerprintMaterialSourceText(source.text) },
     ] as const)).then((entries) => {
       if (!cancelled) setMaterialSummaryFingerprints(Object.fromEntries(entries));
@@ -1100,19 +1113,26 @@ function AdventureWorkspace() {
       if (!cancelled) setMaterialSummaryFingerprints({});
     });
     return () => { cancelled = true; };
-  }, [owner, view, summarySessionId, summaryMaterialSources]);
+  }, [owner, materialSummaryTargetView, materialSummaryTargetSessionId, materialSummaryTargetSources]);
   useEffect(() => {
     setMaterialSummaryUi(null);
     return () => cancelMaterialSummaryRequest(undefined, undefined, false);
-  }, [view, summarySessionId, owner, cancelMaterialSummaryRequest]);
+  }, [view, summarySessionId, draftTripId, selectedStudyPlan?.id, studyPlanStorage.draft.selectedStepId,
+    onboardingComplete, saved.active?.id, exclusive, owner, cancelMaterialSummaryRequest]);
   useEffect(() => {
     const active = materialSummaryRequest.current;
     if (!active) return;
-    const source = summaryMaterialSources.find((item) => item.id === active.sourceId);
-    if (active.ownerId !== owner || active.sessionId !== summarySessionId ||
+    const source = active.view === "summary"
+      ? summaryMaterialSources.find((item) => item.id === active.sourceId)
+      : isStudyWorkspaceView(view) && draftTripId === active.sessionId
+        ? sources.find((item) => item.id === active.sourceId)
+        : undefined;
+    if (active.ownerId !== owner || active.view !== view || active.sessionId !== materialSummaryTargetSessionId ||
+        active.planId !== (active.view === "summary" ? null : studyPlanContext.current.selectedPlanId) ||
+        active.stepId !== (active.view === "summary" ? null : studyPlanContext.current.selectedStepId) ||
         !source?.reviewed || source.text !== active.sourceText)
       cancelMaterialSummaryRequest(active.sessionId, active.sourceId);
-  }, [owner, summarySessionId, summaryMaterialSources, cancelMaterialSummaryRequest]);
+  }, [owner, view, summarySessionId, materialSummaryTargetSessionId, summaryMaterialSources, sources, draftTripId, studyPlanStorage.draft.selectedStepId, cancelMaterialSummaryRequest]);
   const guestNotice = guestNoticeStatus ? guestPublicationNotice(guestNoticeStatus) : null;
   const isStudyExerciseOwnerWorkspaceCurrent = useCallback((ownerId: string, authGeneration: number, workspaceGeneration: number) => {
     const auth = useAuthStore.getState();
@@ -1204,19 +1224,82 @@ function AdventureWorkspace() {
     quizPrefetchUi.correctionVersion === summaryCorrectionVersion && quizPrefetchUi.count === summaryQuizCount
     ? quizPrefetchUi
     : null;
-  async function generateMaterialSummary(sessionId: string, sourceId: string) {
+  function getCurrentMaterialSummarySource(
+    targetView: MaterialSummaryScope["view"],
+    sessionId: string,
+    sourceId: string,
+  ): MaterialSource | undefined {
+    if (targetView === "summary")
+      return current.current.sources?.[sessionId]?.find((item) => item.id === sourceId);
+    const context = studyPlanContext.current;
+    if (context.view !== targetView || context.draftTripId !== sessionId) return undefined;
+    return context.sources.find((item) => item.id === sourceId);
+  }
+  function canGeneratePrivateMaterialSummary(targetView: MaterialSummaryScope["view"], source: MaterialSource): boolean {
+    return canRequestMaterialSummary({
+      targetView,
+      view,
+      ownerReady: owner === "guest" ? !user && !needsLogin : !!user && user.id === owner && !needsLogin,
+      online,
+      authOffline,
+      loaded,
+      exclusive,
+      workspaceLive: workspaceLive.current,
+      onboardingComplete,
+      activeSession: Boolean(saved.active),
+      source,
+    });
+  }
+  function privateMaterialSummaryUnavailableReason(targetView: MaterialSummaryScope["view"]): string {
+    if (owner !== "guest" && (!user || needsLogin)) return "Đăng nhập lại để tạo tóm tắt tài liệu.";
+    if (!online || authOffline) return "Kết nối mạng để tạo tóm tắt tài liệu.";
+    if (!loaded || !exclusive || !workspaceLive.current) return "Mở dữ liệu riêng trên thiết bị này để tạo tóm tắt.";
+    if (targetView !== "summary" && !onboardingComplete)
+      return "Hoàn tất hướng dẫn trước khi dùng AI trong buổi học.";
+    if (targetView !== "summary" && saved.active) return "Kết thúc phiên đang mở trước khi tạo tóm tắt.";
+    return "";
+  }
+  async function generateMaterialSummary(
+    sessionId: string,
+    sourceId: string,
+    targetView: MaterialSummaryScope["view"],
+  ) {
     const ownerId = ownerRef.current;
     const guest = ownerId === "guest";
-    const auth = useAuthStore.getState();
     const value = current.current;
     const removed = new Set([...(value.removedSessionIds ?? []), ...(value.snapshot?.removedSessionIds ?? [])]);
-    const session = historySessions(value, ownerId).find((item) => item.id === sessionId);
-    const source = value.sources?.[sessionId]?.find((item) => item.id === sourceId);
-    if ((!guest && (!auth.user || auth.user.id !== ownerId || auth.needsLogin)) ||
-        (guest && auth.user) || auth.needsLogin ||
-        !workspaceLive.current || viewRef.current !== "summary" || value.summarySessionId !== sessionId ||
-        removed.has(sessionId) || !session || session.userId !== ownerId || !source?.reviewed ||
-        source.text.trim().length < 10 || source.text.length > 50_000) return;
+    const context = studyPlanContext.current;
+    const session = targetView === "summary"
+      ? historySessions(value, ownerId).find((item) => item.id === sessionId)
+      : undefined;
+    const source = targetView === "summary"
+      ? value.sources?.[sessionId]?.find((item) => item.id === sourceId)
+      : context.draftTripId === sessionId && context.view === targetView
+        ? context.sources.find((item) => item.id === sourceId)
+        : undefined;
+    const planId = targetView === "summary" ? null : context.selectedPlanId;
+    const stepId = targetView === "summary" ? null : context.selectedStepId;
+    const hasEligibleAccess = (candidate: MaterialSource | undefined) => {
+      const auth = useAuthStore.getState();
+      return canRequestMaterialSummary({
+        targetView,
+        view: viewRef.current,
+        ownerReady: guest ? !auth.user && !auth.needsLogin : auth.user?.id === ownerId && !auth.needsLogin,
+        online: navigator.onLine,
+        authOffline: auth.offline,
+        loaded,
+        exclusive: exclusiveLease.current,
+        workspaceLive: workspaceLive.current,
+        onboardingComplete: current.current.studyPlanStorage?.onboarding.phase === "complete",
+        activeSession: Boolean(current.current.active),
+        source: candidate ?? { reviewed: false, text: "" },
+      });
+    };
+    if (!source || !hasEligibleAccess(source) ||
+        (targetView === "summary" && (value.summarySessionId !== sessionId || removed.has(sessionId) ||
+          !session || session.userId !== ownerId)) ||
+        (targetView !== "summary" && (context.draftTripId !== sessionId ||
+          context.selectedPlanId !== planId || context.selectedStepId !== stepId))) return;
 
     cancelMaterialSummaryRequest();
     const requestGeneration = ++materialSummaryRequestGeneration.current;
@@ -1231,23 +1314,33 @@ function AdventureWorkspace() {
       sourceText: source.text,
       sourceFingerprint: "",
       requestGeneration,
+      view: targetView,
+      planId,
+      stepId,
     };
     materialSummaryRequest.current = active;
     const currentScope = (): MaterialSummaryScope => ({
       ownerId: ownerRef.current,
       workspaceGeneration: materialSummaryWorkspaceGeneration.current,
       authGeneration: getAuthGeneration(),
-      sessionId: current.current.summarySessionId ?? "",
-      sourceId: current.current.sources?.[sessionId]?.find((item) => item.id === sourceId)?.id ?? "",
+      sessionId: targetView === "summary"
+        ? current.current.summarySessionId ?? ""
+        : studyPlanContext.current.draftTripId,
+      sourceId: getCurrentMaterialSummarySource(targetView, sessionId, sourceId)?.id ?? "",
       sourceFingerprint: active.sourceFingerprint,
       requestGeneration: materialSummaryRequestGeneration.current,
+      view: targetView,
+      planId: targetView === "summary" ? null : studyPlanContext.current.selectedPlanId,
+      stepId: targetView === "summary" ? null : studyPlanContext.current.selectedStepId,
     });
     const isCurrent = () => {
       const latest = current.current;
-      const latestAuth = useAuthStore.getState();
+      const latestSession = targetView === "summary"
+        ? historySessions(latest, ownerId).find((item) => item.id === sessionId)
+        : undefined;
+      const latestSource = getCurrentMaterialSummarySource(targetView, sessionId, sourceId);
+      const latestContext = studyPlanContext.current;
       const latestRemoved = new Set([...(latest.removedSessionIds ?? []), ...(latest.snapshot?.removedSessionIds ?? [])]);
-      const latestSession = historySessions(latest, ownerId).find((item) => item.id === sessionId);
-      const latestSource = latest.sources?.[sessionId]?.find((item) => item.id === sourceId);
       const expected: MaterialSummaryScope = {
         ownerId: active.ownerId,
         workspaceGeneration: active.workspaceGeneration,
@@ -1256,19 +1349,36 @@ function AdventureWorkspace() {
         sourceId: active.sourceId,
         sourceFingerprint: active.sourceFingerprint,
         requestGeneration: active.requestGeneration,
+        view: active.view,
+        planId: active.planId,
+        stepId: active.stepId,
       };
+      const currentScopeValue = currentScope();
+      const sessionValid = targetView === "summary"
+        ? latest.summarySessionId === sessionId && !latestRemoved.has(sessionId) && latestSession?.userId === ownerId
+        : latestContext.draftTripId === sessionId && latestContext.view === targetView &&
+          latestContext.selectedPlanId === active.planId && latestContext.selectedStepId === active.stepId &&
+          latest.studyPlanStorage?.onboarding.phase === "complete" && !latest.active;
       return materialSummaryRequest.current === active && !controller.signal.aborted &&
         ownerRef.current === ownerId && workspaceLive.current &&
         getAuthGeneration() === active.authGeneration &&
-        (guest ? !latestAuth.user : latestAuth.user?.id === ownerId) && !latestAuth.needsLogin &&
-        viewRef.current === "summary" && latest.summarySessionId === sessionId &&
-        !latestRemoved.has(sessionId) && latestSession?.userId === ownerId &&
-        latestSource?.reviewed === true && latestSource.text === active.sourceText &&
-        isCurrentMaterialSummaryScope(expected, currentScope());
+        viewRef.current === targetView &&
+        canApplyMaterialSummaryResponse({
+          expected,
+          current: currentScopeValue,
+          ownerMatches: ownerRef.current === ownerId,
+          workspaceLive: workspaceLive.current,
+          sessionValid,
+          source: latestSource,
+          sourceText: active.sourceText,
+          onboardingComplete: latest.studyPlanStorage?.onboarding.phase === "complete",
+          activeSession: Boolean(latest.active),
+        });
     };
     setMaterialSummaryUi({
       ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
-      sessionId, sourceId, sourceFingerprint: "", requestGeneration, status: "pending",
+        sessionId, sourceId, sourceFingerprint: "", requestGeneration, status: "pending",
+        view: targetView, planId, stepId,
     });
     try {
       active.sourceFingerprint = await fingerprintMaterialSourceText(source.text);
@@ -1278,13 +1388,13 @@ function AdventureWorkspace() {
         setMaterialSummaryUi({
           ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
           sessionId, sourceId, sourceFingerprint: active.sourceFingerprint, requestGeneration,
-          status: "ready", summary: existing,
+          status: "ready", summary: existing, view: targetView, planId, stepId,
         });
         return;
       }
       const result = await summarizeReviewedMaterial(active.sourceText, controller.signal, guest);
       if (!isCurrent()) return;
-      const latestSource = current.current.sources?.[sessionId]?.find((item) => item.id === sourceId);
+      const latestSource = getCurrentMaterialSummarySource(targetView, sessionId, sourceId);
       if (!latestSource || await fingerprintMaterialSourceText(latestSource.text) !== active.sourceFingerprint || !isCurrent()) return;
       if (typeof result.summary !== "string" || result.summary.trim().length === 0 || result.summary.length > 4_000)
         throw new Error("Gemini chưa trả về được bản tóm tắt. Hãy thử lại.");
@@ -1299,13 +1409,14 @@ function AdventureWorkspace() {
       setMaterialSummaryUi({
         ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
         sessionId, sourceId, sourceFingerprint: active.sourceFingerprint, requestGeneration,
-        status: "ready", summary,
+        status: "ready", summary, view: targetView, planId, stepId,
       });
     } catch (cause) {
       if (isCurrent()) setMaterialSummaryUi({
         ownerId, workspaceGeneration: active.workspaceGeneration, authGeneration: active.authGeneration,
         sessionId, sourceId, sourceFingerprint: active.sourceFingerprint, requestGeneration,
         status: "failed", error: cause instanceof Error ? cause.message : "Chưa tạo được tóm tắt tài liệu.",
+        view: targetView, planId, stepId,
       });
     } finally {
       if (materialSummaryRequest.current === active) materialSummaryRequest.current = null;
@@ -3504,7 +3615,27 @@ function AdventureWorkspace() {
                       </div>}
                       <p className="material-hint">AI đọc cả chữ in và chữ viết tay, đồng thời đề xuất khôi phục phần mờ dựa trên ngữ cảnh. Chỗ suy luận được đánh dấu [suy luận: …]; chỗ thiếu căn cứ giữ [không rõ]. Hãy kiểm tra trước khi dùng làm tài liệu.</p>
                       </div>
-                      {sources.map((source) => <details className="material-source" key={source.id} open={!source.reviewed}>
+                      {sources.map((source) => {
+                        const targetView = view as "station" | "ticket";
+                        const fingerprintState = materialSummaryFingerprints[JSON.stringify([draftTripId, source.id])];
+                        const sourceFingerprint = fingerprintState?.text === source.text ? fingerprintState.fingerprint : "";
+                        const ui = materialSummaryUi?.ownerId === owner && materialSummaryUi.view === targetView &&
+                          materialSummaryUi.sessionId === draftTripId && materialSummaryUi.sourceId === source.id &&
+                          materialSummaryUi.planId === (studyPlanContext.current.selectedPlanId ?? null) &&
+                          materialSummaryUi.stepId === (studyPlanContext.current.selectedStepId ?? null)
+                          ? materialSummaryUi
+                          : null;
+                        const cachedSummary = sourceFingerprint
+                          ? cachedMaterialSummary(saved, draftTripId, source, sourceFingerprint)
+                          : undefined;
+                        const summaryText = source.reviewed
+                          ? cachedSummary ?? (ui?.status === "ready" && ui.sourceFingerprint === sourceFingerprint ? ui.summary : undefined)
+                          : undefined;
+                        const summaryError = ui?.status === "failed" && ui.sourceFingerprint === sourceFingerprint
+                          ? ui.error
+                          : "";
+                        const canGenerateSummary = canGeneratePrivateMaterialSummary(targetView, source);
+                        return <details className="material-source" key={source.id} open={!source.reviewed}>
                         <summary>{source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra nội dung"}</summary>
                         <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy || privateTripDraftLocked} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => {
                           noteStudyExerciseSourceChange(draftTripId, source.id);
@@ -3539,7 +3670,18 @@ function AdventureWorkspace() {
                           }}>Gỡ tài liệu</button>
                         </div>
                         {source.source !== "ai-generated" && !originalFiles.current.has(source.id) && <small>Muốn đọc lại bằng AI, hãy nhập lại tệp gốc.</small>}
-                      </details>)}
+                        <MaterialSummaryControl
+                          source={source}
+                          summary={summaryText}
+                          pending={ui?.status === "pending"}
+                          error={summaryError}
+                          canGenerate={canGenerateSummary}
+                          disabledReason={!canGenerateSummary ? privateMaterialSummaryUnavailableReason(targetView) : ""}
+                          onGenerate={() => void generateMaterialSummary(draftTripId, source.id, targetView)}
+                          onCancel={() => cancelMaterialSummaryRequest(draftTripId, source.id)}
+                        />
+                      </details>;
+                      })}
                       {!!materials.length && <ul className="material-list" aria-label="Tài liệu đã chọn">{materials.map((file, i) => <li key={`${i}:${file.name}`}>
                         <strong>{file.name}</strong><span>{(file.size / 1024).toFixed(1)} KB · {file.message}</span>
                       </li>)}</ul>}
@@ -4580,7 +4722,7 @@ function AdventureWorkspace() {
                         const fingerprintKey = JSON.stringify([summarySession.id, source.id]);
                         const fingerprintState = materialSummaryFingerprints[fingerprintKey];
                         const sourceFingerprint = fingerprintState?.text === source.text ? fingerprintState.fingerprint : "";
-                        const ui = materialSummaryUi?.ownerId === owner &&
+                        const ui = materialSummaryUi?.ownerId === owner && materialSummaryUi.view === "summary" &&
                           materialSummaryUi.sessionId === summarySession.id && materialSummaryUi.sourceId === source.id
                           ? materialSummaryUi
                           : null;
@@ -4593,17 +4735,10 @@ function AdventureWorkspace() {
                         const summaryError = ui?.status === "failed" && ui.sourceFingerprint === sourceFingerprint
                           ? ui.error
                           : "";
-                        const canGenerateSummary = (owner === "guest" || (!!user && !needsLogin)) && online &&
-                          !authOffline && loaded && exclusive && workspaceLive.current;
-                        const summaryUnavailableReason = owner !== "guest" && (!user || needsLogin)
-                          ? "Đăng nhập lại để tạo tóm tắt tài liệu."
-                          : !online || authOffline
-                            ? "Kết nối mạng để tạo tóm tắt tài liệu."
-                            : owner === "guest"
-                              ? "Tóm tắt được lưu riêng trên thiết bị này."
-                            : !loaded || !exclusive || !workspaceLive.current
-                              ? "Mở hành trình trên thiết bị này để tạo tóm tắt."
-                              : "";
+                        const canGenerateSummary = canGeneratePrivateMaterialSummary("summary", source);
+                        const summaryUnavailableReason = !canGenerateSummary
+                          ? privateMaterialSummaryUnavailableReason("summary")
+                          : owner === "guest" ? "Tóm tắt được lưu riêng trên thiết bị này." : "";
                         return <details className="material-source" key={source.id} open={!source.reviewed}>
                           <summary>Nguồn câu hỏi · {source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra"}</summary>
                           <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} textareaLabel="Bản chép tài liệu" onChange={(text) => {
@@ -4633,7 +4768,8 @@ function AdventureWorkspace() {
                             error={summaryError}
                             canGenerate={canGenerateSummary}
                             disabledReason={summaryUnavailableReason}
-                            onGenerate={() => void generateMaterialSummary(summarySession.id, source.id)}
+                            onGenerate={() => void generateMaterialSummary(summarySession.id, source.id, "summary")}
+                            onCancel={() => cancelMaterialSummaryRequest(summarySession.id, source.id)}
                           />
                         </details>;
                       })}
