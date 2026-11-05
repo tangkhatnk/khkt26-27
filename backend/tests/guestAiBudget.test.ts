@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import RedisMock from "ioredis-mock";
 import { ApiError } from "../src/errors.js";
@@ -11,18 +11,25 @@ const limits: GuestAiBudgetLimits = {
   globalDailyUnits: 100,
 };
 const redis = new RedisMock();
+const quotaClock = new Date(Date.UTC(2026, 10, 4, 12));
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(quotaClock);
+});
 afterEach(async () => {
   await redis.flushall();
+  vi.useRealTimers();
 });
 
 it("reserves per-task quota atomically when concurrent guest calls arrive", async () => {
+  const now = Date.now();
   const results = await Promise.allSettled(Array.from({ length: 12 }, () =>
     reserveGuestAiBudget(redis as unknown as Redis, {
       principalId: "principal-a",
       remoteAddress: "203.0.113.10",
       task: "question",
       providerUnits: 1,
-      now: Date.UTC(2026, 10, 4, 12),
+      now,
       limits,
     }),
   ));
@@ -36,14 +43,15 @@ it("reserves per-task quota atomically when concurrent guest calls arrive", asyn
 
 it("applies the shared provider envelope across independent guest principals", async () => {
   const smallGlobalLimit = { ...limits, globalDailyUnits: 5 };
+  const now = Date.now();
   const results = await Promise.allSettled([
     reserveGuestAiBudget(redis as unknown as Redis, {
       principalId: "principal-a", remoteAddress: "203.0.113.10", task: "tutor",
-      providerUnits: 3, now: Date.UTC(2026, 10, 4, 12), limits: smallGlobalLimit,
+      providerUnits: 3, now, limits: smallGlobalLimit,
     }),
     reserveGuestAiBudget(redis as unknown as Redis, {
       principalId: "principal-b", remoteAddress: "203.0.113.11", task: "tutor",
-      providerUnits: 3, now: Date.UTC(2026, 10, 4, 12), limits: smallGlobalLimit,
+      providerUnits: 3, now, limits: smallGlobalLimit,
     }),
   ]);
 
@@ -55,9 +63,10 @@ it("applies the shared provider envelope across independent guest principals", a
 
 it("does not charge provider units for deterministic evaluation", async () => {
   const oneUnitEnvelope = { ...limits, globalDailyUnits: 1 };
+  const now = Date.now();
   const response = await reserveGuestAiBudget(redis as unknown as Redis, {
     principalId: "principal-a", remoteAddress: "203.0.113.10", task: "evaluation",
-    providerUnits: 0, now: Date.UTC(2026, 10, 4, 12), limits: oneUnitEnvelope,
+    providerUnits: 0, now, limits: oneUnitEnvelope,
   });
 
   expect(response).toBeUndefined();
@@ -65,6 +74,7 @@ it("does not charge provider units for deterministic evaluation", async () => {
 
 it("shares the daily socket-IP request ceiling across guest credentials", async () => {
   const smallIpLimit = { ...limits, perIpRequests: 2 };
+  const now = Date.now();
   const calls = [
     { principalId: "principal-a", task: "question" as const },
     { principalId: "principal-b", task: "question" as const },
@@ -76,7 +86,7 @@ it("shares the daily socket-IP request ceiling across guest credentials", async 
       remoteAddress: "203.0.113.10",
       task,
       providerUnits: 0,
-      now: Date.UTC(2026, 10, 4, 12),
+      now,
       limits: smallIpLimit,
     }),
   ));

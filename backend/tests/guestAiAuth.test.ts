@@ -1,18 +1,25 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import RedisMock from "ioredis-mock";
 import { issueGuestAiCredential, verifyGuestAiCredential } from "../src/guestAiAuth.js";
 import { ApiError } from "../src/errors.js";
 
 const redis = new RedisMock();
+const quotaClock = new Date(Date.UTC(2026, 10, 4, 12));
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(quotaClock);
+});
 afterEach(async () => {
   await redis.flushall();
+  vi.useRealTimers();
 });
 
 it("enforces issuance caps atomically by socket IP and globally", async () => {
   const limits = { perIpDaily: 4, globalDaily: 10 };
+  const now = Date.now();
   const issued = await Promise.allSettled(Array.from({ length: 20 }, () =>
-    issueGuestAiCredential(redis as unknown as Redis, "198.51.100.7", Date.UTC(2026, 10, 4, 12), limits),
+    issueGuestAiCredential(redis as unknown as Redis, "198.51.100.7", now, limits),
   ));
 
   expect(issued.filter(result => result.status === "fulfilled")).toHaveLength(4);
