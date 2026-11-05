@@ -10,6 +10,13 @@ import { resolve } from "node:path";
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 let vite;
 let StudyPlanWorkspace;
+let StudyPlanStepEditor;
+let StudyPlanStepNavigation;
+let getStudyPlanStepDraftErrors;
+let isStudyPlanStepDraftDirty;
+let buildStudyPlanStepPatch;
+let commitStudyPlanStepDraft;
+let requestStudyPlanStepSelection;
 let StudyWorkspaceSettings;
 let StudyOnboarding;
 let studyPlanFlow;
@@ -26,7 +33,16 @@ before(async () => {
     logLevel: "silent",
     server: { middlewareMode: true },
   });
-  ({ StudyPlanWorkspace } = await vite.ssrLoadModule("/src/adventure/StudyPlanWorkspace.tsx"));
+  ({
+    StudyPlanWorkspace,
+    StudyPlanStepEditor,
+    StudyPlanStepNavigation,
+    getStudyPlanStepDraftErrors,
+    isStudyPlanStepDraftDirty,
+    buildStudyPlanStepPatch,
+    commitStudyPlanStepDraft,
+    requestStudyPlanStepSelection,
+  } = await vite.ssrLoadModule("/src/adventure/StudyPlanWorkspace.tsx"));
   ({ StudyWorkspaceSettings } = await vite.ssrLoadModule("/src/adventure/StudyWorkspaceSettings.tsx"));
   ({ StudyOnboarding } = await vite.ssrLoadModule("/src/adventure/StudyOnboarding.tsx"));
   studyPlanFlow = await vite.ssrLoadModule("/src/adventure/studyPlanFlow.ts");
@@ -50,6 +66,16 @@ function render(overrides = {}) {
     legacyDetails: React.createElement("span", null, "Chi tiết tuyến cũ"),
     ...overrides,
   }));
+}
+
+function collectElements(element, result = []) {
+  if (Array.isArray(element)) {
+    for (const child of element) collectElements(child, result);
+  } else if (element && typeof element === "object" && "type" in element && "props" in element) {
+    result.push(element);
+    collectElements(element.props.children, result);
+  }
+  return result;
 }
 
 test("goal-first workspace summarizes goal, subject, breaks, and total time with one inline content column", () => {
@@ -154,6 +180,188 @@ test("AI plan steps remain labeled drafts and expose their action, outcome, and 
   assert.match(view, /Nêu được hai chức năng/u);
   assert.match(view, /Tự diễn đạt bằng lời của mình/u);
   assert.match(view, /aria-current="step"/u);
+});
+
+test("plan navigation stays compact while the selected step owns the detail panel", () => {
+  const view = render({
+    plan: {
+      id: "plan-a",
+      title: "Ôn trao đổi chất",
+      origin: "manual",
+      selectedStepId: "step-a",
+      steps: [
+        {
+          id: "step-a", plannedSessionId: "session-a", title: "Đọc phần đầu",
+          action: "Đọc phần ghi chú đã xem", outcome: "Nêu được hai ý chính",
+          check: "Tự diễn đạt lại bằng lời", preferredMinutes: 20,
+        },
+        {
+          id: "step-b", plannedSessionId: "session-b", title: "Tự kiểm tra",
+          action: "Trả lời câu hỏi ôn tập", outcome: "Phát hiện phần còn thiếu",
+          check: "Giải thích lại điểm chưa rõ", preferredMinutes: 25,
+        },
+      ],
+    },
+    onSelectStep: () => {},
+    onSaveStep: () => {},
+  });
+
+  assert.match(view, /class="[^"]*study-plan-workspace__step-nav"/u);
+  assert.match(view, /<strong>Đọc phần đầu<\/strong>/u);
+  assert.match(view, /<strong>Tự kiểm tra<\/strong>/u);
+  assert.match(view, /class="study-plan-workspace__selected-step"/u);
+  assert.match(view, /Đọc phần ghi chú đã xem/u);
+  assert.doesNotMatch(view.slice(view.indexOf("study-plan-workspace__step-nav"), view.indexOf("class=\"study-plan-workspace__selected-step\"")), /Đọc phần ghi chú đã xem|Trả lời câu hỏi ôn tập/u);
+
+  const selected = [];
+  const navigation = StudyPlanStepNavigation({
+    steps: [
+      { id: "step-a", title: "Đọc phần đầu" },
+      { id: "step-b", title: "Tự kiểm tra" },
+    ],
+    selectedStepId: "step-a",
+    onSelectStep: (id) => selected.push(id),
+  });
+  const navButtons = collectElements(navigation).filter((node) => node.type === "button");
+  navButtons[1].props.onClick();
+  assert.deepEqual(selected, ["step-b"]);
+  const staticNavigation = StudyPlanStepNavigation({
+    steps: [{ id: "step-a", title: "Đọc phần đầu" }],
+    selectedStepId: "step-a",
+  });
+  assert.equal(collectElements(staticNavigation).find((node) => node.type === "button").props.disabled, true);
+});
+
+test("step editor retains raw drafts until Save or Cancel and exposes accessible fields", () => {
+  const rawChanges = [];
+  let saves = 0;
+  let cancels = 0;
+  const draft = {
+    action: "  Viết lại khái niệm  ",
+    outcome: "Nêu được định nghĩa",
+    check: "Tự giải thích không nhìn tài liệu",
+  };
+  const editor = StudyPlanStepEditor({
+    stepTitle: "Tự kiểm tra",
+    draft,
+    errors: {},
+    canSave: true,
+    onDraftChange: (field, value) => rawChanges.push([field, value]),
+    onSave: () => { saves += 1; },
+    onCancel: () => { cancels += 1; },
+  });
+  const nodes = collectElements(editor);
+  const textareas = nodes.filter((node) => node.type === "textarea");
+  const buttons = nodes.filter((node) => node.type === "button");
+
+  assert.equal(textareas.length, 3);
+  assert.match(renderToStaticMarkup(editor), /aria-label="Hành động cho bước Tự kiểm tra"/u);
+  assert.match(renderToStaticMarkup(editor), /aria-label="Kết quả mong đợi cho bước Tự kiểm tra"/u);
+  assert.match(renderToStaticMarkup(editor), /aria-label="Câu tự kiểm tra cho bước Tự kiểm tra"/u);
+  assert.equal(textareas[0].props.value, draft.action);
+  textareas[0].props.onChange({ currentTarget: { value: "  bản nháp chưa lưu  " } });
+  assert.deepEqual(rawChanges, [["action", "  bản nháp chưa lưu  "]]);
+  buttons.find((node) => node.props.children === "Lưu thay đổi").props.onClick();
+  buttons.find((node) => node.props.children === "Hủy").props.onClick();
+  assert.equal(saves, 1);
+  assert.equal(cancels, 1);
+
+  const invalidMarkup = renderToStaticMarkup(StudyPlanStepEditor({
+    stepId: "step-a",
+    stepTitle: "Tự kiểm tra",
+    draft: { ...draft, action: "  " },
+    errors: { action: "Nhập ít nhất 3 ký tự." },
+    canSave: false,
+    onDraftChange: () => {},
+    onSave: () => {},
+    onCancel: () => {},
+  }));
+  assert.match(invalidMarkup, /aria-invalid="true"/u);
+  assert.match(invalidMarkup, /role="alert">Nhập ít nhất 3 ký tự\.<\/p>/u);
+  assert.match(invalidMarkup, /class="study-plan-workspace__save" disabled/u);
+});
+
+test("step draft validation enforces trimmed field bounds without mutating raw drafts", () => {
+  const draft = {
+    action: "  làm  ",
+    outcome: "x".repeat(401),
+    check: "   ",
+  };
+  const errors = getStudyPlanStepDraftErrors(draft);
+
+  assert.deepEqual(errors, {
+    outcome: "Tối đa 400 ký tự.",
+    check: "Nhập ít nhất 3 ký tự.",
+  });
+  assert.equal(draft.action, "  làm  ");
+  assert.equal(draft.outcome.length, 401);
+  assert.deepEqual(buildStudyPlanStepPatch({
+    action: "  Viết lại khái niệm  ",
+    outcome: " Nêu được định nghĩa ",
+    check: " Tự giải thích không nhìn tài liệu ",
+  }), {
+    action: "Viết lại khái niệm",
+    outcome: "Nêu được định nghĩa",
+    check: "Tự giải thích không nhìn tài liệu",
+  });
+});
+
+test("dirty step changes block switching and generation until saved or cancelled", () => {
+  const original = {
+    action: "Đọc phần ghi chú", outcome: "Nêu được hai ý chính", check: "Tự diễn đạt lại",
+  };
+  const draft = { ...original, action: "  Đọc phần ghi chú  " };
+  assert.equal(isStudyPlanStepDraftDirty(original, draft), false);
+  assert.equal(isStudyPlanStepDraftDirty(original, { ...draft, action: "Đọc chủ động" }), true);
+
+  const calls = [];
+  const allowed = requestStudyPlanStepSelection({
+    stepId: "step-b",
+    dirty: true,
+    onSelect: (id) => calls.push(["select", id]),
+    onBlocked: () => calls.push(["blocked"]),
+  });
+  assert.equal(allowed, false);
+  assert.deepEqual(calls, [["blocked"]]);
+});
+
+test("step save callback receives only changed step fields after trimming valid drafts", () => {
+  const saved = [];
+  const current = { action: "Đọc phần ghi chú", outcome: "Nêu được hai ý", check: "Tự diễn đạt lại" };
+  const draft = { action: "  Đọc chủ động  ", outcome: "  Nêu được hai ý  ", check: " Tự diễn đạt lại " };
+
+  assert.equal(commitStudyPlanStepDraft({
+    stepId: "step-a",
+    current,
+    draft,
+    onSave: (stepId, patch) => {
+      saved.push([stepId, patch]);
+      return true;
+    },
+  }), true);
+  assert.deepEqual(saved, [["step-a", {
+    action: "Đọc chủ động",
+    outcome: "Nêu được hai ý",
+    check: "Tự diễn đạt lại",
+  }]]);
+  assert.equal(commitStudyPlanStepDraft({
+    stepId: "step-a",
+    current,
+    draft: { ...draft, action: "  " },
+    onSave: () => assert.fail("invalid edits must not be saved"),
+  }), false);
+  assert.equal(commitStudyPlanStepDraft({
+    stepId: "step-a",
+    current,
+    draft: { ...current },
+    onSave: () => assert.fail("unchanged edits must not be saved"),
+  }), false);
+  assert.equal(commitStudyPlanStepDraft({
+    stepId: "step-a",
+    current,
+    draft,
+    onSave: () => false,
+  }), false);
 });
 
 test("workspace exposes a deliberate plan request and visible recoverable states", () => {

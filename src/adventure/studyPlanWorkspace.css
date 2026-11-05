@@ -60,15 +60,36 @@
 .study-plan-workspace__plan-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .study-plan-workspace__plan-heading h2 { margin: 0; font-size: 20px; }
 .study-plan-workspace__draft-label { padding: 6px 10px; border-radius: 20px; background: #edf1e7; color: #536d5a; font-size: 12px; font-weight: 700; }
-.study-plan-workspace__steps { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.study-plan-workspace__step-select { display: flex; width: 100%; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--border, #dce3d9); border-radius: 10px; background: var(--surface, #fffefa); color: var(--ink, #263d34); text-align: left; }
+.study-plan-workspace__steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.study-plan-workspace__step-select { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border, #dce3d9); border-radius: 10px; background: var(--surface, #fffefa); color: var(--ink, #263d34); text-align: left; }
 button.study-plan-workspace__step-select { cursor: pointer; }
-.study-plan-workspace__steps li[aria-current="step"] .study-plan-workspace__step-select,
+button.study-plan-workspace__step-select:disabled { cursor: default; opacity: .72; }
+.study-plan-workspace__step-select strong { min-width: 0; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
 .study-plan-workspace__step-select[aria-current="step"] { border-color: #59856a; box-shadow: inset 3px 0 #59856a; }
 .study-plan-workspace__step-number { display: grid; flex: 0 0 30px; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: #e8efe5; color: #3b6549; font-weight: 750; }
-.study-plan-workspace__step-copy { display: grid; gap: 4px; min-width: 0; font-size: 13px; line-height: 1.45; }
-.study-plan-workspace__step-copy strong { font-size: 15px; }
-.study-plan-workspace__step-copy b { font-weight: 700; }
+.study-plan-workspace__selected-step { display: grid; gap: 14px; padding-top: 15px; border-top: 1px solid var(--border, #dce3d9); }
+.study-plan-workspace__selected-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.study-plan-workspace__selected-heading .study-plan-workspace__eyebrow { margin-bottom: 4px; }
+.study-plan-workspace__selected-heading h3 { margin: 0; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
+.study-plan-workspace__selected-content { display: grid; gap: 12px; margin: 0; }
+.study-plan-workspace__selected-content div { min-width: 0; }
+.study-plan-workspace__selected-content dt { color: var(--muted, #707a72); font-size: 12px; font-weight: 700; }
+.study-plan-workspace__selected-content dd { margin: 3px 0 0; font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.study-plan-workspace__editor { display: grid; min-width: 0; gap: 12px; margin: 0; padding: 0; border: 0; }
+.study-plan-workspace__editor legend { padding: 0; color: var(--ink, #263d34); font-size: 14px; font-weight: 700; }
+.study-plan-workspace__editor-field { display: grid; gap: 5px; }
+.study-plan-workspace__editor-field label { color: var(--muted, #707a72); font-size: 12px; font-weight: 700; }
+.study-plan-workspace__editor-field textarea { width: 100%; min-height: 76px; padding: 9px 11px; border: 1px solid var(--border, #dce3d9); border-radius: 8px; background: var(--surface, #fffefa); color: var(--ink, #263d34); font: inherit; line-height: 1.5; resize: vertical; }
+.study-plan-workspace__editor-field textarea:focus-visible { outline: 3px solid #db9b4a; outline-offset: 2px; }
+.study-plan-workspace__field-error { margin: 0; color: #9e3930; font-size: 12px; }
+.study-plan-workspace__save-error { margin: 0; color: #9e3930; font-size: 13px; line-height: 1.45; }
+.study-plan-workspace__editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.study-plan-workspace__save,.study-plan-workspace__discard,.study-plan-workspace__edit { min-height: 40px; padding: 8px 13px; border: 1px solid var(--border, #dce3d9); border-radius: 8px; background: var(--surface, #fffefa); color: var(--ink, #263d34); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.study-plan-workspace__save { border-color: #47735a; background: #47735a; color: #fff; }
+.study-plan-workspace__save:disabled { cursor: not-allowed; opacity: .55; }
+.study-plan-workspace__edit:disabled { cursor: not-allowed; opacity: .55; }
+.study-plan-workspace__save:focus-visible,.study-plan-workspace__discard:focus-visible,.study-plan-workspace__edit:focus-visible { outline: 3px solid #db9b4a; outline-offset: 2px; }
+.study-plan-workspace__edit-notice { margin: 0; color: #815d22; font-size: 13px; line-height: 1.45; }
 .study-plan-workspace__empty-plan { margin: 0; color: var(--muted, #707a72); font-size: 14px; line-height: 1.55; }
 .study-plan-workspace__status,.study-plan-workspace__error { margin: 0; font-size: 13px; }
 .study-plan-workspace__error { color: #9e3930; }
@@ -97,6 +118,8 @@ button.study-plan-workspace__step-select { cursor: pointer; }
   .study-plan-workspace__timing dd { font-size: 14px; }
   .study-plan-workspace__plan { padding: 16px; }
   .study-plan-workspace__plan-heading { align-items: flex-start; flex-direction: column; }
+  .study-plan-workspace__steps { grid-template-columns: minmax(0, 1fr); }
+  .study-plan-workspace__selected-heading { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {
