@@ -61,6 +61,8 @@ import {
 import { readMaterialDocument, summarizeMaterialText } from "./materialReading.js";
 import { STUDY_GUIDE_BODY_LIMIT_BYTES, studyGuideRequestSchema } from "./studyGuideSchemas.js";
 import { generateStudyGuide } from "./studyGuide.js";
+import { STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES, studyPlanRequestSchema } from "./studyPlanSchemas.js";
+import { generateStudyPlan } from "./studyPlan.js";
 import { geminiRequestSchema } from "./geminiSchemas.js";
 import { realtime } from "./realtime.js";
 
@@ -724,6 +726,24 @@ export async function buildApp(deps?: {
         try {
           const body = studyGuideRequestSchema.parse(req.body);
           return await generateStudyGuide(body, controller.signal);
+        } finally {
+          req.raw.off("aborted", abort);
+          reply.raw.off("close", closed);
+        }
+      });
+      api.post("/study-plans", {
+        bodyLimit: STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES,
+        config: { rateLimit: { max: 3, timeWindow: "1 minute" } },
+      }, async (req, reply) => {
+        reply.header("Cache-Control", "no-store");
+        const body = studyPlanRequestSchema.parse(req.body);
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const closed = () => { if (!reply.raw.writableEnded) abort(); };
+        req.raw.once("aborted", abort);
+        reply.raw.once("close", closed);
+        try {
+          return await generateStudyPlan(body, controller.signal);
         } finally {
           req.raw.off("aborted", abort);
           reply.raw.off("close", closed);
