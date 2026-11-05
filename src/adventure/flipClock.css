@@ -1,41 +1,59 @@
 .flip-clock {
-  display: inline-flex;
+  display: flex;
   box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
-  padding: 0.32rem 0.55rem;
-  border: 1px solid #d3ddc3;
-  border-radius: 0.8rem;
-  background: linear-gradient(180deg, #fffef7, #f0f2df);
-  box-shadow: inset 0 2px 0 #fff, 0 4px 0 #75846228;
+  justify-content: center;
+  margin: 0 auto;
   color: #334b3b;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: clamp(1.5rem, 5vw, 2.35rem);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   line-height: 1;
 }
 
 .timer.flip-clock {
   display: flex;
-  width: max-content;
+  width: 100%;
   margin: 0 auto;
-  letter-spacing: 0;
-  font-size: clamp(48px, 8vw, 100px);
+  justify-content: center;
+  font-size: clamp(3rem, 14vw, 9rem);
 }
 
-.flip-clock-readout,
-.flip-clock-group,
+.flip-clock-readout {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.45rem, 2.5vw, 1.25rem);
+}
+
+.flip-clock-panel {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: clamp(0.65rem, 2.5vw, 1.25rem) clamp(0.75rem, 3vw, 1.5rem);
+  border: 1px solid #d5ddce;
+  border-radius: 0.8rem;
+  background: #f0f3eb;
+  color: #334b3b;
+}
+
+.flip-clock-panel--wide .flip-clock-digits {
+  font-size: 0.88em;
+}
+
 .flip-clock-digits {
   display: inline-flex;
   align-items: center;
-}
-
-.flip-clock-group {
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.flip-clock-digits {
-  gap: 0.07em;
+  gap: 0.035em;
 }
 
 .flip-clock-digit {
@@ -44,10 +62,10 @@
   width: 0.62em;
   height: 0.92em;
   overflow: hidden;
-  border: 1px solid #bcc8ad;
-  border-radius: 0.12em;
-  background: #e7ebd9;
-  box-shadow: 0 2px 0 #9da98b55;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   isolation: isolate;
   perspective: 12em;
 }
@@ -58,7 +76,7 @@
   width: 100%;
   height: 50%;
   overflow: hidden;
-  background: linear-gradient(110deg, #f9f8ed, #e8eddd);
+  background: transparent;
   text-align: center;
 }
 
@@ -68,14 +86,14 @@
   width: 100%;
   height: 200%;
   color: currentColor;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 0.92em;
   text-align: center;
 }
 
 .flip-clock-upper {
   top: 0;
-  border-bottom: 1px solid #c4ceba;
+  border-bottom: 1px solid #c5d0c2;
 }
 
 .flip-clock-upper > span {
@@ -84,7 +102,6 @@
 
 .flip-clock-lower {
   bottom: 0;
-  background: linear-gradient(110deg, #e8eddd, #f2f2e6);
 }
 
 .flip-clock-lower > span {
@@ -121,25 +138,53 @@
 }
 
 .flip-clock-unit {
-  color: #71816b;
+  color: #6e7c6d;
   font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 0.24em;
-  font-weight: 800;
+  font-size: clamp(0.65rem, 1vw, 0.82rem);
+  font-weight: 750;
   letter-spacing: 0.12em;
   line-height: 1;
 }
 
 .flip-clock-separator {
-  align-self: flex-start;
-  position: relative;
-  width: 0.12em;
-  height: 0.92em;
-  margin: 0 0.14em;
+  color: #71816b;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.55em;
+  font-weight: 500;
+  line-height: 1;
 }
-.flip-clock-separator::before,
-.flip-clock-separator::after { content: ""; position: absolute; left: 50%; width: .07em; height: .07em; transform: translateX(-50%); border-radius: 50%; background: #80906f; }
-.flip-clock-separator::before { top: 29%; }
-.flip-clock-separator::after { bottom: 29%; }
+
+html[data-theme="dark"] .adventure .focus-card .timer.flip-clock {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #eaf1e7;
+}
+
+html[data-theme="dark"] .adventure .focus-card .flip-clock-panel {
+  border-color: #405246;
+  background: #243229;
+  color: #eaf1e7;
+}
+
+html[data-theme="dark"] .adventure .focus-card .flip-clock-digit {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .adventure .focus-card .flip-clock-half {
+  background: transparent;
+}
+
+html[data-theme="dark"] .adventure .focus-card .flip-clock-upper {
+  border-color: #526555;
+}
+
+html[data-theme="dark"] .adventure .focus-card .flip-clock-unit,
+html[data-theme="dark"] .adventure .focus-card .flip-clock-separator {
+  color: #b7c8b7;
+}
 
 @keyframes flip-clock-top-out {
   to { transform: rotateX(-90deg); }
@@ -148,6 +193,31 @@
 @keyframes flip-clock-bottom-in {
   from { transform: rotateX(90deg); }
   to { transform: rotateX(0); }
+}
+
+@media (max-width: 420px) {
+  .timer.flip-clock {
+    font-size: clamp(2.75rem, 13.5vw, 3.5rem);
+  }
+
+  .flip-clock-readout {
+    gap: 0.4rem;
+  }
+
+  .flip-clock-panel {
+    gap: 0.32rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.65rem;
+  }
+
+  .flip-clock-panel--wide .flip-clock-digits {
+    font-size: 0.84em;
+  }
+
+  .flip-clock-unit {
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
