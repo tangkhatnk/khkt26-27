@@ -45,6 +45,7 @@ beforeEach(async () => {
     }) },
   } as unknown as PrismaClient;
   redis = new RedisMock();
+  await redis.flushall();
   app = await buildApp({ db, redis: redis as unknown as Redis, logger: false });
   await app.ready();
   generateStudyPlan.mockReset();
@@ -125,5 +126,60 @@ describe("study plan routes", () => {
     expect(missing.statusCode).toBe(401);
     expect(wrongScheme.statusCode).toBe(401);
     expect(generateStudyPlan).not.toHaveBeenCalled();
+  });
+
+  it.each(["account", "guest"] as const)("applies a 3-per-minute route cap to %s planning", async route => {
+    const guestToken = route === "guest" ? await issueGuestCredential() : undefined;
+    const url = route === "account" ? "/api/v1/study-plans" : "/api/v1/ai/guest/study-plans";
+    const headers = route === "account"
+      ? { authorization }
+      : { authorization: `GuestAI ${guestToken}` };
+    const responses = [];
+    for (let index = 0; index < 4; index++) {
+      responses.push(await app.inject({
+        method: "POST", url, headers,
+        payload: { goal: "Hiểu chu trình nước", preferredMinutes: 45 },
+      }));
+    }
+
+    expect(responses.map(response => response.statusCode)).toEqual([200, 200, 200, 429]);
+    expect(generateStudyPlan).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["account", "guest"] as const)("cancels %s provider work when the response stream closes", async route => {
+    const guestToken = route === "guest" ? await issueGuestCredential() : undefined;
+    const url = route === "account" ? "/api/v1/study-plans" : "/api/v1/ai/guest/study-plans";
+    const headers = route === "account"
+      ? { authorization, "content-type": "application/json" }
+      : { authorization: `GuestAI ${guestToken}`, "content-type": "application/json" };
+    let startProvider!: () => void;
+    const providerStarted = new Promise<void>(resolve => { startProvider = resolve; });
+    let providerSignal: AbortSignal | undefined;
+    generateStudyPlan.mockImplementation((_input, signal) => {
+      providerSignal = signal as AbortSignal;
+      startProvider();
+      return new Promise((_resolve, reject) => {
+        providerSignal!.addEventListener("abort", () => reject(new Error("provider cancelled")), { once: true });
+      });
+    });
+
+    const baseUrl = await app.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+    const pending = fetch(`${baseUrl}${url}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ goal: "Hiểu chu trình nước", preferredMinutes: 45 }),
+      signal: controller.signal,
+    });
+    try {
+      await providerStarted;
+      expect(providerSignal?.aborted).toBe(false);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      await vi.waitFor(() => expect(providerSignal?.aborted).toBe(true));
+      expect(generateStudyPlan).toHaveBeenCalledOnce();
+    } finally {
+      controller.abort();
+    }
   });
 });

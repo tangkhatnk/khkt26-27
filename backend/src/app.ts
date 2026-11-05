@@ -4,6 +4,7 @@ import { publicMaterialSummaryRoutes } from "./publicMaterialSummaries.js";
 import { publicReportRoutes } from "./publicReport.js";
 import { studyExerciseRoutes } from "./studyExercises.js";
 import { guestAiRoutes } from "./guestAi.js";
+import { signalForRequest } from "./guestAiWorkflows.js";
 import { adminRoutes } from "./admin.js";
 import { localRead, verifyLocalUrl } from "./localStorage.js";
 import { Metrics } from "./metrics.js";
@@ -737,16 +738,11 @@ export async function buildApp(deps?: {
       }, async (req, reply) => {
         reply.header("Cache-Control", "no-store");
         const body = studyPlanRequestSchema.parse(req.body);
-        const controller = new AbortController();
-        const abort = () => controller.abort();
-        const closed = () => { if (!reply.raw.writableEnded) abort(); };
-        req.raw.once("aborted", abort);
-        reply.raw.once("close", closed);
+        const signal = signalForRequest(req, reply);
         try {
-          return await generateStudyPlan(body, controller.signal);
+          return await generateStudyPlan(body, signal.signal);
         } finally {
-          req.raw.off("aborted", abort);
-          reply.raw.off("close", closed);
+          signal.dispose();
         }
       });
       api.post("/quiz/generate", {
