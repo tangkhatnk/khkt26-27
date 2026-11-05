@@ -9,12 +9,16 @@ type Props = {
   topics: readonly Topic[];
   hasActiveTrip: boolean;
   onPrepare: (draft: QuickTripDraft) => void;
+  onDraftChange?: (draft: QuickTripDraft) => void;
 };
 
-function HomeTripFormView({ draftRef, topics, hasActiveTrip, onPrepare }: Props) {
+function HomeTripFormView({ draftRef, topics, hasActiveTrip, onPrepare, onDraftChange }: Props) {
   const [draft, setDraft] = useState(() => ({ ...draftRef.current }));
-  const change = (changes: Partial<QuickTripDraft>) =>
-    setDraft(updateQuickTripDraft(draftRef, changes));
+  const change = (changes: Partial<QuickTripDraft>) => {
+    const next = updateQuickTripDraft(draftRef, changes);
+    setDraft(next);
+    onDraftChange?.(next);
+  };
 
   return (
     <section className="ticket-card">

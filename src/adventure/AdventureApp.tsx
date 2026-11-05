@@ -44,6 +44,9 @@ import {
   StudyExerciseQuestionViewer,
 } from "./StudyExercisePreparation";
 import { HomeTripForm } from "./HomeTripForm";
+import { StudyOnboarding } from "./StudyOnboarding";
+import { canShowStudyOnboarding, reduceStudyOnboardingProgress, type StudyOnboardingProgress } from "./studyOnboardingModel.ts";
+import { createStudyPlanStorage } from "./studyPlanStorage.ts";
 import {
   CuratedEvaluation,
   CuratedEvaluationReceipt,
@@ -445,6 +448,29 @@ function AdventureWorkspace() {
         try {
           const value = readSaved(owner);
           const pathRun = value.learningPath?.activeRun;
+          if (!value.active && !pathRun) {
+            const draft = value.studyPlanStorage?.draft;
+            if (draft) {
+              const quickDraft = {
+                goal: draft.goal,
+                topic: draft.topicId,
+                topicLabel: draft.topicLabel,
+                minutes: draft.preferredMinutes,
+                breakCount: draft.breakCount,
+                breakMinutes: draft.breakMinutes,
+                level: draft.level,
+                confidence: draft.confidence,
+                selectedPlanId: draft.selectedPlanId,
+                selectedStepId: draft.selectedStepId,
+              };
+              updateQuickTripDraft(quickTripDraft, quickDraft);
+              setGoal(draft.goal);
+              setTopic(draft.topicId);
+              setMinutes(draft.preferredMinutes);
+              setBreakCount(draft.breakCount);
+              setBreakMinutes(draft.breakMinutes);
+            }
+          }
           if (pathRun && pathRun.phase === "ticket" && !value.active) {
             const runCourse = CURATED_COURSES.find((course) => course.id === pathRun.courseId);
             const runLesson = runCourse?.lessons.find((lesson) => lesson.id === pathRun.lessonId && lesson.version === pathRun.lessonVersion);
@@ -2595,6 +2621,71 @@ function AdventureWorkspace() {
     setMode("solo");
     go("ticket");
   }
+  function saveStudyOnboardingProgress(progress: StudyOnboardingProgress) {
+    const storage = current.current.studyPlanStorage ?? createStudyPlanStorage();
+    const survey = progress.survey;
+    const preferredMinutes = survey.preferredMinutes !== null && Number.isSafeInteger(survey.preferredMinutes) &&
+      survey.preferredMinutes >= 1 && survey.preferredMinutes <= 240
+      ? survey.preferredMinutes : storage.draft.preferredMinutes;
+    const validMinutes = preferredMinutes === survey.preferredMinutes;
+    const draft = {
+      ...storage.draft,
+      ...survey,
+      preferredMinutes,
+      selectedPlanId: storage.draft.selectedPlanId,
+      selectedStepId: storage.draft.selectedStepId,
+    };
+    const quickDraft = {
+      goal: survey.goal,
+      topic: survey.topicId,
+      topicLabel: survey.topicLabel,
+      minutes: preferredMinutes,
+      level: survey.level,
+      confidence: survey.confidence,
+    };
+    updateQuickTripDraft(quickTripDraft, quickDraft);
+    setGoal(survey.goal);
+    setTopic(survey.topicId);
+    if (validMinutes) setMinutes(preferredMinutes);
+    commit({
+      ...current.current,
+      studyPlanStorage: { ...storage, onboarding: progress, draft },
+    });
+  }
+  function reopenStudyOnboarding() {
+    const progress = current.current.studyPlanStorage?.onboarding;
+    if (!progress) return;
+    saveStudyOnboardingProgress(reduceStudyOnboardingProgress(progress, { type: "onboarding/reopen" }));
+  }
+  function persistQuickTripStudyDraft(draft: QuickTripDraft) {
+    const storage = current.current.studyPlanStorage ?? createStudyPlanStorage();
+    const topicLabel = availableTopics.find((item) => item.id === draft.topic)?.name ?? draft.topicLabel ?? draft.topic;
+    const preferredMinutes = Number.isSafeInteger(draft.minutes) && draft.minutes >= 1 && draft.minutes <= 240
+      ? draft.minutes : storage.draft.preferredMinutes;
+    const breakCount = Number.isSafeInteger(draft.breakCount) && draft.breakCount >= 0 && draft.breakCount <= 10
+      ? draft.breakCount : storage.draft.breakCount;
+    const breakMinutes = Number.isSafeInteger(draft.breakMinutes) && draft.breakMinutes >= 1 && draft.breakMinutes <= 30
+      ? draft.breakMinutes : storage.draft.breakMinutes;
+    const studyDraft = {
+      ...storage.draft,
+      goal: draft.goal,
+      topicId: draft.topic,
+      topicLabel,
+      preferredMinutes,
+      breakCount,
+      breakMinutes,
+      level: draft.level ?? storage.draft.level,
+      confidence: draft.confidence ?? storage.draft.confidence,
+      selectedPlanId: draft.selectedPlanId ?? storage.draft.selectedPlanId,
+      selectedStepId: draft.selectedStepId ?? storage.draft.selectedStepId,
+    };
+    setGoal(draft.goal);
+    setTopic(draft.topic);
+    if (Number.isSafeInteger(draft.minutes) && draft.minutes >= 1 && draft.minutes <= 240) setMinutes(draft.minutes);
+    setBreakCount(draft.breakCount);
+    setBreakMinutes(draft.breakMinutes);
+    commit({ ...current.current, studyPlanStorage: { ...storage, draft: studyDraft } });
+  }
   return (
     <div className="adventure" ref={studyFullscreen.ref}>
       <aside className="sidebar">
@@ -2738,10 +2829,21 @@ function AdventureWorkspace() {
               </div>}
               {error && <button onClick={() => window.location.reload()}>Thử mở lại</button>}
             </div>
+          ) : canShowStudyOnboarding(loaded, saved.active, saved.studyPlanStorage?.onboarding) ? (
+            <StudyOnboarding
+              progress={saved.studyPlanStorage?.onboarding ?? createStudyPlanStorage().onboarding}
+              topics={availableTopics}
+              onProgressChange={saveStudyOnboardingProgress}
+            />
           ) : (
             <>
               {view === "station" && (
                 <>
+                  {!saved.active && saved.studyPlanStorage?.onboarding.phase === "complete" && (
+                    <button className="study-onboarding-reopen" type="button" onClick={reopenStudyOnboarding}>
+                      Mở lại hướng dẫn
+                    </button>
+                  )}
                   <LearningPathHome
                     courses={CURATED_COURSES}
                     course={learningPathCourse}
@@ -2762,6 +2864,7 @@ function AdventureWorkspace() {
                           topics={availableTopics}
                           hasActiveTrip={Boolean(active)}
                           onPrepare={onPrepareQuickTrip}
+                          onDraftChange={persistQuickTripStudyDraft}
                         />
                       </details>
                     }
