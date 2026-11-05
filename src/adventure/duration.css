@@ -1,3 +1,55 @@
+.duration-range-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem 0.8rem;
+  margin-top: 0.9rem;
+  color: var(--ink, #26352d);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.duration-slider {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  margin: 0.2rem 0;
+  accent-color: #397652;
+  cursor: pointer;
+}
+
+.duration-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.duration-current-value {
+  justify-self: end;
+  color: var(--muted, #59685e);
+  font-size: 0.84rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.duration-current-value.is-invalid {
+  color: #a34837;
+}
+
+.duration-slider:focus-visible,
+.custom-duration input:focus-visible,
+.quick-times button:focus-visible {
+  outline: 3px solid #8ab7a0;
+  outline-offset: 3px;
+}
+
+html[data-theme="dark"] .adventure .duration-slider {
+  accent-color: #8ab7a0;
+}
+
+html[data-theme="dark"] .adventure .duration-current-value.is-invalid {
+  color: #f2a493;
+}
+
 .duration-breaks {
   margin: 1rem 0 0.7rem;
   border: 1px solid #cbd9cb;
