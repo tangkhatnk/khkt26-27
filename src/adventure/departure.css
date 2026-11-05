@@ -5,6 +5,44 @@
   margin: 28px 0;
   align-items: start;
 }
+.study-companion.study-preparation-summary {
+  max-width: 1000px;
+  margin: 0 auto 10px;
+  align-items: flex-start;
+}
+.study-preparation-summary__buddy { padding-top: 4px; }
+.study-preparation-summary__buddy .learning-buddy { width: 72px; height: 72px; }
+.study-preparation-summary__content { display: grid; gap: 8px; }
+.study-preparation-summary__title { margin: 0 0 2px; font-size: 17px; }
+.study-preparation-summary__details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+.study-preparation-summary__details > div { display: grid; gap: 3px; min-width: 0; }
+.study-preparation-summary__details .study-preparation-summary__goal,
+.study-preparation-summary__details .study-preparation-summary__subject { grid-column: 1 / -1; }
+.study-preparation-summary__details dt { color: var(--muted); font-size: 12px; }
+.study-preparation-summary__details dd { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.study-preparation-summary__details .study-preparation-summary__goal dd { font-size: 16px; }
+.study-preparation-summary__journey {
+  max-width: 1000px;
+  margin: 0 auto 14px;
+}
+.study-preparation-summary__journey > summary {
+  width: fit-content;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.study-preparation-summary__journey > summary:hover { color: var(--ink); }
+.study-preparation-summary__journey > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.study-preparation-summary__journey[open] > .boarding-ticket { margin-top: 10px; }
 .boarding-preparation > .panel { min-width: 0; margin-bottom: 0; }
 .departure-settings { position: sticky; top: 24px; }
 .departure-intro { color: #66756b; line-height: 1.65; }
@@ -57,6 +95,10 @@
   .departure-settings { position: static; }
 }
 @media (max-width: 520px) {
+  .study-companion.study-preparation-summary { margin: 0 0 10px; padding: 12px; gap: 10px; }
+  .study-preparation-summary__buddy .learning-buddy { width: 56px; height: 56px; }
+  .study-preparation-summary__details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
+  .study-preparation-summary__title { font-size: 16px; }
   .boarding-preparation { gap: 18px; margin-top: 20px; }
   .boarding-preparation > .panel { padding: 20px; }
   .departure-source-options button { font-size: 11px; padding: 10px 4px; }

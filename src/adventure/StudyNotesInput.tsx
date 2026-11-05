@@ -22,7 +22,7 @@ export function StudyNotesInput({
       <div className="study-notes-input__intro">
         <h3 id="study-notes-input-title">Nội dung bạn đã có</h3>
         <p>
-          Mục tiêu chuyến đi cho biết bạn muốn đạt gì; ghi chú bên dưới là kiến thức
+          Mục tiêu buổi học cho biết bạn muốn đạt gì. Ghi chú bên dưới là kiến thức
           thực tế để tạo câu hỏi ôn tập.
         </p>
         <p className="study-notes-input__example">
