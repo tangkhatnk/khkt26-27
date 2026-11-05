@@ -1,5 +1,9 @@
 import { useSyncExternalStore } from "react";
 
+export function isStudyWorkspaceView(view: string): boolean {
+  return view === "station" || view === "ticket";
+}
+
 function subscribe(onChange: () => void) {
   window.addEventListener("popstate", onChange);
   return () => window.removeEventListener("popstate", onChange);

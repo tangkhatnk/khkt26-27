@@ -20,6 +20,12 @@ export type QuizDraft = {
   correctionVersion?: number;
   /** The learner chose to skip quiz preparation before starting this session. */
   reviewSkipped?: boolean;
+  /** New sessions require a deliberate choice before preparing questions during focus. */
+  prefetchEnabled?: boolean;
+  /** Whether this session has owner material that the learner could choose to send. */
+  prefetchSourcePresent?: boolean;
+  /** Explicit consent to send that session material for question preparation. */
+  prefetchSourceConsent?: boolean;
   /** The number of questions in the saved generation (or the selected count before generation). */
   count: number;
   /** Next generation preference; it may differ from count while saved questions are being reviewed. */
@@ -112,6 +118,11 @@ export function isValidQuizDraft(value: unknown): value is QuizDraft {
   const answers = value.answers;
   const guestDeck = value.guestQuizId !== undefined;
   if ((value.reviewSkipped !== undefined && typeof value.reviewSkipped !== "boolean") ||
+      (value.prefetchEnabled !== undefined && typeof value.prefetchEnabled !== "boolean") ||
+      (value.prefetchSourcePresent !== undefined && typeof value.prefetchSourcePresent !== "boolean") ||
+      (value.prefetchSourceConsent !== undefined && typeof value.prefetchSourceConsent !== "boolean") ||
+      (value.prefetchEnabled !== undefined &&
+        (value.prefetchSourcePresent === undefined || value.prefetchSourceConsent === undefined)) ||
       (value.correctionVersion !== undefined && !isCorrectionVersion(value.correctionVersion)) ||
       (value.requestedCount !== undefined && !isQuizCount(value.requestedCount)) ||
       (guestDeck && (typeof value.guestQuizId !== "string" || !value.guestQuizId)) ||
@@ -127,8 +138,13 @@ export function isValidQuizDraft(value: unknown): value is QuizDraft {
   });
 }
 
-/** Legacy drafts remain eligible; only an explicit saved skip disables preparation. */
-export function shouldPrefetchQuizReview(draft: Pick<QuizDraft, "reviewSkipped"> | undefined): boolean {
+/** Legacy drafts retain their old default; new sessions require opt-in and material consent. */
+export function shouldPrefetchQuizReview(draft: Pick<QuizDraft,
+  "reviewSkipped" | "prefetchEnabled" | "prefetchSourcePresent" | "prefetchSourceConsent"> | undefined): boolean {
+  if (draft?.prefetchEnabled !== undefined) {
+    return draft.prefetchEnabled && draft.reviewSkipped !== true &&
+      (!draft.prefetchSourcePresent || draft.prefetchSourceConsent === true);
+  }
   return draft?.reviewSkipped !== true;
 }
 
@@ -192,6 +208,7 @@ export function createSessionQuizDraft(
   countInput: string,
   reviewSkipped: boolean,
   correctionVersion = 0,
+  prefetch?: { enabled: boolean; sourcePresent: boolean; sourceConsent: boolean },
 ): QuizDraft {
   const parsedCount = Number(countInput);
   const count = isQuizCount(parsedCount) ? parsedCount : 3;
@@ -202,6 +219,11 @@ export function createSessionQuizDraft(
     questions: [],
     answers: {},
     ...(reviewSkipped ? { reviewSkipped: true } : {}),
+    ...(prefetch ? {
+      prefetchEnabled: prefetch.enabled,
+      prefetchSourcePresent: prefetch.sourcePresent,
+      prefetchSourceConsent: prefetch.sourceConsent,
+    } : {}),
   };
 }
 
@@ -214,6 +236,11 @@ export function quizPanelDraftState(value: unknown, correctionVersion = 0): { dr
     : {
         ...emptyQuizDraft(correctionVersion),
         ...(valid?.reviewSkipped !== undefined ? { reviewSkipped: valid.reviewSkipped } : {}),
+        ...(valid?.prefetchEnabled !== undefined ? {
+          prefetchEnabled: valid.prefetchEnabled,
+          prefetchSourcePresent: valid.prefetchSourcePresent,
+          prefetchSourceConsent: valid.prefetchSourceConsent,
+        } : {}),
         ...(valid ? { count: valid.requestedCount ?? valid.count, requestedCount: valid.requestedCount ?? valid.count } : {}),
       };
   return { draft, countInput: String(draft.requestedCount ?? draft.count) };

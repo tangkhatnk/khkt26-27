@@ -1,7 +1,27 @@
 import type { MaterialSource } from "./materialSources.ts";
+import { isStudyWorkspaceView } from "./navigation.ts";
 import { isValidBreakPlan, studyElapsedSeconds, type BreakPlan } from "../../backend/src/adventure/domain.ts";
 
 const EMPTY_STUDY_EXERCISE_SOURCES: readonly MaterialSource[] = Object.freeze([]);
+
+export function isGuestExerciseStartScopeCurrent(input: {
+  ownerId: string;
+  expectedOwnerId: string;
+  currentOwnerId: string;
+  view: string;
+  sessionId: string;
+  currentDraftSessionId: string;
+  authGenerationMatches: boolean;
+  workspaceGenerationMatches: boolean;
+  workspaceLive: boolean;
+  hasActiveSession: boolean;
+  preparationReady: boolean;
+}): boolean {
+  return input.ownerId === "guest" && input.expectedOwnerId === "guest" &&
+    input.currentOwnerId === input.expectedOwnerId && isStudyWorkspaceView(input.view) &&
+    input.sessionId === input.currentDraftSessionId && input.authGenerationMatches &&
+    input.workspaceGenerationMatches && input.workspaceLive && !input.hasActiveSession && input.preparationReady;
+}
 
 export function studyExerciseSourcesForSession(
   sourcesBySession: Readonly<Record<string, readonly MaterialSource[] | undefined>> | undefined,

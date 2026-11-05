@@ -46,3 +46,18 @@ test('editing an illustrated AI source clears its diagram metadata without addin
  assert.equal(validMaterialSources([{...reviewedSource,source:'local-ocr'}]),false);
  assert.equal(validMaterialSources([{...reviewedSource,illustrations:[{...illustration,svg:'<svg />'}]}]),false);
 });
+
+test('appending a reviewed guide respects the source-count and combined quiz-text limits', () => {
+ const candidate=reviewMaterialSource(createMaterialSource('new',{name:'Bản ôn tập',text:'Nội dung mới đủ dài để làm nguồn học.'}), 'Nội dung mới đủ dài để làm nguồn học.');
+ const ten=Array.from({length:10},(_,index)=>reviewMaterialSource(createMaterialSource(`s${index}`,{name:`Nguồn ${index}`,text:'Nội dung nguồn đủ dài.',source:'embedded-text'}),'Nội dung nguồn đủ dài.'));
+ assert.deepEqual(materialSources.validateStudyGuideAppend(ten,[],candidate),{
+  ok:false,
+  message:'Mỗi buổi học lưu tối đa 10 nguồn. Hãy thay nội dung hoặc gỡ bớt nguồn trước khi thêm.',
+ });
+ assert.deepEqual(materialSources.validateStudyGuideAppend(ten.slice(0,9),[],candidate),{ok:true});
+
+ const large=reviewMaterialSource(createMaterialSource('large',{name:'A'.repeat(20),text:'A'.repeat(49_950),source:'embedded-text'}),'A'.repeat(49_950));
+ const overflow=reviewMaterialSource(createMaterialSource('overflow',{name:'B'.repeat(20),text:'B'.repeat(10),source:'embedded-text'}),'B'.repeat(10));
+ assert.equal(materialSources.validateStudyGuideAppend([large],[],overflow).ok,false);
+ assert.match(materialSources.validateStudyGuideAppend([large],[],overflow).message,/50\.000/u);
+});

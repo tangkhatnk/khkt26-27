@@ -10,6 +10,7 @@ import {
   lessonStates,
   normalizeLearningPathProgress,
   nextAvailableLesson,
+  retireInactiveLegacyLessonRun,
   setLessonRunPhase,
 } from "../src/adventure/learningPath.ts";
 import { CURATED_COURSES } from "../src/adventure/curatedCurriculum.ts";
@@ -223,6 +224,54 @@ test("legacy path data migrates an empty interrupted-session index and stale ret
   };
   assert.equal(isValidLearningPathProgress(stale), true);
   assert.equal(interruptedLessonForSession(normalizeLearningPathProgress(stale), "stale-retry-session"), undefined);
+});
+
+test("a pending legacy lesson or ticket run can be retired without losing receipts", () => {
+  const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
+  assert.ok(course);
+  const base = {
+    ...createLearningPathProgress(course.id),
+    completed: [{
+      lessonId: course.lessons[0].id,
+      lessonVersion: course.lessons[0].version,
+      sessionId: "prior-session",
+      score: 1,
+      total: 2,
+      completedAt: 123,
+      assessedAnswers: [],
+    }],
+    interruptedRuns: [{
+      courseId: course.id,
+      lessonId: course.lessons[0].id,
+      lessonVersion: course.lessons[0].version,
+      sessionId: "interrupted-receipt",
+      endedAt: 124,
+    }],
+  };
+
+  for (const phase of ["lesson", "ticket"]) {
+    const pending = beginLessonRun(base, course, course.lessons[1].id, `pending-${phase}`);
+    assert.ok(pending);
+    const legacy = { ...pending, activeRun: { ...pending.activeRun, phase } };
+    const retired = retireInactiveLegacyLessonRun(legacy, `pending-${phase}`);
+
+    assert.equal(retired.activeRun, undefined);
+    assert.deepEqual(retired.completed, base.completed);
+    assert.deepEqual(retired.interruptedRuns, base.interruptedRuns);
+    assert.equal(lessonStates(course, retired)[0].status, "completed");
+    assert.equal(lessonStates(course, retired)[1].status, "available");
+  }
+});
+
+test("retiring a stale legacy draft cannot clear a different run or an active focus run", () => {
+  const course = CURATED_COURSES.find((item) => item.id === "math-7-ratios");
+  assert.ok(course);
+  const pending = beginLessonRun(createLearningPathProgress(course.id), course, course.lessons[0].id, "pending-session");
+  assert.ok(pending);
+  const focus = { ...pending, activeRun: { ...pending.activeRun, phase: "focus" } };
+
+  assert.equal(retireInactiveLegacyLessonRun(pending, "other-session"), pending);
+  assert.equal(retireInactiveLegacyLessonRun(focus, "pending-session"), focus);
 });
 
 test("path progress keeps completion history when the catalog grows beyond the old fixed limit", () => {

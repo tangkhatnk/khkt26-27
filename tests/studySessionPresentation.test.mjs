@@ -26,5 +26,5 @@ test("summary keeps a companion and session metrics without train imagery or car
   assert.doesNotMatch(summary, /<JourneyView\b|<TopDownScene\b|KINH NGHIỆM TOA|Mang kiến thức theo chuyến đi/u);
   assert.match(summary, /SessionSummaryCompanion/u);
   assert.match(summary, /summary-stats/u);
-  assert.match(summary, /Mở vé cho buổi học mới/u);
+  assert.match(summary, /Mở buổi học mới/u);
 });

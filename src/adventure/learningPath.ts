@@ -187,6 +187,15 @@ export function setLessonRunPhase(
   return { ...progress, activeRun: { ...activeRun, phase } };
 }
 
+export function retireInactiveLegacyLessonRun(
+  progress: LearningPathProgress,
+  sessionId: string,
+): LearningPathProgress {
+  const run = progress.activeRun;
+  if (!run || run.sessionId !== sessionId || (run.phase !== "lesson" && run.phase !== "ticket")) return progress;
+  return { ...progress, activeRun: undefined };
+}
+
 export function finishLessonFocus(
   progress: LearningPathProgress,
   session: Pick<Session, "id" | "started" | "target" | "breakPlan" | "ended">,

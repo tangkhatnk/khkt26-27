@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readSaved, writeSaved } from "../src/adventure/storage.ts";
 import { createLearningPathProgress } from "../src/adventure/learningPath.ts";
-import { createStudyPlanStorage, normalizeStudyPlanStorage } from "../src/adventure/studyPlanStorage.ts";
+import { createStudyPlanStorage, normalizeStudyPlanStorage, updateStudyPlanDraftFromQuickTrip } from "../src/adventure/studyPlanStorage.ts";
+import { reopenStudyOnboardingFromDraft } from "../src/adventure/studyOnboardingModel.ts";
 
 function withLocalStorage(callback) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -139,6 +140,43 @@ test("plan drafts remain scoped to the existing owner-specific Saved record", ()
   });
 });
 
+test("reopening onboarding uses the edited goal and duration while preserving private legacy material and grades", () => {
+  withLocalStorage(() => {
+    const storage = createStudyPlanStorage({ legacyActivity: true });
+    storage.onboarding = {
+      ...storage.onboarding,
+      survey: {
+        ...storage.onboarding.survey,
+        goal: "Mục tiêu khảo sát cũ",
+        preferredMinutes: 25,
+      },
+    };
+    storage.draft = {
+      ...storage.draft,
+      goal: "Mục tiêu đã chỉnh trong buổi học",
+      topicId: "chemistry",
+      topicLabel: "Hóa học",
+      preferredMinutes: 90,
+    };
+    localStorage.setItem("train-adventure:v1:guest", JSON.stringify(legacySaved({ studyPlanStorage: storage })));
+
+    const saved = readSaved("guest");
+    const reopened = reopenStudyOnboardingFromDraft(saved.studyPlanStorage.onboarding, saved.studyPlanStorage.draft);
+    const nextSaved = {
+      ...saved,
+      studyPlanStorage: { ...saved.studyPlanStorage, onboarding: reopened },
+    };
+
+    assert.equal(reopened.survey.goal, "Mục tiêu đã chỉnh trong buổi học");
+    assert.equal(reopened.survey.preferredMinutes, 90);
+    assert.equal(reopened.survey.topicLabel, "Hóa học");
+    assert.equal(nextSaved.notes["session-old"], "Ghi chú riêng đã lưu");
+    assert.equal(nextSaved.sources["session-old"][0].id, "source-old");
+    assert.equal(nextSaved.materials["session-old"][0].sourceId, "source-old");
+    assert.equal(nextSaved.local.sessions["session-old"].quiz.score, 1);
+  });
+});
+
 test("plan storage keeps valid records, drops malformed plan entries, and does not clamp invalid duration", () => {
   const initial = createStudyPlanStorage();
   const validPlan = {
@@ -226,4 +264,31 @@ test("one-step local manual plans remain readable while generated plans require 
   const restored = normalizeStudyPlanStorage({ ...base, plans: [manual] });
 
   assert.deepEqual(restored.plans.map((plan) => plan.id), ["manual-plan"]);
+});
+
+test("explicit null clears optional level, confidence, and selected plan fields", () => {
+  const current = {
+    ...createStudyPlanStorage().draft,
+    level: "Lớp 9",
+    confidence: 3,
+    selectedPlanId: "plan-a",
+    selectedStepId: "step-a",
+  };
+
+  const updated = updateStudyPlanDraftFromQuickTrip(current, {
+    goal: "Ôn phản ứng hóa học",
+    topic: "chemistry",
+    minutes: 45,
+    breakCount: 0,
+    breakMinutes: 5,
+    level: "",
+    confidence: null,
+    selectedPlanId: null,
+    selectedStepId: null,
+  }, "Hóa học");
+
+  assert.equal(updated.level, "");
+  assert.equal(updated.confidence, null);
+  assert.equal(updated.selectedPlanId, null);
+  assert.equal(updated.selectedStepId, null);
 });

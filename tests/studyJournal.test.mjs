@@ -20,6 +20,70 @@ function source(id, startedAt, overrides = {}) {
   };
 }
 
+function session(id, changes = {}) {
+  return {
+    id,
+    userId: "guest",
+    groupId: null,
+    goal: `Mục tiêu ${id}`,
+    topic: "biology",
+    started: 1_000,
+    ended: 61_000,
+    target: 60,
+    segments: [],
+    seconds: 30,
+    contribution: 30,
+    rules: "rules",
+    ...changes,
+  };
+}
+
+test("journal source projection keeps owner scope and distinct private, curated, legacy, corrected, and effective values", () => {
+  const rows = [
+    session("private", { effectiveMetrics: { focusedSeconds: 41.75 } }),
+    session("curated"),
+    session("legacy", { quiz: { score: 1, total: 2 } }),
+    session("corrected", {
+      quiz: { score: 1, total: 2 },
+      effectiveMetrics: { focusedSeconds: 28.5, quizScore: 2, quizTotal: 2 },
+      correctionFlags: { quizResult: true },
+    }),
+    session("other-owner", { userId: "account-b" }),
+  ];
+  const projected = journalModule.buildStudyJournalSources({
+    ownerId: "guest",
+    sessions: rows,
+    learningPath: { completed: [{ sessionId: "curated", score: 3, total: 4 }] },
+    quizDrafts: {
+      private: { count: 3, questions: [], answers: {}, guestQuizId: "deck-private", guestGrade: { score: 2, total: 3 } },
+    },
+    topicLabel: (id) => id === "biology" ? "Sinh học" : id,
+  });
+
+  assert.deepEqual(projected.map((item) => item.id), ["private", "curated", "legacy", "corrected"]);
+  assert.equal(projected[0].focusedSeconds, 41.75);
+  assert.equal(projected[0].topic, "Sinh học");
+  assert.deepEqual(projected[0].quizResult, { origin: "guest-ai", correct: 2, total: 3 });
+  assert.deepEqual(projected[1].quizResult, { origin: "curated", correct: 3, total: 4 });
+  assert.deepEqual(projected[2].quizResult, { origin: "legacy-session", correct: 1, total: 2 });
+  assert.deepEqual(projected[3].quizResult, { origin: "legacy-session", correct: 2, total: 2 });
+  assert.equal(projected[3].corrected, true);
+  assert.equal(Object.keys(projected[0]).some((key) => /source|material|notes/i.test(key)), false);
+});
+
+test("account journal projection never exposes guest-private grades", () => {
+  const projected = journalModule.buildStudyJournalSources({
+    ownerId: "account-a",
+    sessions: [session("private", { userId: "account-a" })],
+    learningPath: { completed: [] },
+    quizDrafts: {
+      private: { count: 3, questions: [], answers: {}, guestQuizId: "deck-private", guestGrade: { score: 2, total: 3 } },
+    },
+    topicLabel: (id) => id,
+  });
+  assert.deepEqual(projected[0].quizResult, { origin: "none" });
+});
+
 test("buildStudyJournalEntries keeps one, odd, and even entry counts and sorts newest first", () => {
   const oldest = source("oldest", 1);
   const middle = source("middle", 2);
@@ -77,12 +141,6 @@ test("single pages and desktop spreads clamp navigation for one, odd, and even c
   assert.equal(move(2, 4, "spread", 1), 2);
   assert.equal(move(0, 3, "single", 1), 1);
   assert.equal(move(2, 3, "single", 1), 2);
-});
-
-test("opening an entry invokes only its session id", () => {
-  const calls = [];
-  journalModule.activateStudyJournalEntry("session-42", (id) => calls.push(id));
-  assert.deepEqual(calls, ["session-42"]);
 });
 
 let vite;

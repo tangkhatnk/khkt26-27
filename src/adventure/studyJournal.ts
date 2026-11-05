@@ -1,3 +1,8 @@
+import { analyzeSession, hasSessionCorrections } from "./learning.ts";
+import { isValidQuizAssessment, type QuizDraft } from "./quizDrafts.ts";
+import type { LearningPathProgress } from "./learningPath.ts";
+import type { SessionHistoryEntry } from "./storage.ts";
+
 export type StudyJournalQuizOrigin = "guest-ai" | "curated" | "legacy-session" | "none";
 
 export type StudyJournalSource = {
@@ -31,6 +36,47 @@ export type StudyJournalEntry = {
   };
   corrected: boolean;
 };
+
+/** Projects owner-filtered session records into the journal's metadata-only shape. */
+export function buildStudyJournalSources(input: {
+  ownerId: string;
+  sessions: readonly SessionHistoryEntry[];
+  learningPath: Pick<LearningPathProgress, "completed">;
+  quizDrafts?: Readonly<Record<string, QuizDraft | undefined>>;
+  topicLabel: (topicId: string) => string;
+}): StudyJournalSource[] {
+  return input.sessions.filter((session) => session.userId === input.ownerId).map((session) => {
+    const correctedQuiz = session.correctionFlags?.quizResult === true;
+    const effectiveScore = session.effectiveMetrics?.quizScore;
+    const effectiveTotal = session.effectiveMetrics?.quizTotal;
+    const privateGrade = input.ownerId === "guest" ? input.quizDrafts?.[session.id]?.guestGrade : undefined;
+    const curated = input.learningPath.completed.find((entry) => entry.sessionId === session.id);
+    let quizResult: StudyJournalSource["quizResult"] = { origin: "none" };
+
+    if (correctedQuiz) {
+      if (Number.isSafeInteger(effectiveScore) && Number.isSafeInteger(effectiveTotal) &&
+          Number(effectiveTotal) > 0 && Number(effectiveScore) >= 0 && Number(effectiveScore) <= Number(effectiveTotal))
+        quizResult = { origin: "legacy-session", correct: Number(effectiveScore), total: Number(effectiveTotal) };
+    } else if (privateGrade && isValidQuizAssessment(privateGrade)) {
+      quizResult = { origin: "guest-ai", correct: privateGrade.score, total: privateGrade.total };
+    } else if (curated && Number.isSafeInteger(curated.score) && Number.isSafeInteger(curated.total) &&
+        curated.total > 0 && curated.score >= 0 && curated.score <= curated.total) {
+      quizResult = { origin: "curated", correct: curated.score, total: curated.total };
+    } else if (session.quiz && isValidQuizAssessment(session.quiz)) {
+      quizResult = { origin: "legacy-session", correct: session.quiz.score, total: session.quiz.total };
+    }
+
+    return {
+      id: session.id,
+      startedAt: session.started,
+      goal: session.goal,
+      topic: input.topicLabel(session.topic),
+      focusedSeconds: analyzeSession(session).focusedSeconds,
+      quizResult,
+      corrected: hasSessionCorrections(session.correctionFlags),
+    };
+  });
+}
 
 const quizLabels: Record<StudyJournalQuizOrigin, string> = {
   "guest-ai": "Quiz AI",
@@ -148,11 +194,4 @@ export function moveStudyJournalPage(
   const spreadStart = position.visibleIndexes[0]!;
   const lastSpreadStart = Math.floor((entryCount - 1) / 2) * 2;
   return Math.max(0, Math.min(lastSpreadStart, spreadStart + direction * 2));
-}
-
-export function activateStudyJournalEntry(
-  sessionId: string,
-  onOpenSession: (id: string) => void,
-): void {
-  onOpenSession(sessionId);
 }

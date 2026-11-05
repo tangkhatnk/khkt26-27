@@ -77,7 +77,8 @@ test("tutorial renders the real selected controls, explicit no-material path, an
   progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "duration" });
   const retrieval = markup(progress);
   assert.match(retrieval, /Tự kiểm tra sau khi tập trung/u);
-  assert.match(retrieval, /Tôi đã biết bước tự kiểm tra/u);
+  assert.match(retrieval, /Khi bạn đổi một lựa chọn, hướng dẫn hoàn tất/u);
+  assert.doesNotMatch(retrieval, /Tôi đã biết bước tự kiểm tra/u);
   assert.doesNotMatch(retrieval, /Bắt đầu phiên|Tạo bản ôn tập bằng AI/u);
   progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "retrieval" });
   assert.equal(progress.phase, "complete");

@@ -43,6 +43,24 @@ export const DEFAULT_STUDY_SURVEY: StudySurvey = {
   confidence: null,
 };
 
+export function syncStudySurveyWithCurrentDraft(
+  survey: StudySurvey,
+  draft: StudySurvey,
+  currentDuration: number,
+): StudySurvey {
+  return {
+    ...survey,
+    goal: draft.goal,
+    topicId: draft.topicId,
+    topicLabel: draft.topicLabel,
+    preferredMinutes: Number.isSafeInteger(currentDuration) && currentDuration >= 1 && currentDuration <= 240
+      ? currentDuration
+      : null,
+    level: draft.level,
+    confidence: draft.confidence,
+  };
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -143,6 +161,23 @@ export function reduceStudyOnboardingProgress(
     case "onboarding/edit-survey":
       return state.phase === "complete" ? { ...state, phase: "survey", surveyStep: 0 } : state;
   }
+}
+
+export function reopenStudyOnboardingFromDraft(
+  progress: StudyOnboardingProgress,
+  draft: StudySurvey,
+): StudyOnboardingProgress {
+  return reduceStudyOnboardingProgress({
+    ...progress,
+    survey: { ...draft },
+  }, { type: "onboarding/reopen" });
+}
+
+export function completeStudyOnboardingRetrievalChoice(
+  progress: StudyOnboardingProgress,
+): StudyOnboardingProgress {
+  if (progress.phase !== "tutorial" || progress.tutorialStep !== 3) return progress;
+  return reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "retrieval" });
 }
 
 export function canShowStudyOnboarding(

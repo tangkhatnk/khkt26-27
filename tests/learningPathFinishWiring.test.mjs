@@ -17,18 +17,18 @@ function extractFinish(source) {
     : "";
 }
 
-function extractTicketView(source) {
+function extractStudyWorkspace(source) {
   const normalizedSource = normalizeLineEndings(source);
-  const start = normalizedSource.indexOf('{view === "ticket" && (');
-  const end = normalizedSource.indexOf('{view === "focus" &&', start);
-  return start >= 0 && end > start ? normalizedSource.slice(start, end) : "";
+  const start = normalizedSource.indexOf("<StudyPlanWorkspace");
+  const end = normalizedSource.indexOf("</StudyPlanWorkspace>", start);
+  return start >= 0 && end > start ? normalizedSource.slice(start, end + "</StudyPlanWorkspace>".length) : "";
 }
 
-function extractTicketEditor(source) {
+function extractWorkspaceSettings(source) {
   const normalizedSource = normalizeLineEndings(source);
-  const start = normalizedSource.indexOf("function TicketEditor(");
-  const end = normalizedSource.indexOf("\n}\n\nfunction Heading", start);
-  return start >= 0 && end > start ? normalizedSource.slice(start, end) : "";
+  const start = normalizedSource.indexOf("<StudyWorkspaceSettings");
+  const end = normalizedSource.indexOf("/>", start);
+  return start >= 0 && end > start ? normalizedSource.slice(start, end + 2) : "";
 }
 
 const finish = extractFinish(adventureApp);
@@ -52,29 +52,25 @@ test("the real focus finish path applies scheduled-duration eligibility before l
   assert.ok(finish.includes("value.learningPath = finishLessonFocus(value.learningPath, s);"));
 });
 
-test("ticket wiring slices accept both LF and CRLF checkouts", () => {
+test("goal-first workspace wiring slices accept both LF and CRLF checkouts", () => {
   const crlfAdventureApp = normalizeLineEndings(adventureApp).replace(/\n/gu, "\r\n");
 
-  assert.equal(extractTicketView(crlfAdventureApp), extractTicketView(adventureApp));
-  assert.equal(extractTicketEditor(crlfAdventureApp), extractTicketEditor(adventureApp));
+  assert.equal(extractStudyWorkspace(crlfAdventureApp), extractStudyWorkspace(adventureApp));
+  assert.equal(extractWorkspaceSettings(crlfAdventureApp), extractWorkspaceSettings(adventureApp));
 });
 
-test("the ticket flow uses the shared preparation summary and neutral personal start copy", () => {
-  const ticket = extractTicketView(adventureApp);
+test("the primary station renders the goal-first workspace and keeps journey detail optional", async () => {
+  const workspace = extractStudyWorkspace(adventureApp);
+  const settings = extractWorkspaceSettings(adventureApp);
+  const workspaceComponent = await readFile(new URL("../src/adventure/StudyPlanWorkspace.tsx", import.meta.url), "utf8");
 
-  assert.match(ticket, /<StudyPreparationSummary\b/u);
-  assert.ok(ticket.indexOf("<StudyPreparationSummary") < ticket.indexOf("<BoardingTicket"));
-  assert.match(ticket, /kicker="CHUẨN BỊ BUỔI HỌC"/u);
-  assert.doesNotMatch(ticket, /text="[^"]*lên tàu/u);
-  assert.doesNotMatch(ticket, /departure-intro[^>]*>[^<]*lên tàu/u);
-  assert.match(ticket, /: "Bắt đầu buổi học · "/u);
-  assert.doesNotMatch(ticket, /: "Bắt đầu chuyến · "/u);
-  assert.match(ticket, /Khởi hành cùng lúc · /u);
-  assert.match(ticket, /Bắt đầu phiên cho chuyến chung · /u);
+  assert.match(workspace, /<StudyPlanWorkspace\s+goal=\{goal\}/u);
+  assert.match(workspace, /legacyDetails=\{<BoardingTicket/u);
+  assert.match(settings, /legacyDisclosure=\{view === "ticket"\}/u);
+  assert.match(settings, /onGoalChange=\{\(value\) => persistQuickTripStudyDraft/u);
+  assert.match(settings, /onDurationChange=\{\(value\) => persistQuickTripStudyDraft/u);
+  assert.match(workspaceComponent, /<summary>Chi tiết hành trình cũ<\/summary>/u);
   assert.match(adventureApp, /ticket: "Chuẩn bị"/u);
-  const editor = extractTicketEditor(adventureApp);
-  assert.match(editor, /Chỉnh mục tiêu và thời gian/u);
-  assert.doesNotMatch(editor, /Sửa vé chuyến học/u);
 });
 
 test("interrupted lesson retry is resolved by persisted session identity rather than the editable goal", () => {
@@ -88,21 +84,20 @@ test("interrupted lesson retry is resolved by persisted session identity rather 
   assert.doesNotMatch(summary, /summarySession\.goal/u);
 });
 
-test("local daily quiz metrics receive guest grades as a private projection", () => {
-  assert.match(adventureApp, /guestQuizResultsForDailySummary\(owner, sessions, saved\.quizDrafts\)/u);
-});
-
-test("the private guest journal row reads its grade without writing it into session history", () => {
+test("the owner-scoped journal uses a private grade projection without mutating sessions", () => {
+  const projectionStart = adventureApp.indexOf("const studyJournalEntries = useMemo(");
+  const projectionEnd = adventureApp.indexOf("const selectedLearningCourse", projectionStart);
+  const projection = projectionStart >= 0 && projectionEnd > projectionStart
+    ? adventureApp.slice(projectionStart, projectionEnd)
+    : "";
   const journalStart = adventureApp.indexOf('view === "journal"');
   const historyStart = adventureApp.indexOf('view === "experiments"', journalStart);
   const journal = journalStart >= 0 && historyStart > journalStart
     ? adventureApp.slice(journalStart, historyStart)
     : "";
 
-  assert.match(journal, /owner === "guest" \? guestQuizGradesBySession\.get\(s\.id\) : undefined/u);
-  assert.match(journal, /Điểm Quiz AI riêng: \$\{privateGuestGrade\.score\}\/\$\{privateGuestGrade\.total\}/u);
-  assert.match(journal, /`Điểm quiz: \$\{s\.quiz\.score\}\/\$\{s\.quiz\.total\}`/u);
-  assert.match(journal, /Chưa có kết quả quiz/u);
-  assert.match(journal, /privateGuestGrade\s*\?\s*"Xem đáp án trong tổng kết"\s*:\s*s\.quiz\?\.feedback/u);
-  assert.doesNotMatch(journal, /s\.quiz\s*=/u);
+  assert.match(projection, /buildStudyJournalSources\(\{[\s\S]*ownerId: owner,[\s\S]*sessions,[\s\S]*learningPath: learningPathProgress,[\s\S]*quizDrafts: saved\.quizDrafts/u);
+  assert.match(journal, /<StudyJournal[\s\S]*entries=\{studyJournalEntries\}/u);
+  assert.match(journal, /sessions\.find\(\(item\) => item\.id === id && item\.userId === owner\)/u);
+  assert.doesNotMatch(projection, /session\.quiz\s*=/u);
 });

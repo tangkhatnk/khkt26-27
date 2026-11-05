@@ -4,6 +4,7 @@ import {
   type StudyOnboardingProgress,
   type StudySurvey,
 } from "./studyOnboardingModel.ts";
+import type { QuickTripDraft } from "./quickTripDraft.ts";
 
 export const STUDY_PLAN_STORAGE_VERSION = 1 as const;
 export const MAX_LOCAL_STUDY_PLANS = 50;
@@ -86,6 +87,28 @@ export function createStudyPlanStorage(options: { legacyActivity?: boolean } = {
     onboarding,
     draft: createStudyPlanDraft(onboarding.survey),
     plans: [],
+  };
+}
+
+export function updateStudyPlanDraftFromQuickTrip(
+  current: StudyPlanDraft,
+  draft: QuickTripDraft,
+  topicLabel: string,
+): StudyPlanDraft {
+  return {
+    ...current,
+    goal: draft.goal,
+    topicId: draft.topic,
+    topicLabel,
+    preferredMinutes: isMinutes(draft.minutes) ? draft.minutes : current.preferredMinutes,
+    breakCount: Number.isSafeInteger(draft.breakCount) && draft.breakCount >= 0 && draft.breakCount <= 10
+      ? draft.breakCount : current.breakCount,
+    breakMinutes: Number.isSafeInteger(draft.breakMinutes) && draft.breakMinutes >= 1 && draft.breakMinutes <= 30
+      ? draft.breakMinutes : current.breakMinutes,
+    level: draft.level === undefined ? current.level : draft.level,
+    confidence: draft.confidence === undefined ? current.confidence : draft.confidence,
+    selectedPlanId: draft.selectedPlanId === undefined ? current.selectedPlanId : draft.selectedPlanId,
+    selectedStepId: draft.selectedStepId === undefined ? current.selectedStepId : draft.selectedStepId,
   };
 }
 

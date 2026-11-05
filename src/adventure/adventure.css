@@ -1343,6 +1343,20 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   align-items: flex-start;
   gap: 4px;
 }
+.quiz-prefetch-options {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 620px);
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--ink);
+}
+.quiz-prefetch-options legend { padding: 0 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.quiz-prefetch-options label { display: flex; align-items: flex-start; gap: 9px; line-height: 1.45; }
+.quiz-prefetch-options input { flex: 0 0 18px; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--accent, #47735a); }
+.quiz-prefetch-options small { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .departure-quiz-skip {
   display: inline-flex;
   align-items: center;

@@ -1,5 +1,5 @@
 import { quizSourceText, type MaterialSource } from "./materialSources.ts";
-import type { QuizQuestion } from "./quizDrafts";
+import type { GuestQuizQuestion, QuizQuestion } from "./quizDrafts";
 
 export type QuizGenerationSource = {
   topic: string;
@@ -46,9 +46,17 @@ export function quizGenerationSourceKey(payload: QuizGenerationPayload): string 
 }
 
 export function quizDraftFromQuestions(
-  questions: QuizQuestion[],
+  questions: (QuizQuestion | GuestQuizQuestion)[],
   count: number,
   correctionVersion = 0,
+  guestQuizId?: string,
 ) {
-  return { correctionVersion, count, requestedCount: count, questions, answers: {} };
+  return {
+    correctionVersion,
+    count,
+    requestedCount: count,
+    questions,
+    answers: {},
+    ...(guestQuizId ? { guestQuizId } : {}),
+  };
 }

@@ -4,6 +4,8 @@ import {
   type StudyOnboardingProgress,
   type StudySourceChoice,
   type StudySurvey,
+  type StudyTutorialControl,
+  syncStudySurveyWithCurrentDraft,
 } from "./studyOnboardingModel.ts";
 import "./studyOnboarding.css";
 
@@ -27,13 +29,25 @@ function surveyValid(survey: StudySurvey, step: 0 | 1): boolean {
     survey.preferredMinutes >= 1 && survey.preferredMinutes <= 240;
 }
 
-export function StudyOnboarding({ progress, topics = [], onProgressChange }: {
+export function StudyOnboarding({ progress, currentDraft, currentDuration, topics = [], onProgressChange, onGuideControl, onSourceChoice }: {
   progress: StudyOnboardingProgress;
+  currentDraft?: StudySurvey;
+  currentDuration?: number;
   topics?: readonly Topic[];
   onProgressChange: (progress: StudyOnboardingProgress) => void;
+  onGuideControl?: (control: StudyTutorialControl) => boolean | void;
+  onSourceChoice?: (choice: StudySourceChoice) => void;
 }) {
-  const dispatch = (action: Parameters<typeof reduceStudyOnboardingProgress>[1]) =>
-    onProgressChange(reduceStudyOnboardingProgress(progress, action));
+  const dispatch = (action: Parameters<typeof reduceStudyOnboardingProgress>[1]) => {
+    const liveProgress = progress.phase === "tutorial" && currentDraft
+      ? { ...progress, survey: syncStudySurveyWithCurrentDraft(
+          progress.survey,
+          currentDraft,
+          currentDuration ?? currentDraft.preferredMinutes ?? NaN,
+        ) }
+      : progress;
+    onProgressChange(reduceStudyOnboardingProgress(liveProgress, action));
+  };
   const options = topics.length ? topics : FALLBACK_TOPICS;
   const topicLabel = options.find((topic) => topic.id === progress.survey.topicId)?.name ?? progress.survey.topicLabel;
   const surveyChange = (changes: Partial<StudySurvey>) => dispatch({
@@ -94,7 +108,7 @@ export function StudyOnboarding({ progress, topics = [], onProgressChange }: {
           <option value="4">Muốn thử nâng cao</option>
         </select>
       </label>
-      <p className="study-onboarding__privacy">Cấp học và mức tự tin được giữ riêng trên thiết bị. Mức tự tin không gửi tới AI.</p>
+      <p className="study-onboarding__privacy">Cấp/lớp chỉ gửi khi bạn chủ động yêu cầu AI lập kế hoạch. Mức tự tin chỉ được giữ trên thiết bị và không gửi đi.</p>
     </div>}
     <div className="study-onboarding__actions">
       {progress.surveyStep === 1 && <button type="button" onClick={() => dispatch({ type: "survey/previous" })}>Quay lại</button>}
@@ -107,23 +121,29 @@ export function StudyOnboarding({ progress, topics = [], onProgressChange }: {
   </section>;
 
   const step = progress.tutorialStep;
-  const action = (control: "goal" | "duration" | "retrieval", label: string) => <button className="primary" type="button"
+  const action = (control: "goal" | "duration", label: string) => <button className="primary" type="button"
     disabled={control === "goal" ? progress.survey.goal.trim().length < 3 : control === "duration" &&
-      (progress.survey.preferredMinutes === null || !Number.isSafeInteger(progress.survey.preferredMinutes) ||
-       progress.survey.preferredMinutes < 1 || progress.survey.preferredMinutes > 240)}
-    onClick={() => dispatch({ type: "tutorial/used", control })}>{label}</button>;
+      (currentDuration !== undefined
+        ? !Number.isSafeInteger(currentDuration) || currentDuration < 1 || currentDuration > 240
+        : progress.survey.preferredMinutes === null || !Number.isSafeInteger(progress.survey.preferredMinutes) ||
+          progress.survey.preferredMinutes < 1 || progress.survey.preferredMinutes > 240)}
+    onClick={() => {
+      if (onGuideControl?.(control) === false) return;
+      dispatch({ type: "tutorial/used", control });
+    }}>{label}</button>;
   const sourceChoice = (choice: StudySourceChoice, label: string) => <button type="button"
     aria-pressed={progress.tutorial.sourceChoice === choice}
     className={progress.tutorial.sourceChoice === choice ? "selected" : ""}
-    onClick={() => dispatch({ type: "tutorial/used", control: "source", choice })}>{label}</button>;
+    onClick={() => { onSourceChoice?.(choice); dispatch({ type: "tutorial/used", control: "source", choice }); }}>{label}</button>;
 
   return <section className="study-onboarding" aria-labelledby="study-onboarding-title">
     <p className="study-onboarding__eyebrow">HƯỚNG DẪN · BƯỚC {step + 1}/4</p>
     <h1 id="study-onboarding-title">Thử các thao tác chính</h1>
     <p className="study-onboarding__intro">Không có đồng hồ hay nội dung nào được gửi đi trong hướng dẫn này.</p>
     {step === 0 && <div className="study-onboarding__step">
-      <h2>1. Xem hoặc sửa mục tiêu</h2>
-      {renderGoalAndTopic(false)}
+      <h2>1. Xem hoặc sửa mục tiêu trong không gian học bên dưới</h2>
+      <p>Ô mục tiêu nằm ở cột thiết lập. Bạn có thể sửa nội dung, nhưng chưa bắt đầu phiên học.</p>
+      <button type="button" onClick={() => onGuideControl?.("goal")}>Đi tới ô mục tiêu</button>
       {action("goal", "Đã xem mục tiêu")}
     </div>}
     {step === 1 && <div className="study-onboarding__step">
@@ -137,14 +157,14 @@ export function StudyOnboarding({ progress, topics = [], onProgressChange }: {
     </div>}
     {step === 2 && <div className="study-onboarding__step">
       <h2>3. Điều chỉnh thời lượng</h2>
-      <p>Thời lượng có thể nhập từ 1 đến 240 phút. Chưa có phiên học nào bắt đầu.</p>
-      {renderDuration(false)}
+      <p>Chọn thanh trượt hoặc ô nhập phút trong cột thiết lập bên dưới; có thể chọn từ 1 đến 240 phút. Chưa có phiên học nào bắt đầu.</p>
+      <button type="button" onClick={() => onGuideControl?.("duration")}>Đi tới thời lượng</button>
       {action("duration", "Đã chọn thời lượng")}
     </div>}
     {step === 3 && <div className="study-onboarding__step">
       <h2>4. Tự kiểm tra sau khi tập trung</h2>
-      <p>Khi kết thúc buổi học, bạn có thể tự nhớ lại kiến thức rồi xem kết quả trong Nhật ký.</p>
-      {action("retrieval", "Tôi đã biết bước tự kiểm tra")}
+      <p>Chọn số câu hỏi hoặc bật/tắt chuẩn bị Quiz AI trong cột thiết lập. Khi bạn đổi một lựa chọn, hướng dẫn hoàn tất; trong lúc hướng dẫn chưa có yêu cầu AI nào được gửi.</p>
+      <button type="button" onClick={() => onGuideControl?.("retrieval")}>Đi tới lựa chọn ôn tập</button>
     </div>}
     <div className="study-onboarding__actions">
       <button type="button" onClick={() => dispatch({ type: "tutorial/previous" })}>{step === 0 ? "Sửa khảo sát" : "Quay lại"}</button>

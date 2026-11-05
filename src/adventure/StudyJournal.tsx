@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  activateStudyJournalEntry,
   formatStudyJournalDuration,
   getStudyJournalPagePosition,
   moveStudyJournalPage,
@@ -65,7 +64,7 @@ function JournalPage({
         type="button"
         className="study-journal-page__open"
         aria-label="Mở chi tiết phiên học"
-        onClick={() => activateStudyJournalEntry(entry.id, onOpenSession)}
+        onClick={() => onOpenSession(entry.id)}
       >Mở chi tiết</button>
     </footer>
   </article>;

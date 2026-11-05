@@ -157,6 +157,28 @@ test("pending AI guide review exposes a clearly primary confirmation and explici
   assert.doesNotMatch(markup, /Bố cục bản ôn tập|đúng 8 mục|Lý thuyết \(chi tiết nhất\)/u);
 });
 
+test("a reviewed AI guide requires an explicit append, replace, or preserve-and-cancel choice", () => {
+  const markup = renderToStaticMarkup(React.createElement(StudyGuideComposer, {
+    disabled: false,
+    canGenerate: true,
+    unavailableReason: "",
+    hasExistingContent: true,
+    review: { draft: { title: "Ôn Sinh học", text: "## Tế bào\nMàng tế bào điều hòa trao đổi chất." }, view: "preview" },
+    onReviewAction: () => {},
+    onGenerate: async () => undefined,
+    onCancel: () => {},
+    onUse: () => {},
+    onDiscard: () => {},
+    onDownload: () => {},
+  }));
+
+  assert.match(markup, /role="group" aria-label="Cách dùng bản ôn tập"/u);
+  assert.match(markup, /Thêm vào nội dung hiện có/u);
+  assert.match(markup, /Thay thế nội dung hiện có/u);
+  assert.match(markup, /Giữ nguyên nội dung, hủy bản nháp/u);
+  assert.doesNotMatch(markup, /Xác nhận và dùng làm tài liệu/u);
+});
+
 test("quiz generation exposes a distinct primary action", () => {
   const markup = renderToStaticMarkup(React.createElement(QuizPanel, {
     ownerId: "owner-a",
@@ -282,8 +304,9 @@ test("departure review preference uses an explicit skip toggle and hides the cou
   assert.match(enabledMarkup, /aria-pressed="false"[^>]*>Bỏ qua ôn tập/u);
   assert.match(enabledMarkup, /Quiz AI là tùy chọn/u);
   assert.match(enabledMarkup, /Bạn có thể tạo câu hỏi sau buổi học mà không cần tài khoản/u);
-  assert.match(enabledMarkup, /có thể chuẩn bị trước câu hỏi từ nguồn đã xác nhận trong lúc bạn học/u);
-  assert.match(enabledMarkup, /Khi đăng nhập và bật ôn tập/u);
+  assert.match(enabledMarkup, /Chuẩn bị câu hỏi trong lúc học \(tùy chọn\)/u);
+  assert.match(enabledMarkup, /Chuẩn bị trước chỉ bắt đầu nếu bạn bật tùy chọn bên dưới/u);
+  assert.match(enabledMarkup, /Không gửi nội dung hay chuẩn bị câu hỏi khi tùy chọn này đang tắt/u);
   assert.doesNotMatch(enabledMarkup, /chỉ khi đăng nhập/u);
 
   const skippedMarkup = control(true);
@@ -295,6 +318,26 @@ test("departure review preference uses an explicit skip toggle and hides the cou
   const busyMarkup = control(false, true);
   assert.match(busyMarkup, /<input[^>]*disabled=""/u);
   assert.match(busyMarkup, /<button[^>]*disabled=""/u);
+});
+
+test("source-backed prefetch asks for reviewed material consent only after explicit opt-in", () => {
+  const markup = renderToStaticMarkup(React.createElement(QuizReviewPreference, {
+    count: "3",
+    skipped: false,
+    disabled: false,
+    prefetchEnabled: true,
+    sourcePresent: true,
+    sourceReviewed: true,
+    sourceConsent: false,
+    onCountChange: () => {},
+    onToggleSkip: () => {},
+    onPrefetchChange: () => {},
+    onSourceConsentChange: () => {},
+  }));
+
+  assert.match(markup, /Cho phép gửi nội dung đã kiểm tra để chuẩn bị Quiz AI/u);
+  assert.match(markup, /type="checkbox"/u);
+  assert.doesNotMatch(markup, /checked=""[^>]*Cho phép gửi/u);
 });
 
 test("corrected summary notice separates effective metrics from the recorded end time", () => {
