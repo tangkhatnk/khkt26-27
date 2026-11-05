@@ -24,7 +24,7 @@ import { createStudyGuideReviewState, hasPendingStudyGuide as hasPendingGuideRev
 import { useStudyFullscreen } from "./useStudyFullscreen";
 import { FocusFullscreenRecovery } from "./FocusFullscreenRecovery";
 import { JourneyView } from "./JourneyView";
-import { FocusStudyCompanion, SessionSummaryCompanion } from "./StudySessionPresentation";
+import { FocusStudyCompanion, SessionSummaryCompanion, StudyPreparationSummary } from "./StudySessionPresentation";
 import { detectDeviceCategory } from "./device";
 import { explorationProgress } from "./exploration";
 import type { MaterialExtractionProgress } from "./materialExtraction";
@@ -776,6 +776,8 @@ function AdventureWorkspace() {
     ...studyTopics,
     ...topics.filter((t) => !studyTopics.some((s) => s.id === t.id)),
   ], [topics]);
+  const ticketTopicName = availableTopics.find((item) => item.id === topic)?.name ??
+    (selectedGroupTrip && "topic" in selectedGroupTrip ? selectedGroupTrip.topic : undefined) ?? "Tự học";
   const legacyTripGoal = group?.trip && "goal" in group.trip ? group.trip.goal : undefined;
   const legacyTripTopic = group?.trip && "topic" in group.trip ? group.trip.topic : undefined;
   const legacyTripTopicName = availableTopics.find((item) => item.id === legacyTripTopic)?.name ?? legacyTripTopic ?? "Tự học";
@@ -2660,7 +2662,7 @@ function AdventureWorkspace() {
                     lesson: "Bài học",
                     map: "Bản đồ hành trình",
                     carriage: "Toa của tôi",
-                    ticket: "Vé học",
+                    ticket: "Chuẩn bị",
                     focus: "Chuyến đang chạy",
                     summary: "Thành quả",
                     account: "Tài khoản",
@@ -2793,29 +2795,36 @@ function AdventureWorkspace() {
               {view === "ticket" && (
                 <>
                   <Heading
-                    kicker="CHUẨN BỊ KHỞI HÀNH"
-                    title="Tấm vé cho chặng học của bạn"
-                    text="Kiểm tra lộ trình, mang theo tài liệu rồi lên tàu."
+                    kicker="CHUẨN BỊ BUỔI HỌC"
+                    title="Chuẩn bị cho buổi học"
+                    text="Xem lại mục tiêu và thời lượng, thêm nội dung ôn tập nếu cần, rồi bắt đầu khi sẵn sàng."
                   />
-                  <BoardingTicket
+                  <StudyPreparationSummary
                     goal={goal}
-                    topicName={availableTopics.find((item) => item.id === topic)?.name ??
-                      (selectedGroupTrip && "topic" in selectedGroupTrip ? selectedGroupTrip.topic : undefined) ?? "Tự học"}
+                    subject={ticketTopicName}
                     minutes={minutes}
                     breakCount={breakCount}
                     breakMinutes={breakMinutes}
-                    station={stations[journey?.station ?? 0]}
-                    branch={journey?.branch}
-                    carriageName={carriage?.name ?? "Toa Mây"}
-                    mode={mode}
-                    synchronizedTrip={isSynchronizedTrip(selectedGroupTrip)}
-                    tripCode={ticketCode?.id === ticketId ? ticketCode.value : undefined}
-                  />
+                  >
+                    <BoardingTicket
+                      goal={goal}
+                      topicName={ticketTopicName}
+                      minutes={minutes}
+                      breakCount={breakCount}
+                      breakMinutes={breakMinutes}
+                      station={stations[journey?.station ?? 0]}
+                      branch={journey?.branch}
+                      carriageName={carriage?.name ?? "Toa Mây"}
+                      mode={mode}
+                      synchronizedTrip={isSynchronizedTrip(selectedGroupTrip)}
+                      tripCode={ticketCode?.id === ticketId ? ticketCode.value : undefined}
+                    />
+                  </StudyPreparationSummary>
                   <div className="boarding-preparation">
                     <section className="panel form departure-materials">
                       <div className="eyebrow">HÀNH TRANG HỌC TẬP</div>
                       <h2>Nội dung ôn tập</h2>
-                      <p className="departure-intro">Dán nội dung đã có, chọn tệp hoặc nhờ AI soạn một bản ôn tập để mang lên tàu.</p>
+                      <p className="departure-intro">Dán nội dung đã có, chọn tệp hoặc nhờ AI soạn bản ôn tập theo mục tiêu buổi học.</p>
                       <div className="departure-source-options" role="group" aria-label="Chọn cách chuẩn bị nội dung">
                         <button disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} aria-pressed={studyInput === "notes"} onClick={() => setStudyInput("notes")}>Dán nội dung</button>
                         <button disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} aria-pressed={studyInput === "files"} onClick={() => setStudyInput("files")}>Tải tài liệu</button>
@@ -2892,7 +2901,7 @@ function AdventureWorkspace() {
                     </section>
                     <section className="panel form departure-settings">
                       <div className="eyebrow">LỘ TRÌNH CỦA BẠN</div>
-                      <h2>Sẵn sàng khởi hành</h2>
+                      <h2>Thiết lập buổi học</h2>
                       <TicketEditor initiallyOpen={goal.trim().length < 3 || !Number.isInteger(minutes) || minutes < 1 || minutes > 240 || !validBreaks}>
                         <label>
                           Mục tiêu học tập
@@ -3068,7 +3077,7 @@ function AdventureWorkspace() {
                             ? "Khởi hành và bắt đầu phiên · "
                             : selectedGroupTrip
                               ? "Bắt đầu phiên cho chuyến chung · "
-                              : "Bắt đầu chuyến · "}{" "}
+                              : "Bắt đầu buổi học · "}{" "}
                           {Number.isFinite(minutes) ? minutes : "…"} phút học →
                         </button>
                       )}
@@ -3877,11 +3886,13 @@ function AdventureWorkspace() {
                                 <span>{analysis.focusLabel} · {analysis.focusPercent === null ? "—" : `${Math.floor(analysis.focusPercent)}%`} tập trung</span>
                                 <span>Số lần xao nhãng: <b>{analysis.distractions}</b></span>
                                 <span>{s.correctionFlags?.quizResult
-                                  ? `Điểm theo lịch sử đã chỉnh: ${s.effectiveMetrics?.quizScore === null || s.effectiveMetrics?.quizTotal === null
+                                  ? `Điểm quiz theo lịch sử đã chỉnh: ${s.effectiveMetrics?.quizScore === null || s.effectiveMetrics?.quizTotal === null
                                     ? "chưa ghi nhận" : `${s.effectiveMetrics?.quizScore}/${s.effectiveMetrics?.quizTotal}`}`
                                   : privateGuestGrade
-                                    ? `Điểm quiz riêng: ${privateGuestGrade.score}/${privateGuestGrade.total}`
-                                    : `Điểm ${s.quiz ? `${s.quiz.score}/${s.quiz.total}` : "Chưa làm"}`}</span>
+                                    ? `Điểm Quiz AI riêng: ${privateGuestGrade.score}/${privateGuestGrade.total}`
+                                    : s.quiz
+                                      ? `Điểm quiz: ${s.quiz.score}/${s.quiz.total}`
+                                      : "Chưa có kết quả quiz"}</span>
                                 <span>{privateGuestGrade
                                   ? "Xem đáp án trong tổng kết"
                                   : s.quiz?.feedback
@@ -4266,7 +4277,7 @@ function TicketEditor({ initiallyOpen, children }: { initiallyOpen: boolean; chi
     <details className="ticket-editor" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
         <span className="ticket-editor-icon" aria-hidden="true">✎</span>
-        <span className="ticket-editor-copy"><strong>Sửa vé chuyến học</strong><small>Mục tiêu · chủ đề · thời gian</small></span>
+        <span className="ticket-editor-copy"><strong>Chỉnh mục tiêu và thời gian</strong><small>Mục tiêu · môn học · thời gian</small></span>
         <span className="ticket-editor-action" aria-hidden="true">{open ? "Thu gọn −" : "Chỉnh sửa +"}</span>
       </summary>
       <div className="ticket-editor-fields">{children}</div>

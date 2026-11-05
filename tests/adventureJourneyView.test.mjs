@@ -10,7 +10,9 @@ import { resolve } from "node:path";
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 let vite;
 let BoardingTicket;
+let StudyPreparationSummary;
 let JourneyView;
+let StudyNotesInput;
 let tripSceneTiming;
 let StudyGuideComposer;
 let QuizPanel;
@@ -26,7 +28,9 @@ before(async () => {
     server: { middlewareMode: true },
   });
   ({ BoardingTicket } = await vite.ssrLoadModule("/src/adventure/BoardingTicket.tsx"));
+  ({ StudyPreparationSummary } = await vite.ssrLoadModule("/src/adventure/StudySessionPresentation.tsx"));
   ({ JourneyView } = await vite.ssrLoadModule("/src/adventure/JourneyView.tsx"));
+  ({ StudyNotesInput } = await vite.ssrLoadModule("/src/adventure/StudyNotesInput.tsx"));
   ({ StudyGuideComposer } = await vite.ssrLoadModule("/src/adventure/StudyGuideComposer.tsx"));
   ({ QuizPanel } = await vite.ssrLoadModule("/src/adventure/QuizPanel.tsx"));
   ({ QuizReviewPreference } = await vite.ssrLoadModule("/src/adventure/QuizReviewPreference.tsx"));
@@ -83,6 +87,52 @@ test("boarding pass uses shared-trip wording only for synchronized group session
   assert.match(legacy, /Cùng đoàn/u);
   assert.match(solo, /Một mình/u);
   assert.doesNotMatch(solo, /Cùng chuyến|Cùng đoàn/u);
+});
+
+test("preparation summary shows the study plan and keeps journey details collapsed", () => {
+  assert.equal(typeof StudyPreparationSummary, "function", "the shared preparation summary is available");
+
+  const markup = renderToStaticMarkup(React.createElement(StudyPreparationSummary, {
+    goal: "Giải phương trình bậc hai",
+    subject: "Toán học",
+    minutes: 25,
+    breakCount: 2,
+    breakMinutes: 5,
+    children: React.createElement(BoardingTicket, {
+      goal: "Giải phương trình bậc hai",
+      topicName: "Toán học",
+      minutes: 25,
+      breakCount: 2,
+      breakMinutes: 5,
+      station: "Rừng Sương mù",
+      branch: "coast",
+      carriageName: "Toa Mây",
+      mode: "solo",
+    }),
+  }));
+
+  assert.match(markup, /aria-labelledby="study-preparation-summary-title"/u);
+  assert.match(markup, /<h2 id="study-preparation-summary-title"[^>]*>Tóm tắt buổi học<\/h2>/u);
+  assert.match(markup, /aria-label="Người bạn học, một sinh vật nhỏ đội lá"/u);
+  assert.match(markup, /<dt>Mục tiêu<\/dt><dd>Giải phương trình bậc hai<\/dd>/u);
+  assert.match(markup, /<dt>Môn học<\/dt><dd>Toán học<\/dd>/u);
+  assert.match(markup, /<dt>Tập trung<\/dt><dd>25 phút<\/dd>/u);
+  assert.match(markup, /<dt>Giải lao<\/dt><dd>2 lần × 5 phút<\/dd>/u);
+  assert.match(markup, /<dt>Tổng thời lượng<\/dt><dd>35 phút<\/dd>/u);
+  assert.match(markup, /<details class="study-preparation-summary__journey"><summary>Chi tiết hành trình<\/summary><section class="boarding-ticket"/u);
+  assert.doesNotMatch(markup, /<details[^>]*\bopen(?:=|>)/u);
+});
+
+test("study notes describe a goal for the study session", () => {
+  const markup = renderToStaticMarkup(React.createElement(StudyNotesInput, {
+    value: "",
+    onChange: () => {},
+    disabled: false,
+    hasDocuments: false,
+  }));
+
+  assert.match(markup, /Mục tiêu buổi học cho biết/u);
+  assert.doesNotMatch(markup, /Mục tiêu chuyến đi/u);
 });
 
 test("pending AI guide review exposes a clearly primary confirmation and explicit discard", () => {
@@ -230,11 +280,17 @@ test("departure review preference uses an explicit skip toggle and hides the cou
   const enabledMarkup = control(false);
   assert.match(enabledMarkup, /type="number"[^>]*value="3"/u);
   assert.match(enabledMarkup, /aria-pressed="false"[^>]*>Bỏ qua ôn tập/u);
+  assert.match(enabledMarkup, /Quiz AI là tùy chọn/u);
+  assert.match(enabledMarkup, /Bạn có thể tạo câu hỏi sau buổi học mà không cần tài khoản/u);
+  assert.match(enabledMarkup, /có thể chuẩn bị trước câu hỏi từ nguồn đã xác nhận trong lúc bạn học/u);
+  assert.match(enabledMarkup, /Khi đăng nhập và bật ôn tập/u);
+  assert.doesNotMatch(enabledMarkup, /chỉ khi đăng nhập/u);
 
   const skippedMarkup = control(true);
   assert.doesNotMatch(skippedMarkup, /type="number"/u);
   assert.match(skippedMarkup, /aria-pressed="true"[^>]*>Bật ôn tập/u);
-  assert.match(skippedMarkup, /không tạo sẵn câu hỏi/u);
+  assert.match(skippedMarkup, /không chuẩn bị câu hỏi/u);
+  assert.match(skippedMarkup, /Sau phiên, bạn vẫn có thể tự tạo Quiz AI mà không cần tài khoản/u);
 
   const busyMarkup = control(false, true);
   assert.match(busyMarkup, /<input[^>]*disabled=""/u);

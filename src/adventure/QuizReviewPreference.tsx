@@ -32,7 +32,7 @@ export function QuizReviewPreference({
       </label>
       <small id="departure-quiz-hint" className="departure-quiz-hint">
         {isQuizCount(Number(count))
-          ? "Khi đăng nhập, nguồn đã kiểm tra được gửi cho AI để chuẩn bị câu hỏi trong lúc bạn tập trung. Bạn có thể đổi số lượng ở phần thành quả."
+          ? "Quiz AI là tùy chọn. Bạn có thể tạo câu hỏi sau buổi học mà không cần tài khoản. Khi đăng nhập và bật ôn tập, ứng dụng có thể chuẩn bị trước câu hỏi từ nguồn đã xác nhận trong lúc bạn học. Bạn có thể đổi số lượng ở phần thành quả."
           : "Chọn số câu hỏi là số nguyên từ 1 đến 30."}
       </small>
     </>}
@@ -46,7 +46,7 @@ export function QuizReviewPreference({
       {skipped ? "Bật ôn tập" : "Bỏ qua ôn tập"}
     </button>
     {skipped && <small id="departure-quiz-hint" className="departure-quiz-hint">
-      Ứng dụng sẽ không tạo sẵn câu hỏi trong lúc học. Bạn vẫn có thể bật ôn tập ở phần thành quả.
+      Ứng dụng không chuẩn bị câu hỏi trong lúc học. Sau phiên, bạn vẫn có thể tự tạo Quiz AI mà không cần tài khoản.
     </small>}
   </div>;
 }
