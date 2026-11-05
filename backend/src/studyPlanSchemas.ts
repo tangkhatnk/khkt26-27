@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import type { StudyPlanRequest, StudyPlanResponse } from "./studyPlanContracts.js";
+
+export type { StudyPlanRequest, StudyPlanResponse } from "./studyPlanContracts.js";
 
 export const STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES = 256 * 1024;
 
@@ -42,16 +45,12 @@ export const studyPlanRequestSchema = z.object({
   }
 });
 
-export type StudyPlanRequest = z.infer<typeof studyPlanRequestSchema>;
-
 export const studyPlanResponseSchema = z.object({
   title: z.string().trim().min(3).max(120),
   steps: z.array(studyPlanStepSchema).min(3).max(8),
   finalCheck: z.string().trim().min(3).max(500).optional(),
   verificationNote: z.string().trim().min(3).max(500).optional(),
 }).strict();
-
-export type StudyPlanResponse = z.infer<typeof studyPlanResponseSchema>;
 
 export const studyPlanProviderResponseJsonSchema = {
   type: "object" as const,
