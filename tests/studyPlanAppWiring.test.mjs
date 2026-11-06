@@ -253,3 +253,23 @@ test("reusing a library source persists consent revocation in the same owner-loc
   assert.match(persist, /notes: changes\.notes \?\? documentText/u);
   assert.match(use, /record\.kind === "note" && draftTripId === record\.sessionId/u);
 });
+
+test("active focus uses the quiet canvas without moving the session controls or clock ownership", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const focusStart = app.indexOf("{view === \"focus\" &&");
+  const focusEnd = app.indexOf("{view === \"map\" &&", focusStart);
+  const focus = app.slice(focusStart, focusEnd);
+
+  assert.match(app, /import \{ QuietFocusCanvas \} from "\.\/QuietFocusCanvas"/u);
+  assert.match(focus, /className="focus-card quiet-focus-shell"/u);
+  assert.match(focus, /<QuietFocusCanvas[\s\S]*?goal=\{active\.goal\}/u);
+  assert.match(focus, /clockSeconds=\{rest \? rest\.remainingSeconds : studyStage\?\.remainingSeconds \?\? active\.target - elapsedSeconds\(active, displayAt\)\}/u);
+  assert.match(focus, /motionAllowed=\{active\.state === "focus" \|\| active\.state === "reconnecting"\}/u);
+  assert.match(focus, /essentialControls=\{/u);
+  assert.match(focus, /warnings=\{/u);
+  assert.match(focus, /materials=\{/u);
+  assert.match(focus, /details=\{/u);
+  assert.match(focus, /setConfirm\("finish"\)/u);
+  assert.match(focus, /studyFullscreen\.toggle/u);
+  assert.doesNotMatch(focus, /<FlipClock/u);
+});

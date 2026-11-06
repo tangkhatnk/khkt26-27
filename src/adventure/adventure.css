@@ -937,6 +937,26 @@ body,
   padding-top: 30px;
   border: 1px solid #dce3d6;
 }
+.focus-card.quiet-focus-shell {
+  max-width: 980px;
+  padding: 0;
+  overflow: visible;
+  background: var(--surface, #eef2e8);
+  border-color: var(--line, #dce3d6);
+  color: var(--ink, #263d34);
+}
+.quiet-focus-shell .quiet-focus-canvas { max-width: 100%; }
+.quiet-focus-shell .quiet-focus-canvas__status { display: grid; gap: .55rem; }
+.quiet-focus-shell .quiet-focus-canvas__status .focus-phase-label,
+.quiet-focus-shell .quiet-focus-canvas__status .focus-next { margin: 0; }
+.quiet-focus-shell .quiet-focus-canvas__essentials .focus-controls {
+  width: 100%;
+  padding: 0;
+  justify-content: center;
+  gap: .75rem;
+}
+.quiet-focus-shell .quiet-focus-canvas__warnings .info-box { margin: 0; }
+.quiet-focus-shell .quiet-focus-canvas__disclosure-content .study-companion { margin: .75rem 0; }
 .timer {
   font-size: clamp(70px, 8vw, 105px);
   letter-spacing: -5px;

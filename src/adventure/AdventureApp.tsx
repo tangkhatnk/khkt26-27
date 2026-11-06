@@ -17,7 +17,7 @@ import { StudyGuideComposer, type StudyGuideUseMode } from "./StudyGuideComposer
 import { MaterialSourceReader, MaterialSourceReviewButton } from "./MaterialSourceReader";
 import { MaterialSummaryControl } from "./MaterialSummaryControl";
 import { PublicMaterialSummaryControl, type PublicMaterialSummaryScope } from "./PublicMaterialSummaryControl";
-import { FlipClock } from "./FlipClock";
+import { QuietFocusCanvas } from "./QuietFocusCanvas";
 import { ThemeToggle } from "./theme";
 import { studyGuideDownload, studyGuideSource, type StudyGuideDraft } from "./studyGuide";
 import { createStudyGuideReviewState, hasPendingStudyGuide as hasPendingGuideReview, reduceStudyGuideReview } from "./studyGuideReview";
@@ -4121,76 +4121,90 @@ function AdventureWorkspace() {
                         returnFocusRef={fullscreenContinueRef}
                       />
                     )}
-                    <div className="focus-heading">
-                      <span className="pill">
-                        {active.groupId ? "BUỔI HỌC CÙNG BẠN" : "BUỔI HỌC CÁ NHÂN"}
-                      </span>
-                      <h1>{active.goal}</h1>
-                      {ticketCode?.id === active.id && <span className="pill">Mã phiên {ticketCode.value}</span>}
-                      <p>
-                        {rest ? "Giải lao một chút. Phiên sẽ tự tiếp tục sau giờ nghỉ." : active.state === "away"
-                          ? "Đồng hồ vẫn chạy. Khoảng thời gian bạn rời đi không được cộng vào thời gian học."
-                          : "Không vội vàng. Chỉ cần hiện diện ở đây."}
-                      </p>
-                    </div>
-                    <section className="focus-card">
-                      <div className="focus-phase-label">
-                        {rest ? `Nghỉ giải lao ${rest.index}/${rest.count}` : `Lượt học ${(studyStage?.index ?? 0) + 1}/${studyStage?.count ?? 1}`}
-                      </div>
-                      <FlipClock seconds={rest ? rest.remainingSeconds : studyStage?.remainingSeconds ?? active.target - elapsedSeconds(active, displayAt)}
-                        label={rest ? "Giải lao còn lại" : "Lượt học còn lại"}
-                        motionAllowed={active.state === "focus" || active.state === "reconnecting"} />
-                      <p className="focus-next" role="status">
-                        {rest
-                          ? `Tự tiếp tục lượt học ${rest.index + 1}/${rest.count + 1} lúc ${new Date(rest.endsAt).toLocaleTimeString("vi-VN", {hour: "2-digit", minute: "2-digit", second: "2-digit"})}`
-                          : studyStage && studyStage.index < studyStage.count - 1
-                            ? `Tiếp theo: nghỉ ${clock(active.breakPlan?.seconds ?? 0)}`
-                            : "Lượt cuối · phiên học hoàn tất khi đồng hồ về 00:00"}
-                      </p>
-                      {active.breakPlan && active.breakPlan.count > 0 && <p className="focus-plan-total">{active.target / 60} phút học + {active.breakPlan.count * active.breakPlan.seconds / 60} phút nghỉ · tổng thời lượng {totalDuration(active) / 60} phút</p>}
-                      <FocusStudyCompanion
-                        state={active.state}
-                        resting={Boolean(rest)}
-                        focusedSeconds={focused(active)}
-                        targetSeconds={active.target}
-                        distractions={active.distractions ?? 0}
+                    <section className="focus-card quiet-focus-shell">
+                      <QuietFocusCanvas
+                        goal={active.goal}
+                        clockSeconds={rest ? rest.remainingSeconds : studyStage?.remainingSeconds ?? active.target - elapsedSeconds(active, displayAt)}
+                        clockLabel={rest ? "Giải lao còn lại" : "Lượt học còn lại"}
+                        motionAllowed={active.state === "focus" || active.state === "reconnecting"}
+                        status={
+                          <>
+                            <p className="focus-phase-label">
+                              {rest ? `Nghỉ giải lao ${rest.index}/${rest.count}` : `Lượt học ${(studyStage?.index ?? 0) + 1}/${studyStage?.count ?? 1}`}
+                            </p>
+                            <p className="focus-next">
+                              {rest
+                                ? `Tự tiếp tục lượt học ${rest.index + 1}/${rest.count + 1} lúc ${new Date(rest.endsAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+                                : studyStage && studyStage.index < studyStage.count - 1
+                                  ? `Tiếp theo: nghỉ ${clock(active.breakPlan?.seconds ?? 0)}`
+                                  : "Lượt cuối · phiên học hoàn tất khi đồng hồ về 00:00"}
+                            </p>
+                            {active.breakPlan && active.breakPlan.count > 0 && <p className="focus-plan-total">
+                              {active.target / 60} phút học + {active.breakPlan.count * active.breakPlan.seconds / 60} phút nghỉ · tổng thời lượng {totalDuration(active) / 60} phút
+                            </p>}
+                          </>
+                        }
+                        warnings={deviceClockBehind || (active.syncClock && !synchronizedClockSupported) || studyExerciseFocusAvailabilityMessage
+                          ? <>
+                            {deviceClockBehind && <div className="info-box">
+                              <p>Đồng hồ thiết bị đang chạy lùi. Hãy đặt lại giờ đúng để tiếp tục; dữ liệu phiên vẫn được giữ.</p>
+                              <button onClick={exportData}>Xuất bản sao phiên học</button>
+                            </div>}
+                            {active.syncClock && !synchronizedClockSupported && <div className="info-box" role="status">
+                              <p>{clockSkewUnsupported
+                                ? "Đồng hồ thiết bị lệch quá 24 giờ so với máy chủ. Bật đặt ngày và giờ tự động, rồi đồng bộ để tiếp tục tính thời gian."
+                                : "Đang chờ mẫu giờ mới từ máy chủ. Thời gian học sẽ tiếp tục sau khi đồng hồ được xác nhận."}</p>
+                              <button disabled={!online || busy} onClick={() => void run(sync)}>Cập nhật tiến độ</button>
+                            </div>}
+                            {studyExerciseFocusAvailabilityMessage && <p className="study-exercises__error" role="alert">{studyExerciseFocusAvailabilityMessage}</p>}
+                          </>
+                          : undefined}
+                        essentialControls={
+                          <div className="focus-controls">
+                            <ThemeToggle />
+                            <div className="study-fullscreen-control">
+                              <button ref={fullscreenContinueRef} type="button" onClick={studyFullscreen.toggle} aria-pressed={studyFullscreen.isFullscreen} disabled={studyFullscreen.status === "pending" && !studyFullscreen.isFullscreen}>
+                                {studyFullscreen.isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
+                              </button>
+                              {studyFullscreen.message && !studyFullscreen.restorePrompt && <span className="study-fullscreen-status" role="status">{studyFullscreen.message}</span>}
+                            </div>
+                            <button disabled={deviceClockBehind} onClick={() => setConfirm("finish")}>
+                              Kết thúc và lưu phiên
+                            </button>
+                          </div>
+                        }
+                        materials={active.document || active.sources?.length || active.materials?.length || studyExercisePreparation?.plannedSessionId === active.id
+                          ? <>
+                            {studyExercisePreparation?.plannedSessionId === active.id &&
+                              <StudyExerciseQuestionViewer preparation={studyExercisePreparation} phase="focus" />}
+                            {active.document && <details className="panel study-notes">
+                              <summary>Tài liệu của bạn · đọc ngay tại đây</summary>
+                              <MaterialSourceReader title="Nội dung ôn tập" text={active.document} />
+                            </details>}
+                            {active.sources?.map((source) => <details className="panel study-notes" key={source.id}>
+                              <summary>Nguồn tài liệu · {source.name}{!source.reviewed && " · chưa kiểm tra"}</summary>
+                              <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} />
+                            </details>)}
+                            {!!active.materials?.length && <div className="panel material-list" aria-label="Tệp của phiên học">
+                              {active.materials.map((file, i) => <p key={`${i}:${file.name}`}><strong>{file.name}</strong> · {file.message}</p>)}
+                            </div>}
+                          </>
+                          : undefined}
+                        details={
+                          <>
+                            {ticketCode?.id === active.id && <p className="focus-plan-total">Mã phiên {ticketCode.value}</p>}
+                            <FocusStudyCompanion
+                              state={active.state}
+                              resting={Boolean(rest)}
+                              focusedSeconds={focused(active)}
+                              targetSeconds={active.target}
+                              distractions={active.distractions ?? 0}
+                            />
+                            {active.groupId && <p className="overhead-hint">Tiến độ nhóm cập nhật sau khi máy chủ xác nhận thời gian học của từng người.</p>}
+                          </>
+                        }
                       />
-                      {active.groupId && <p className="overhead-hint">Tiến độ nhóm cập nhật sau khi máy chủ xác nhận thời gian học của từng người.</p>}
-                      <div className="focus-controls">
-                        <ThemeToggle />
-                        <div className="study-fullscreen-control">
-                          <button ref={fullscreenContinueRef} type="button" onClick={studyFullscreen.toggle} aria-pressed={studyFullscreen.isFullscreen} disabled={studyFullscreen.status === "pending" && !studyFullscreen.isFullscreen}>
-                            {studyFullscreen.isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
-                          </button>
-                          {studyFullscreen.message && !studyFullscreen.restorePrompt && <span className="study-fullscreen-status" role="status">{studyFullscreen.message}</span>}
-                        </div>
-                        {deviceClockBehind && <div className="info-box">
-                          <p>Đồng hồ thiết bị đang chạy lùi. Hãy đặt lại giờ đúng để tiếp tục; dữ liệu phiên vẫn được giữ.</p>
-                          <button onClick={exportData}>Xuất bản sao phiên học</button>
-                        </div>}
-                        {active.syncClock && !synchronizedClockSupported && <div className="info-box" role="status">
-                          <p>{clockSkewUnsupported
-                            ? "Đồng hồ thiết bị lệch quá 24 giờ so với máy chủ. Bật đặt ngày và giờ tự động, rồi đồng bộ để tiếp tục tính thời gian."
-                            : "Đang chờ mẫu giờ mới từ máy chủ. Thời gian học sẽ tiếp tục sau khi đồng hồ được xác nhận."}</p>
-                          <button disabled={!online || busy} onClick={() => void run(sync)}>Cập nhật tiến độ</button>
-                        </div>}
-                        <button disabled={deviceClockBehind} onClick={() => setConfirm("finish")}>
-                          Kết thúc và lưu phiên
-                        </button>
-                      </div>
                     </section>
-                    {studyExercisePreparation?.plannedSessionId === active.id &&
-                      <StudyExerciseQuestionViewer preparation={studyExercisePreparation} phase="focus" />}
-                    {studyExerciseFocusAvailabilityMessage &&
-                      <p className="study-exercises__error" role="alert">{studyExerciseFocusAvailabilityMessage}</p>}
-                    {active.document && (
-                      <details className="panel study-notes">
-                        <summary>Tài liệu của bạn · đọc ngay tại đây</summary>
-                        <MaterialSourceReader title="Nội dung ôn tập" text={active.document} />
-                      </details>
-                    )}
-                    {active.sources?.map((source) => <details className="panel study-notes" key={source.id}><summary>Nguồn tài liệu · {source.name}{!source.reviewed && " · chưa kiểm tra"}</summary><MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} /></details>)}
-                    {!!active.materials?.length && <div className="panel material-list" aria-label="Tệp của phiên học">{active.materials.map((file, i) => <p key={`${i}:${file.name}`}><strong>{file.name}</strong> · {file.message}</p>)}</div>}
                   </>
                 ) : (
                   <Empty
