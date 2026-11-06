@@ -252,6 +252,10 @@ test("plan navigation stays compact while the selected step owns the detail pane
       { id: "step-b", title: "Tự kiểm tra" },
     ],
     selectedStepId: "step-a",
+    stepStates: [
+      { stepId: "step-a", state: "available" },
+      { stepId: "step-b", state: "available" },
+    ],
     onSelectStep: (id) => selected.push(id),
   });
   const navButtons = collectElements(navigation).filter((node) => node.type === "button");
