@@ -42,6 +42,19 @@ export function isQuizCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 30;
 }
 
+/** Explicit summary generation is separate from automatic prefetch consent. */
+export function canManuallyGenerateQuiz(input: {
+  count: unknown;
+  draft?: Pick<QuizDraft, "reviewSkipped">;
+  canUseAI: boolean;
+  hasAssessment: boolean;
+  generating: boolean;
+  grading: boolean;
+}): boolean {
+  return isQuizCount(input.count) && input.canUseAI && !input.hasAssessment &&
+    !input.generating && !input.grading && input.draft?.reviewSkipped !== true;
+}
+
 export function canStartSessionWithQuizReview(countInput: string, reviewSkipped: boolean): boolean {
   return reviewSkipped || isQuizCount(Number(countInput));
 }

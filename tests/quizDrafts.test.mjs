@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QuizRequestGuard, canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidGuestQuizDeck, isValidGuestQuizGrade, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
+import { QuizRequestGuard, canManuallyGenerateQuiz, canStartSessionWithQuizReview, createSessionQuizDraft, isQuizCount, isValidGuestQuizDeck, isValidGuestQuizGrade, isValidQuizDraft, isValidQuizDraftMap, quizPanelDraftState, shouldPrefetchQuizReview, updateQuizDrafts } from "../src/adventure/quizDrafts.ts";
 
 const question = {
   id: "123e4567-e89b-42d3-a456-426614174000",
@@ -121,6 +121,34 @@ test("new quiz prefetch requires opt-in and reviewed-source consent while legacy
     count: 3, questions: [], answers: {}, prefetchEnabled: true,
     prefetchSourcePresent: true, prefetchSourceConsent: "yes",
   }), false);
+});
+
+test("explicit Quiz AI generation ignores prefetch opt-in but honors skip and panel eligibility", () => {
+  const draft = {
+    count: 3,
+    questions: [],
+    answers: {},
+    prefetchEnabled: false,
+    prefetchSourcePresent: true,
+    prefetchSourceConsent: false,
+  };
+  const eligible = {
+    draft,
+    count: 3,
+    canUseAI: true,
+    hasAssessment: false,
+    generating: false,
+    grading: false,
+  };
+
+  assert.equal(shouldPrefetchQuizReview(draft), false);
+  assert.equal(canManuallyGenerateQuiz(eligible), true);
+  assert.equal(canManuallyGenerateQuiz({ ...eligible, draft: { ...draft, reviewSkipped: true } }), false);
+  assert.equal(canManuallyGenerateQuiz({ ...eligible, count: 0 }), false);
+  assert.equal(canManuallyGenerateQuiz({ ...eligible, canUseAI: false }), false);
+  assert.equal(canManuallyGenerateQuiz({ ...eligible, hasAssessment: true }), false);
+  assert.equal(canManuallyGenerateQuiz({ ...eligible, generating: true }), false);
+  assert.equal(canManuallyGenerateQuiz({ ...eligible, grading: true }), false);
 });
 
 test("new sessions persist explicit prefetch choice independently from review skipping", () => {

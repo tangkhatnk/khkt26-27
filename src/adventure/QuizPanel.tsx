@@ -6,11 +6,11 @@ import { knowledgeGaps } from "./learning";
 import { StudyGuideInlineText } from "./StudyGuideRenderer";
 import { quizPrefetchNotice } from "./quizPrefetchPresentation";
 import {
+  canManuallyGenerateQuiz,
   isQuizCount,
   isValidQuizDraft,
   QuizRequestGuard,
   quizPanelDraftState,
-  shouldPrefetchQuizReview,
   type QuizDraft,
   type GuestQuizQuestion,
   type QuizQuestion,
@@ -97,8 +97,14 @@ export function QuizPanel({
 
   async function generate() {
     const count = Number(countInput);
-    if (!isQuizCount(count) || assessment || generating || grading || !canUseAI ||
-        !shouldPrefetchQuizReview(draft)) return;
+    if (!canManuallyGenerateQuiz({
+      count,
+      draft,
+      canUseAI,
+      hasAssessment: Boolean(assessment),
+      generating,
+      grading,
+    })) return;
     const request = requests.current.begin(ownerId, session.id);
     setGenerating(true);
     setError("");
