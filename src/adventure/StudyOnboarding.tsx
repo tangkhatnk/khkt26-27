@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DurationPicker } from "./DurationPicker";
 import {
   reduceStudyOnboardingProgress,
@@ -11,6 +11,33 @@ import {
 import "./studyOnboarding.css";
 
 type Topic = { id: string; name: string };
+
+type StudyOnboardingAction = Parameters<typeof reduceStudyOnboardingProgress>[1];
+
+type OnboardingCommitResult =
+  | { status: "unchanged"; progress: StudyOnboardingProgress }
+  | { status: "rejected"; progress: StudyOnboardingProgress }
+  | { status: "failed"; progress: StudyOnboardingProgress }
+  | { status: "saved"; progress: StudyOnboardingProgress };
+
+type OnboardingCommitOptions = {
+  beforeSave?: () => boolean | void;
+  afterSave?: () => void;
+};
+
+export function commitStudyOnboardingAction(
+  progress: StudyOnboardingProgress,
+  action: StudyOnboardingAction,
+  onProgressChange: (progress: StudyOnboardingProgress) => boolean | void,
+  options: OnboardingCommitOptions = {},
+): OnboardingCommitResult {
+  const nextProgress = reduceStudyOnboardingProgress(progress, action);
+  if (nextProgress === progress) return { status: "unchanged", progress };
+  if (options.beforeSave?.() === false) return { status: "rejected", progress };
+  if (onProgressChange(nextProgress) === false) return { status: "failed", progress };
+  options.afterSave?.();
+  return { status: "saved", progress: nextProgress };
+}
 
 const FALLBACK_TOPICS: Topic[] = [
   { id: "biology", name: "Sinh học" },
@@ -44,38 +71,37 @@ function surveyValid(survey: StudySurvey, step: 0 | 1): boolean {
     survey.preferredMinutes >= 1 && survey.preferredMinutes <= 240;
 }
 
-export function StudyOnboarding({ progress, currentDraft, currentDuration, topics = [], onProgressChange, onGuideControl, onSourceChoice }: {
+export function StudyOnboarding({ progress, currentDraft, currentDuration, topics = [], goalControl, durationControl, retrievalControl, onProgressChange, onGuideControl, onSourceChoice }: {
   progress: StudyOnboardingProgress;
   currentDraft?: StudySurvey;
   currentDuration?: number;
   topics?: readonly Topic[];
-  onProgressChange: (progress: StudyOnboardingProgress) => void;
+  goalControl?: ReactNode;
+  durationControl?: ReactNode;
+  retrievalControl?: ReactNode;
+  onProgressChange: (progress: StudyOnboardingProgress) => boolean | void;
   onGuideControl?: (control: StudyTutorialControl) => boolean | void;
   onSourceChoice?: (choice: StudySourceChoice) => void;
 }) {
+  const [feedback, setFeedback] = useState("");
   const tutorialStepHeading = useRef<HTMLHeadingElement | null>(null);
   const lastGuideLocation = useRef({
     phase: progress.phase,
     step: progress.tutorialStep,
-    sourceChoice: progress.tutorial.sourceChoice,
   });
   useEffect(() => {
     const previous = lastGuideLocation.current;
     const moved = previous.phase !== progress.phase || previous.step !== progress.tutorialStep;
-    const jumpedToSource = previous.phase === "tutorial" && previous.step === 1 &&
-      progress.phase === "tutorial" && progress.tutorialStep === 2 &&
-      progress.tutorial.sourceChoice !== null && progress.tutorial.sourceChoice !== "none";
     lastGuideLocation.current = {
       phase: progress.phase,
       step: progress.tutorialStep,
-      sourceChoice: progress.tutorial.sourceChoice,
     };
-    if (!moved || progress.phase !== "tutorial" || jumpedToSource) return;
+    if (!moved || progress.phase !== "tutorial") return;
     const heading = tutorialStepHeading.current;
     if (!heading) return;
     heading.scrollIntoView({ behavior: "auto", block: "center" });
     heading.focus({ preventScroll: true });
-  }, [progress.phase, progress.tutorialStep, progress.tutorial.sourceChoice]);
+  }, [progress.phase, progress.tutorialStep]);
   const tutorialSurvey = progress.phase === "tutorial" && currentDraft
     ? syncStudySurveyWithCurrentDraft(
         progress.survey,
@@ -83,20 +109,31 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
         currentDuration ?? currentDraft.preferredMinutes ?? NaN,
       )
     : progress.survey;
-  const dispatch = (action: Parameters<typeof reduceStudyOnboardingProgress>[1]) => {
+  const dispatch = (action: StudyOnboardingAction, options?: OnboardingCommitOptions): boolean => {
     const liveProgress = progress.phase === "tutorial"
       ? { ...progress, survey: tutorialSurvey }
       : progress;
-    onProgressChange(reduceStudyOnboardingProgress(liveProgress, action));
+    const result = commitStudyOnboardingAction(liveProgress, action, onProgressChange, options);
+    if (result.status === "unchanged") return false;
+    if (result.status === "rejected") {
+      setFeedback("Kiểm tra lựa chọn trong ô bên cạnh rồi thử tiếp tục lại.");
+      return false;
+    }
+    if (result.status === "failed") {
+      setFeedback("Không lưu được bước hướng dẫn trên thiết bị. Bạn vẫn ở màn hình này; hãy thử lại.");
+      return false;
+    }
+    setFeedback("");
+    return true;
   };
   const options = topics.length ? topics : FALLBACK_TOPICS;
-  const topicLabel = options.find((topic) => topic.id === tutorialSurvey.topicId)?.name ?? tutorialSurvey.topicLabel;
   const surveyChange = (changes: Partial<StudySurvey>) => dispatch({
     type: "survey/change",
     changes: { ...changes, ...(changes.topicId ? {
       topicLabel: options.find((topic) => topic.id === changes.topicId)?.name ?? changes.topicId,
     } : {}) },
   });
+  const topicLabel = options.find((topic) => topic.id === tutorialSurvey.topicId)?.name ?? tutorialSurvey.topicLabel;
   const renderGoalAndTopic = (disabled: boolean) => <div className="study-onboarding__fields">
     <label htmlFor="onboarding-goal">Mục tiêu buổi học
       <textarea id="onboarding-goal" value={progress.survey.goal} maxLength={500} rows={3} disabled={disabled}
@@ -120,6 +157,7 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
     <p className="study-onboarding__eyebrow">KHỞI ĐỘNG KHÔNG GIAN HỌC</p>
     <h1 id="study-onboarding-title">Hướng dẫn đang tạm dừng</h1>
     <p>Câu trả lời và bước hiện tại đã được lưu trên thiết bị này.</p>
+    {feedback && <p className="study-onboarding__feedback" role="status" aria-live="polite">{feedback}</p>}
     <div className="study-onboarding__actions">
       <button className="primary" type="button" onClick={() => dispatch({ type: "onboarding/resume" })}>Tiếp tục hướng dẫn</button>
       <button type="button" className="study-onboarding__quiet-action" onClick={() => dispatch({ type: "onboarding/skip" })}>
@@ -132,7 +170,9 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
 
   if (progress.phase === "survey") return <section className="study-onboarding" aria-labelledby="study-onboarding-title">
     <p className="study-onboarding__eyebrow">KHỞI ĐỘNG KHÔNG GIAN HỌC · CÂU {progress.surveyStep + 1}/2</p>
-    <h1 id="study-onboarding-title">Bắt đầu từ điều bạn muốn đạt được</h1>
+    <h1 id="study-onboarding-title">
+      {progress.surveyStep === 0 ? "Bắt đầu từ điều bạn muốn đạt được" : "Chọn thời lượng cho buổi học"}
+    </h1>
     <p className="study-onboarding__intro">Thông tin này điền vào buổi học của bạn. Bạn có thể sửa lại bất cứ lúc nào.</p>
     <ProgressTrail label="Tiến trình khảo sát" currentStep={progress.surveyStep} steps={["Mục tiêu", "Thời lượng"]} />
     {progress.surveyStep === 0 ? renderGoalAndTopic(false) : <div className="study-onboarding__fields">
@@ -162,6 +202,7 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
         ? "Nhập mục tiêu ít nhất 3 ký tự và chọn môn học để tiếp tục."
         : "Chọn số phút nguyên từ 1 đến 240 để tiếp tục."}
     </p>}
+    {feedback && <p className="study-onboarding__feedback" role="status" aria-live="polite">{feedback}</p>}
     <div className="study-onboarding__actions">
       {progress.surveyStep === 1 && <button type="button" onClick={() => dispatch({ type: "survey/previous" })}>Quay lại</button>}
       <button className="primary" type="button" disabled={!surveyValid(progress.survey, progress.surveyStep)}
@@ -175,54 +216,82 @@ export function StudyOnboarding({ progress, currentDraft, currentDuration, topic
   </section>;
 
   const step = progress.tutorialStep;
-  const action = (control: "goal" | "duration", label: string) => <button className="primary" type="button"
-    disabled={control === "goal" ? tutorialSurvey.goal.trim().length < 3 : control === "duration" &&
+  const hasControl = (control: StudyTutorialControl) => control === "goal"
+    ? goalControl !== null && goalControl !== undefined && goalControl !== false
+    : control === "duration"
+      ? durationControl !== null && durationControl !== undefined && durationControl !== false
+      : control === "retrieval"
+        ? retrievalControl !== null && retrievalControl !== undefined && retrievalControl !== false
+        : true;
+  const controlSpotlight = (control: "goal" | "duration" | "retrieval", label: string, content: ReactNode) =>
+    <div className="study-onboarding__control-spotlight" role="group" aria-label={label}>
+      <span className="study-onboarding__guide-arrow" aria-hidden="true" />
+      <div className="study-onboarding__control-slot">
+        {hasControl(control) ? content : <p role="status">Điều khiển này chưa sẵn sàng. Bạn có thể quay lại hoặc bắt đầu học ngay.</p>}
+      </div>
+    </div>;
+  const action = (control: "goal" | "duration" | "retrieval", label: string) => <button className="primary" type="button"
+    aria-label={`Tiếp tục: ${label}`}
+    disabled={!hasControl(control) || (control === "goal" ? tutorialSurvey.goal.trim().length < 3 : control === "duration" &&
       (currentDuration !== undefined
         ? !Number.isSafeInteger(currentDuration) || currentDuration < 1 || currentDuration > 240
         : progress.survey.preferredMinutes === null || !Number.isSafeInteger(progress.survey.preferredMinutes) ||
-          progress.survey.preferredMinutes < 1 || progress.survey.preferredMinutes > 240)}
+          progress.survey.preferredMinutes < 1 || progress.survey.preferredMinutes > 240))}
     onClick={() => {
-      if (onGuideControl?.(control) === false) return;
-      dispatch({ type: "tutorial/used", control });
+      dispatch({ type: "tutorial/used", control }, {
+        beforeSave: () => onGuideControl?.(control),
+      });
     }}>{label}</button>;
   const sourceChoice = (choice: StudySourceChoice, label: string) => <button type="button"
+    aria-label={`Tiếp tục với lựa chọn: ${label}`}
     aria-pressed={progress.tutorial.sourceChoice === choice}
     className={progress.tutorial.sourceChoice === choice ? "selected" : ""}
-    onClick={() => { onSourceChoice?.(choice); dispatch({ type: "tutorial/used", control: "source", choice }); }}>{label}</button>;
+    onClick={() => dispatch({ type: "tutorial/used", control: "source", choice }, {
+      afterSave: () => onSourceChoice?.(choice),
+    })}>{label}</button>;
+  const continueAction = step === 0
+    ? action("goal", "Đã xem mục tiêu")
+    : step === 2
+      ? action("duration", "Đã chọn thời lượng")
+      : step === 3
+        ? action("retrieval", "Tiếp tục sau khi chọn ôn tập")
+        : null;
 
-  return <section className="study-onboarding" aria-labelledby="study-onboarding-title">
+  return <section className="study-onboarding" aria-labelledby="study-onboarding-step-heading">
     <p className="study-onboarding__eyebrow">HƯỚNG DẪN · BƯỚC {step + 1}/4</p>
-    <h1 id="study-onboarding-title">Thử các thao tác chính</h1>
+    <h1 ref={tutorialStepHeading} id="study-onboarding-step-heading" tabIndex={-1}>
+      {["1. Xem hoặc sửa mục tiêu", "2. Chọn cách bắt đầu với nội dung", "3. Điều chỉnh thời lượng", "4. Tự kiểm tra sau khi tập trung"][step]}
+    </h1>
     <p className="study-onboarding__intro">Hướng dẫn không tự gửi yêu cầu AI. Bạn vẫn có thể chủ động dùng tính năng AI; từng tính năng sẽ nêu rõ nội dung cần gửi và điều kiện sử dụng.</p>
     <ProgressTrail label="Tiến trình hướng dẫn" currentStep={step} steps={["Mục tiêu", "Nội dung", "Thời lượng", "Tự kiểm tra"]} />
-    {step === 0 && <div className="study-onboarding__step">
-      <h2 ref={tutorialStepHeading} id="study-onboarding-step-heading" tabIndex={-1}>1. Xem hoặc sửa mục tiêu trong không gian học bên dưới</h2>
-      <p>Ô mục tiêu nằm ở cột thiết lập. Bạn có thể sửa nội dung hoặc bắt đầu buổi học ngay.</p>
-      <button type="button" onClick={() => onGuideControl?.("goal")}>Đi tới ô mục tiêu</button>
-      {action("goal", "Đã xem mục tiêu")}
-    </div>}
-    {step === 1 && <div className="study-onboarding__step">
-      <h2 ref={tutorialStepHeading} id="study-onboarding-step-heading" tabIndex={-1}>2. Chọn cách bắt đầu với nội dung</h2>
-      <p>Bạn có thể ghi chú, chọn tài liệu từ thiết bị ở không gian học, hoặc học trước rồi bổ sung sau.</p>
-      <div className="study-onboarding__choices" role="group" aria-label="Chọn cách chuẩn bị nội dung">
-        {sourceChoice("notes", "Ghi nội dung")}
-        {sourceChoice("files", "Chọn tệp sau")}
-        {sourceChoice("none", "Hiện chưa có tài liệu")}
+    <div className="study-onboarding__step" key={step}>
+    {step === 0 && <>
+      {controlSpotlight("goal", "Mục tiêu buổi học", goalControl)}
+    </>}
+    {step === 1 && <>
+      <p>Bạn có thể ghi chú, chọn tài liệu từ thiết bị, hoặc chọn chưa có tài liệu.</p>
+      <div className="study-onboarding__control-spotlight">
+        <span className="study-onboarding__guide-arrow" aria-hidden="true" />
+        <div className="study-onboarding__choices" role="group" aria-label="Chọn cách chuẩn bị nội dung">
+          {sourceChoice("notes", "Ghi nội dung")}
+          {sourceChoice("files", "Chọn tệp sau")}
+          {sourceChoice("none", "Hiện chưa có tài liệu")}
+        </div>
       </div>
-    </div>}
-    {step === 2 && <div className="study-onboarding__step">
-      <h2 ref={tutorialStepHeading} id="study-onboarding-step-heading" tabIndex={-1}>3. Điều chỉnh thời lượng</h2>
-      <p>Chọn thanh trượt hoặc ô nhập phút trong cột thiết lập bên dưới; có thể chọn từ 1 đến 240 phút.</p>
-      <button type="button" onClick={() => onGuideControl?.("duration")}>Đi tới thời lượng</button>
-      {action("duration", "Đã chọn thời lượng")}
-    </div>}
-    {step === 3 && <div className="study-onboarding__step">
-      <h2 ref={tutorialStepHeading} id="study-onboarding-step-heading" tabIndex={-1}>4. Tự kiểm tra sau khi tập trung</h2>
-      <p>Chọn số câu hỏi hoặc bật/tắt chuẩn bị Quiz AI trong cột thiết lập. Hướng dẫn không tự gửi yêu cầu; thao tác AI chỉ chạy khi bạn chủ động chọn.</p>
-      <button type="button" onClick={() => onGuideControl?.("retrieval")}>Đi tới lựa chọn ôn tập</button>
-    </div>}
+    </>}
+    {step === 2 && <>
+      <p>Đi tới thời lượng phù hợp bằng bộ điều khiển ngay tại đây, từ 1 đến 240 phút.</p>
+      {controlSpotlight("duration", "Thời lượng buổi học", durationControl)}
+    </>}
+    {step === 3 && <>
+      <p>Chọn số câu hỏi hoặc tùy chọn Quiz AI ngay tại đây. Hướng dẫn không tự gửi yêu cầu; thao tác AI chỉ chạy khi bạn chủ động chọn.</p>
+      {controlSpotlight("retrieval", "Tự kiểm tra sau buổi học", retrievalControl)}
+    </>}
+    </div>
+    {feedback && <p className="study-onboarding__feedback" role="status" aria-live="polite">{feedback}</p>}
     <div className="study-onboarding__actions">
       <button type="button" onClick={() => dispatch({ type: "tutorial/previous" })}>{step === 0 ? "Sửa khảo sát" : "Quay lại"}</button>
+      {continueAction}
       <button type="button" className="study-onboarding__quiet-action" onClick={() => dispatch({ type: "onboarding/skip" })}>
         Bỏ qua hướng dẫn, học ngay
       </button>
