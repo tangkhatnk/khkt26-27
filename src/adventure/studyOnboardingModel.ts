@@ -1,3 +1,5 @@
+import { isQuizCount } from "./quizDrafts.ts";
+
 export const STUDY_ONBOARDING_VERSION = 1 as const;
 
 export type StudySurvey = {
@@ -178,6 +180,14 @@ export function completeStudyOnboardingRetrievalChoice(
 ): StudyOnboardingProgress {
   if (progress.phase !== "tutorial" || progress.tutorialStep !== 3) return progress;
   return reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "retrieval" });
+}
+
+export function completeStudyOnboardingQuizCountChoice(
+  progress: StudyOnboardingProgress,
+  rawCount: string,
+): StudyOnboardingProgress {
+  if (!isQuizCount(Number(rawCount))) return progress;
+  return completeStudyOnboardingRetrievalChoice(progress);
 }
 
 export function canShowStudyOnboarding(

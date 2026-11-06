@@ -449,6 +449,7 @@ test("active focus uses the quiet canvas without moving the session controls or 
   assert.match(focus, /details=\{/u);
   assert.match(focus, /setConfirm\("finish"\)/u);
   assert.match(focus, /studyFullscreen\.toggle/u);
+  assert.match(focus, /active\.state === "away"[\s\S]*?role="status"[\s\S]*?Tạm rời/u);
   assert.doesNotMatch(focus, /<FlipClock/u);
 });
 
@@ -492,4 +493,80 @@ test("legacy group ticket preparation is restricted to exact departed bound-sess
   assert.match(prepare, /recoverBoundTripSessionId\(/u);
   assert.match(prepare, /restoreSynchronizedDraft\(recoveredId, trip, group\.id\)/u);
   assert.doesNotMatch(prepare, /trip\.status === "waiting"|groupDraftSessionId\([^\n]*reservationId|setGoal\(trip\.goal/u);
+});
+
+test("goal-first workspace shares one desktop editing surface and quiet focus centers without navigation chrome", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const adventureCss = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/adventure.css"), "utf8"));
+  const departureCss = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/departure.css"), "utf8"));
+  const fullscreenCss = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/fullscreen.css"), "utf8"));
+  const themeCss = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/theme.css"), "utf8"));
+
+  assert.match(app, /className=\{`adventure\$\{firstUseNeedsWorkspace \? " adventure--onboarding" : ""\}\$\{view === "focus" && active \? " adventure--quiet-focus" : ""\}`\}/u);
+  assert.match(departureCss, /\.boarding-preparation\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.16fr\)\s+minmax\(280px,\s*\.84fr\)/u);
+  assert.match(departureCss, /\.boarding-preparation\s*\{[^}]*border-radius:[^;}]+;[^}]*overflow:\s*hidden/u);
+  assert.match(departureCss, /\.boarding-preparation\s*>\s*\.panel\s*\{[^}]*background:\s*transparent/u);
+  assert.match(departureCss, /@media \(max-width:\s*1100px\)\s*\{\s*\.boarding-preparation\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
+  assert.match(departureCss, /html\[data-theme="dark"\] \.adventure \.boarding-preparation > \.panel:not\(\.departure-settings\)/u);
+  assert.match(departureCss, /html\[data-theme="dark"\] \.adventure \.boarding-preparation > \.departure-settings\s*\{[^}]*background:\s*var\(--surface-raised\)/u);
+  assert.match(adventureCss, /\.adventure--quiet-focus\s+\.sidebar\s*,\s*\.adventure--quiet-focus\s+\.topbar\s*\{\s*display:\s*none/u);
+  assert.match(adventureCss, /\.adventure--quiet-focus\s+\.main-area\s*\{[^}]*margin-left:\s*0/u);
+  assert.match(adventureCss, /\.adventure\.adventure--quiet-focus main\.view-entrance\s*\{[^}]*display:\s*grid;[^}]*align-content:\s*center/u);
+  assert.match(adventureCss, /\.adventure--quiet-focus\s+\.page-footer\s*\{\s*display:\s*none/u);
+  assert.match(adventureCss, /\.adventure--quiet-focus \.quiet-focus-canvas\s*\{[^}]*min-height:\s*calc\(100dvh - 24px\)/u);
+  assert.match(adventureCss, /@media \(max-width:\s*600px\)\s*\{\s*\.adventure\.adventure--quiet-focus main\.view-entrance\s*\{\s*padding:\s*12px 14px/u);
+  const quietFocusCard = adventureCss.match(/\.adventure--quiet-focus\s+\.focus-card\.quiet-focus-shell\s*\{[^}]*\}/u)?.[0] ?? "";
+  assert.match(quietFocusCard, /background:\s*transparent/u);
+  assert.match(quietFocusCard, /border:\s*0/u);
+  assert.match(adventureCss, /html\[data-theme="dark"\]\s+\.adventure\.adventure--quiet-focus,[\s\S]*?background:\s*#0b100d/u);
+  assert.match(fullscreenCss, /\.adventure:fullscreen \.sidebar,[\s\S]*?\.adventure:fullscreen \.topbar\s*\{\s*display:\s*none/u);
+  assert.match(themeCss, /html\[data-theme="dark"\] \.adventure \.main-area[\s\S]*?background:\s*var\(--page-bg\)/u);
+});
+
+test("mandatory onboarding disables navigation that cannot be opened and gives a blocked-state label", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const navStart = app.indexOf("{nav.map((n) => {");
+  const navEnd = app.indexOf("})}", navStart);
+  const nav = app.slice(navStart, navEnd);
+
+  assert.match(nav, /if \(firstUseNeedsWorkspace && n\.id !== "station"\) return null/u);
+  assert.match(nav, /disabled=\{firstUseNeedsWorkspace\}/u);
+  assert.match(app, /disabled=\{firstUseNeedsWorkspace\}[\s\S]*?go\("account"\)/u);
+  assert.match(app, /firstUseNeedsWorkspace\s*\?\s*"Hoàn tất hướng dẫn để bắt đầu"\s*:\s*online/u);
+  assert.match(app, /online && !authOffline && !needsLogin\s*\?\s*"Trực tuyến"/u);
+});
+
+test("source tutorial shows a return route to the next guide step after jumping into notes or files", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const notesPanelStart = app.indexOf("data-revision-note-id=");
+  const notesPanelEnd = app.indexOf("</div>", notesPanelStart);
+  const notesPanel = app.slice(notesPanelStart, notesPanelEnd);
+  const filesPanelStart = app.indexOf("hidden={studyInput !== \"files\"}");
+  const filesPanelEnd = app.indexOf("</div>", filesPanelStart);
+  const filesPanel = app.slice(filesPanelStart, filesPanelEnd);
+
+  assert.match(app, /function focusStudyTutorialHeading\(\)/u);
+  assert.match(notesPanel, /study-tutorial-return-cue/u);
+  assert.match(filesPanel, /study-tutorial-return-cue/u);
+  assert.match(app, /study-tutorial-return-cue">\s*<span role="status">Bước tiếp theo: điều chỉnh thời lượng\.<\/span>\s*<button/u);
+  assert.doesNotMatch(app, /study-tutorial-return-cue" role="status"/u);
+  assert.match(app, /Quay lại hướng dẫn · Bước 3: thời lượng/u);
+  assert.match(app, /getElementById\("study-onboarding-step-heading"\)/u);
+  const onboarding = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/StudyOnboarding.tsx"), "utf8"));
+  assert.match(onboarding, /const jumpedToSource = previous\.phase === "tutorial" && previous\.step === 1[\s\S]*?progress\.tutorial\.sourceChoice !== "none"/u);
+  assert.match(onboarding, /if \(!moved \|\| progress\.phase !== "tutorial" \|\| jumpedToSource\) return/u);
+});
+
+test("retrieval guide count edits require a valid count, while deliberate toggles can finish the guide", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const countStart = app.indexOf("onCountChange={(value) => {");
+  const countEnd = app.indexOf("onToggleSkip=", countStart);
+  const countChange = app.slice(countStart, countEnd);
+  const skipStart = app.indexOf("onToggleSkip=", countEnd);
+  const skipEnd = app.indexOf("onPrefetchChange=", skipStart);
+  const skipChange = app.slice(skipStart, skipEnd);
+
+  assert.match(countChange, /setQuizCount\(value\);[\s\S]*?recordStudyTutorialRetrievalChoice\(value\)/u);
+  assert.doesNotMatch(countChange, /recordStudyTutorialRetrievalChoice\(\)/u);
+  assert.match(skipChange, /recordStudyTutorialRetrievalChoice\(\)/u);
 });

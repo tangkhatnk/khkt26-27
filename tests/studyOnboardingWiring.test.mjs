@@ -114,3 +114,32 @@ test("reopened tutorial uses the live valid draft goal when its legacy survey go
   assert.doesNotMatch(view, /class="primary" type="button" disabled=""[^>]*>Đã xem mục tiêu/u);
   assert.match(view, /Mục tiêu: Ôn cấu trúc tế bào/u);
 });
+
+test("survey and tutorial show a clear progress hierarchy and each guide step has a keyboard return target", () => {
+  assert.match(markup(createStudyOnboardingProgress()), /study-onboarding__validation-hint[^>]*role="status"/u);
+  let progress = createStudyOnboardingProgress({
+    goal: "Ôn phản ứng hóa học",
+    topicId: "chemistry",
+    topicLabel: "Hóa học",
+  });
+  const survey = markup(progress);
+  assert.match(survey, /aria-label="Tiến trình khảo sát"/u);
+  assert.match(survey, /aria-current="step"><span aria-hidden="true">1<\/span><span>Mục tiêu<\/span>/u);
+
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  const duration = markup(progress);
+  assert.match(duration, /aria-label="Tiến trình khảo sát"/u);
+  assert.match(duration, /aria-current="step"><span aria-hidden="true">2<\/span><span>Thời lượng<\/span>/u);
+
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  const goalStep = markup(progress, { currentDraft: progress.survey, currentDuration: 25 });
+  assert.match(goalStep, /aria-label="Tiến trình hướng dẫn"/u);
+  assert.match(goalStep, /id="study-onboarding-step-heading" tabindex="-1">1\. Xem hoặc sửa mục tiêu/u);
+
+  progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "goal" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "source", choice: "notes" });
+  const durationStep = markup(progress, { currentDraft: progress.survey, currentDuration: 25 });
+  assert.match(durationStep, /aria-current="step"><span aria-hidden="true">3<\/span><span>Thời lượng<\/span>/u);
+  assert.match(durationStep, /id="study-onboarding-step-heading" tabindex="-1">3\. Điều chỉnh thời lượng/u);
+  assert.match(durationStep, /Đi tới thời lượng/u);
+});

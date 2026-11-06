@@ -30,6 +30,64 @@
   line-height: 1.6;
 }
 
+.study-onboarding__progress {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+  margin: 22px 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.study-onboarding__progress li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted, #707a72);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.study-onboarding__progress li > span:first-child {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border, #dce3d9);
+  border-radius: 50%;
+  background: var(--surface, #fffefa);
+  color: var(--muted, #707a72);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.study-onboarding__progress li[aria-current="step"] {
+  color: var(--ink, #263d34);
+}
+
+.study-onboarding__progress li[aria-current="step"] > span:first-child {
+  border-color: #47735a;
+  background: #47735a;
+  color: #fff;
+}
+
+.study-onboarding__progress li[data-complete="true"] > span:first-child {
+  border-color: #a9c4aa;
+  background: #e9f2e6;
+  color: #315a3d;
+}
+
+.study-onboarding__validation-hint {
+  margin: -6px 0 0;
+  color: #8c5428;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .study-onboarding__fields {
   display: grid;
   gap: 18px;
@@ -70,6 +128,7 @@
 }
 
 .study-onboarding__step h2 { margin: 0 0 10px; font-size: 18px; }
+.study-onboarding__step h2:focus { outline: 2px solid #6a9178; outline-offset: 4px; border-radius: 2px; }
 .study-onboarding__step > .primary { margin-top: 16px; }
 .study-onboarding__choices { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .study-onboarding__choices button[aria-pressed="true"] { border-color: #47735a; background: #e5efe4; color: #234d36; }
@@ -99,7 +158,9 @@
 }
 
 @media (max-width: 600px) {
-  .study-onboarding { margin: 8px 0; border-radius: 14px; }
+  .study-onboarding { margin: 8px 0; border-radius: 14px; padding: 17px; }
+  .study-onboarding__progress { gap: 6px; margin-top: 17px; }
+  .study-onboarding__progress li { flex-direction: column; align-items: flex-start; gap: 4px; font-size: 11px; }
   .study-onboarding__step { padding: 14px; }
   .study-onboarding__quiet-action { margin-left: 0; }
 }

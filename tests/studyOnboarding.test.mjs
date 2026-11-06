@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canShowStudyOnboarding,
+  completeStudyOnboardingQuizCountChoice,
   completeStudyOnboardingRetrievalChoice,
   createStudyOnboardingProgress,
   isValidStudyOnboardingProgress,
@@ -231,6 +232,23 @@ test("a stale tutorial cannot acknowledge a duration after the current input bec
 
   assert.equal(unchanged.tutorialStep, 2);
   assert.equal(unchanged.survey.preferredMinutes, null);
+});
+
+test("retrieval tutorial waits for a valid question count, while explicit toggles still complete it", () => {
+  let progress = createStudyOnboardingProgress({ goal: "Ôn tế bào", preferredMinutes: 25 });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "goal" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "source", choice: "none" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "duration" });
+  assert.equal(progress.tutorialStep, 3);
+
+  for (const invalid of ["", "0", "3.5", "31"]) {
+    const unchanged = completeStudyOnboardingQuizCountChoice(progress, invalid);
+    assert.equal(unchanged, progress, `invalid count ${JSON.stringify(invalid)} must not complete onboarding`);
+  }
+  assert.equal(completeStudyOnboardingQuizCountChoice(progress, "3").phase, "complete");
+  assert.equal(completeStudyOnboardingRetrievalChoice(progress).phase, "complete");
 });
 
 test("an active session has priority over first-use onboarding", () => {

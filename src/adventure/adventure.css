@@ -2036,3 +2036,132 @@ body {
 .form .material-ai-option { flex-direction: row; align-items: flex-start; gap: .6rem; line-height: 1.5; }
 .adventure .material-ai-option input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 1px 0 0; padding: 0; flex: 0 0 18px; accent-color: var(--green); }
 .form #notes-help, .form #material-ai-help { margin-top: -8px; color: #596c60; line-height: 1.65; }
+
+.adventure--onboarding .brand[aria-disabled="true"] {
+  cursor: default;
+  opacity: .82;
+  pointer-events: none;
+}
+
+.adventure--onboarding button.nav:disabled {
+  cursor: default;
+  opacity: .72;
+}
+
+.adventure--onboarding .account:disabled,
+.adventure--onboarding .top-actions .avatar:disabled {
+  cursor: default;
+  opacity: .68;
+}
+
+.adventure--quiet-focus {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #f0f2ec;
+}
+
+.adventure--quiet-focus .sidebar,
+.adventure--quiet-focus .topbar {
+  display: none;
+}
+
+.adventure--quiet-focus .main-area {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin-left: 0;
+}
+
+.adventure.adventure--quiet-focus main.view-entrance {
+  display: grid;
+  align-content: center;
+  justify-items: stretch;
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  padding: clamp(16px, 4vh, 44px) clamp(16px, 5vw, 72px);
+  animation: none;
+}
+
+.adventure--quiet-focus .focus-card.quiet-focus-shell {
+  width: min(100%, 1200px);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas {
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-height: calc(100dvh - clamp(32px, 8vh, 88px));
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: clamp(16px, 3vh, 30px);
+  text-align: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__intro {
+  justify-items: center;
+  text-align: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__status {
+  max-width: 48rem;
+  text-align: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__clock,
+.adventure--quiet-focus .quiet-focus-canvas__essentials {
+  width: 100%;
+  justify-items: center;
+  justify-content: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__warnings,
+.adventure--quiet-focus .quiet-focus-canvas__optional {
+  width: min(100%, 54rem);
+  text-align: left;
+}
+
+.adventure--quiet-focus .page-footer {
+  display: none;
+}
+
+.focus-away-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+html[data-theme="dark"] .adventure.adventure--quiet-focus,
+html[data-theme="dark"] .adventure.adventure--quiet-focus .main-area,
+html[data-theme="dark"] .adventure.adventure--quiet-focus main.view-entrance {
+  background: #0b100d;
+  color: #e7eee5;
+}
+
+html[data-theme="dark"] .adventure.adventure--quiet-focus .focus-card.quiet-focus-shell {
+  background: transparent;
+  border-color: transparent;
+}
+
+@media (max-width: 600px) {
+  .adventure.adventure--quiet-focus main.view-entrance {
+    padding: 12px 14px;
+  }
+
+  .adventure--quiet-focus .quiet-focus-canvas {
+    min-height: calc(100dvh - 24px);
+    padding: 12px 4px;
+  }
+}

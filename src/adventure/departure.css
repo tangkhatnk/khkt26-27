@@ -1,9 +1,13 @@
 .boarding-preparation {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, .85fr);
-  gap: 24px;
-  margin: 28px 0;
+  grid-template-columns: minmax(0, 1.16fr) minmax(280px, .84fr);
+  gap: 0;
+  margin: 22px 0;
   align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface, #fffefa);
+  overflow: hidden;
 }
 .study-companion.study-preparation-summary {
   max-width: 1000px;
@@ -43,8 +47,21 @@
 .study-preparation-summary__journey > summary:hover { color: var(--ink); }
 .study-preparation-summary__journey > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .study-preparation-summary__journey[open] > .boarding-ticket { margin-top: 10px; }
-.boarding-preparation > .panel { min-width: 0; margin-bottom: 0; }
-.departure-settings { position: sticky; top: 24px; }
+.boarding-preparation > .panel {
+  min-width: 0;
+  margin-bottom: 0;
+  padding: clamp(18px, 2vw, 28px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.boarding-preparation > .departure-settings {
+  position: static;
+  min-height: 100%;
+  border-left: 1px solid var(--border);
+  background: var(--surface-raised, #f7f8f2);
+}
 .departure-intro { color: #66756b; line-height: 1.65; }
 .departure-source-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 5px; border-radius: 12px; background: #f0f1e9; }
 .departure-source-options button { padding: 11px 7px; font-size: 12px; border: 1px solid transparent; background: transparent; border-radius: 9px; }
@@ -60,6 +77,21 @@
 .departure-settings .ticket-editor-fields { gap: 14px; }
 .departure-settings .duration-presets { flex-wrap: wrap; }
 .departure-settings .departure-quiz-hint { display: block; margin: -4px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.study-tutorial-return-cue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-left: 3px solid #6a9178;
+  border-radius: 8px;
+  background: var(--surface-raised, #f0f3e9);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.study-tutorial-return-cue button { min-height: 44px; }
 .material-formats summary { color: #52695a; cursor: pointer; font-size: 12px; }
 .material-formats p { margin: 10px 0 0; }
 .quick-topic-field { display: grid; gap: 8px; }
@@ -92,14 +124,35 @@
 .adventure .ticket-editor-fields { padding: 18px; }
 @media (max-width: 1100px) {
   .boarding-preparation { grid-template-columns: minmax(0, 1fr); }
-  .departure-settings { position: static; }
+  .boarding-preparation > .departure-settings { border-left: 0; border-top: 1px solid var(--border); }
 }
 @media (max-width: 520px) {
   .study-companion.study-preparation-summary { margin: 0 0 10px; padding: 12px; gap: 10px; }
   .study-preparation-summary__buddy .learning-buddy { width: 56px; height: 56px; }
   .study-preparation-summary__details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
   .study-preparation-summary__title { font-size: 16px; }
-  .boarding-preparation { gap: 18px; margin-top: 20px; }
+  .boarding-preparation { margin-top: 18px; }
   .boarding-preparation > .panel { padding: 20px; }
   .departure-source-options button { font-size: 11px; padding: 10px 4px; }
+}
+
+html[data-theme="dark"] .adventure .boarding-preparation,
+html[data-theme="dark"] .adventure .study-tutorial-return-cue {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .adventure .boarding-preparation > .departure-settings {
+  border-left-color: var(--line);
+  border-top-color: var(--line);
+  background: var(--surface-raised);
+}
+
+html[data-theme="dark"] .adventure .boarding-preparation > .panel:not(.departure-settings) {
+  background: transparent;
+}
+
+html[data-theme="dark"] .adventure .study-tutorial-return-cue {
+  border-left-color: #91bc99;
 }

@@ -46,7 +46,7 @@ import {
 import { StudyOnboarding } from "./StudyOnboarding";
 import { StudyJournal } from "./StudyJournal.tsx";
 import { buildStudyJournalEntries, buildStudyJournalSources } from "./studyJournal.ts";
-import { canShowStudyOnboarding, completeStudyOnboardingRetrievalChoice, reopenStudyOnboardingFromDraft, syncStudySurveyWithCurrentDraft, type StudyOnboardingProgress } from "./studyOnboardingModel.ts";
+import { canShowStudyOnboarding, completeStudyOnboardingQuizCountChoice, completeStudyOnboardingRetrievalChoice, reopenStudyOnboardingFromDraft, syncStudySurveyWithCurrentDraft, type StudyOnboardingProgress } from "./studyOnboardingModel.ts";
 import {
   advanceStudyPlanCandidateAfterStart,
   applyStudyPlanStepPatch,
@@ -3421,10 +3421,12 @@ function AdventureWorkspace() {
       studyPlanStorage: { ...storage, draft: { ...storage.draft, quizPrefetch } },
     });
   }
-  function recordStudyTutorialRetrievalChoice() {
+  function recordStudyTutorialRetrievalChoice(rawQuizCount?: string) {
     const progress = current.current.studyPlanStorage?.onboarding;
     if (!progress) return;
-    const nextProgress = completeStudyOnboardingRetrievalChoice(progress);
+    const nextProgress = rawQuizCount === undefined
+      ? completeStudyOnboardingRetrievalChoice(progress)
+      : completeStudyOnboardingQuizCountChoice(progress, rawQuizCount);
     if (nextProgress !== progress) saveStudyOnboardingProgress(nextProgress);
   }
   function focusStudyTutorialControl(control: "goal" | "source" | "duration" | "retrieval"): boolean {
@@ -3439,6 +3441,14 @@ function AdventureWorkspace() {
     target?.focus({ preventScroll: true });
     return true;
   }
+  function focusStudyTutorialHeading() {
+    const target = document.getElementById("study-onboarding-step-heading");
+    if (!target) return;
+    target.scrollIntoView({ behavior: "auto", block: "center" });
+    target.focus({ preventScroll: true });
+  }
+  const showStudyTutorialReturnCue = tutorialActive &&
+    studyPlanStorage.onboarding.phase === "tutorial" && studyPlanStorage.onboarding.tutorialStep === 2;
   function chooseStudyTutorialSource(choice: "notes" | "files" | "none") {
     const mode = choice === "files" ? "files" : "notes";
     setStudyInput(mode);
@@ -3453,13 +3463,19 @@ function AdventureWorkspace() {
     });
   }
   return (
-    <div className="adventure" ref={studyFullscreen.ref}>
+    <div
+      className={`adventure${firstUseNeedsWorkspace ? " adventure--onboarding" : ""}${view === "focus" && active ? " adventure--quiet-focus" : ""}`}
+      ref={studyFullscreen.ref}
+    >
       <aside className="sidebar">
         <a
           className="brand"
           href="/"
+          aria-disabled={firstUseNeedsWorkspace}
+          tabIndex={firstUseNeedsWorkspace ? -1 : undefined}
           onClick={(e) => {
             e.preventDefault();
+            if (firstUseNeedsWorkspace) return;
             go("station");
           }}
         >
@@ -3471,6 +3487,7 @@ function AdventureWorkspace() {
           <div className="nav-heading">KHÔNG GIAN CỦA BẠN</div>
         <nav aria-label="Điều hướng chính">
           {nav.map((n) => {
+            if (firstUseNeedsWorkspace && n.id !== "station") return null;
             return (
               <button
                 key={n.id}
@@ -3478,6 +3495,7 @@ function AdventureWorkspace() {
                 data-mobile-label={n.mobileLabel}
                 aria-current={view === n.id ? "page" : undefined}
                 aria-label={n.label}
+                disabled={firstUseNeedsWorkspace}
                 onClick={() => go(n.id)}
               >
                 <span aria-hidden="true">{n.icon}</span>
@@ -3496,7 +3514,7 @@ function AdventureWorkspace() {
               Chỉ cần tiếp tục hành trình.
             </p>
           </div>
-          <button className="account" onClick={() => go("account")}>
+          <button className="account" disabled={firstUseNeedsWorkspace} onClick={() => go("account")}>
             <span className="avatar">{(user?.name ?? "B")[0]}</span>
             <span>
               {user?.name ?? "Bạn lữ hành"}
@@ -3531,14 +3549,19 @@ function AdventureWorkspace() {
           </span>
           <div className="top-actions">
             <ThemeToggle />
-            <span className={`connection ${online ? "" : "offline"}`}>
-              {online && !authOffline && !needsLogin
-                ? "● Sẵn sàng lên đường"
-                : "○ Đang offline"}
+            <span className={`connection ${online && !authOffline && !needsLogin ? "" : "offline"}`}>
+              {firstUseNeedsWorkspace
+                ? "Hoàn tất hướng dẫn để bắt đầu"
+                : online && !authOffline && !needsLogin
+                ? "Trực tuyến"
+                : needsLogin
+                  ? "Đăng nhập lại"
+                  : "Đang offline"}
             </span>
             <button
               aria-label="Mở tài khoản"
               className="avatar"
+              disabled={firstUseNeedsWorkspace}
               onClick={() => go("account")}
             >
               {(user?.name ?? "B")[0]}
@@ -3700,12 +3723,20 @@ function AdventureWorkspace() {
                         />
                       </div>
                       <div className="departure-source-panel" data-revision-note-id={JSON.stringify([draftTripId, "notes"])} hidden={studyInput !== "notes"}>
+                        {showStudyTutorialReturnCue && <div className="study-tutorial-return-cue">
+                          <span role="status">Bước tiếp theo: điều chỉnh thời lượng.</span>
+                          <button type="button" onClick={focusStudyTutorialHeading}>Quay lại hướng dẫn · Bước 3: thời lượng</button>
+                        </div>}
                         <StudyNotesInput value={documentText} onChange={(text) => {
                           if (!persistStudyWorkspaceDraft({ notes: text })) return;
                           setDocumentText(text);
                         }} disabled={busy || !!active || studyGuideNeedsConfirmation || privateTripDraftLocked} hasDocuments={Boolean(materials.length || sources.length)} />
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "files"}>
+                      {showStudyTutorialReturnCue && <div className="study-tutorial-return-cue">
+                        <span role="status">Bước tiếp theo: điều chỉnh thời lượng.</span>
+                        <button type="button" onClick={focusStudyTutorialHeading}>Quay lại hướng dẫn · Bước 3: thời lượng</button>
+                      </div>}
                       <h3 className="material-title">Tài liệu học tập</h3>
                       <label className="material-ai-option">
                           <input type="checkbox" checked={preferAiReading} disabled={busy || !!active || tutorialActive || studyGuideNeedsConfirmation || privateTripDraftLocked} onChange={(e) => setPreferAiReading(e.target.checked)} aria-describedby="material-ai-help" />
@@ -3850,7 +3881,10 @@ function AdventureWorkspace() {
                         count={quizCount}
                         skipped={skipQuizReview}
                         disabled={busy || privateTripDraftLocked}
-                        onCountChange={(value) => { setQuizCount(value); recordStudyTutorialRetrievalChoice(); }}
+                        onCountChange={(value) => {
+                          setQuizCount(value);
+                          recordStudyTutorialRetrievalChoice(value);
+                        }}
                         onToggleSkip={() => { setSkipQuizReview((value) => !value); recordStudyTutorialRetrievalChoice(); }}
                         prefetchEnabled={quizPrefetchSettings.enabled}
                         sourcePresent={hasStudyPlanSource}
@@ -3937,6 +3971,9 @@ function AdventureWorkspace() {
                         motionAllowed={active.state === "focus" || active.state === "reconnecting"}
                         status={
                           <>
+                            {active.state === "away" && <p className="focus-away-status" role="status">
+                              Tạm rời · đồng hồ vẫn chạy và khoảng này được ghi là xao nhãng.
+                            </p>}
                             <p className="focus-phase-label">
                               {rest ? `Nghỉ giải lao ${rest.index}/${rest.count}` : `Lượt học ${(studyStage?.index ?? 0) + 1}/${studyStage?.count ?? 1}`}
                             </p>
