@@ -483,7 +483,7 @@ test("the station goal and duration controls stay visible and match tutorial tar
   assert.match(settings, /<QuizReviewPreference[\s\S]*?disabled=\{busy \|\| privateTripDraftLocked\}/u);
   assert.match(app, /function focusStudyTutorialControl[\s\S]*?target\.getClientRects\(\)\.length === 0\) return false/u);
   assert.match(app, /function recordStudyTutorialRetrievalChoice[\s\S]*?completeStudyOnboardingRetrievalChoice/u);
-  assert.match(app, /onCountChange=\{\(value\) => \{ setQuizCount\(value\); recordStudyTutorialRetrievalChoice\(\); \}\}/u);
+  assert.match(app, /onCountChange=\{\(value\) => \{\s*setQuizCount\(value\);\s*recordStudyTutorialRetrievalChoice\(value\);\s*\}\}/u);
   assert.match(app, /quiz-review-preference input:not\(:disabled\), \.quiz-review-preference button:not\(:disabled\)/u);
 });
 
