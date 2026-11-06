@@ -7,7 +7,7 @@ export type RevisionMaterialSourceRecord = {
   stepId?: string | null;
   kind?: "note" | "source";
   source: MaterialSource;
-  material?: { name: string; type: string; status: string; size?: number; message?: string };
+  material?: { sourceId?: string; name: string; type: string; status: string; size?: number; message?: string };
 };
 
 export type RevisionMaterialWorkspaceRecord = {
@@ -52,6 +52,38 @@ function sourceLabel(record: RevisionMaterialSourceRecord): string {
   return "Tài liệu ôn tập";
 }
 
+function sameOptionalArray<T>(
+  left: readonly T[] | undefined,
+  right: readonly T[] | undefined,
+  sameItem: (leftItem: T, rightItem: T) => boolean = (leftItem, rightItem) => leftItem === rightItem,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.length === right.length && left.every((item, index) => sameItem(item, right[index]));
+}
+
+function sameSourceMaterial(
+  left: RevisionMaterialSourceRecord["material"],
+  right: RevisionMaterialSourceRecord["material"],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.sourceId === right.sourceId && left.name === right.name && left.type === right.type &&
+    left.status === right.status && left.size === right.size && left.message === right.message;
+}
+
+function sameExactSourceVersion(
+  left: MaterialSource,
+  right: MaterialSource,
+  leftMaterial: RevisionMaterialSourceRecord["material"],
+  rightMaterial: RevisionMaterialSourceRecord["material"],
+): boolean {
+  return left.id === right.id && left.name === right.name && left.text === right.text &&
+    left.source === right.source && left.requiresReview === right.requiresReview && left.reviewed === right.reviewed &&
+    sameOptionalArray(left.covers, right.covers) &&
+    sameOptionalArray(left.illustrations, right.illustrations,
+      (leftIllustration, rightIllustration) => JSON.stringify(leftIllustration) === JSON.stringify(rightIllustration)) &&
+    sameSourceMaterial(leftMaterial, rightMaterial);
+}
+
 /** Collects private library rows in precedence order: current draft, saved drafts, then history. */
 export function collectRevisionMaterialRecords(
   collection: RevisionMaterialCollection,
@@ -59,13 +91,23 @@ export function collectRevisionMaterialRecords(
 ): RevisionMaterialSourceRecord[] {
   const removed = new Set(removedSessionIds);
   const seen = new Set<string>();
+  const seenSourceVersions = new Map<string, Array<{
+    source: MaterialSource;
+    material: RevisionMaterialSourceRecord["material"];
+  }>>();
   const records: RevisionMaterialSourceRecord[] = [];
   const addWorkspace = (workspace: RevisionMaterialWorkspaceRecord) => {
     if (!workspace.sessionId || removed.has(workspace.sessionId)) return;
     for (const source of workspace.sources ?? []) {
       const id = JSON.stringify([workspace.sessionId, source.id]);
       if (seen.has(id)) continue;
+      const material = workspace.materials?.find((item) => item.sourceId === source.id ||
+        (!item.sourceId && item.name === source.name));
+      const versions = seenSourceVersions.get(source.id);
+      if (versions?.some((version) => sameExactSourceVersion(source, version.source, material, version.material))) continue;
       seen.add(id);
+      if (versions) versions.push({ source, material });
+      else seenSourceVersions.set(source.id, [{ source, material }]);
       records.push({
         id,
         sessionId: workspace.sessionId,
@@ -73,8 +115,7 @@ export function collectRevisionMaterialRecords(
         stepId: workspace.stepId,
         kind: "source",
         source,
-        material: workspace.materials?.find((item) => item.sourceId === source.id ||
-          (!item.sourceId && item.name === source.name)),
+        material,
       });
     }
     const notes = workspace.notes?.trim();

@@ -570,3 +570,17 @@ test("retrieval guide count edits require a valid count, while deliberate toggle
   assert.doesNotMatch(countChange, /recordStudyTutorialRetrievalChoice\(\)/u);
   assert.match(skipChange, /recordStudyTutorialRetrievalChoice\(\)/u);
 });
+
+test("mobile workspace header keeps the full connection label and separates the breadcrumb from controls", async () => {
+  const css = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/adventure.css"), "utf8"));
+  const phone = css.slice(css.lastIndexOf("@media (max-width: 600px)"));
+
+  assert.notEqual(phone, css);
+  assert.doesNotMatch(css, /\.connection\s*\{\s*font-size:\s*0/u);
+  assert.match(phone, /\.topbar\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*59px;[^}]*padding:\s*8px 12px;[^}]*gap:\s*10px/u);
+  assert.match(css, /\.topbar > span\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*0/u);
+  assert.match(phone, /\.topbar > span\s*\{[^}]*line-height:\s*1\.3/u);
+  assert.match(css, /\.top-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*gap:\s*12px/u);
+  assert.match(phone, /\.top-actions\s*\{[^}]*gap:\s*8px/u);
+  assert.match(phone, /\.top-actions \.connection\s*\{[^}]*font-size:\s*10px;[^}]*white-space:\s*nowrap/u);
+});

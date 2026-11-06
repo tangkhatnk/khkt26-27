@@ -70,3 +70,41 @@ test("library collection includes current, saved, and historical notes while exc
     "Ghi chú hiện tại đủ dài để xem trước và dùng lại.");
   assert.equal(entries.some((entry) => "text" in entry || "source" in entry), false);
 });
+
+test("library collapses exact source clones but preserves distinct saved versions", () => {
+  const pdf = source({ id: "pdf-source", reviewed: true, requiresReview: false });
+  const ai = source({
+    id: "ai-source",
+    name: "Bản ôn tập AI",
+    source: "ai-generated",
+    reviewed: true,
+    requiresReview: false,
+  });
+  const editedPdf = { ...pdf, text: "Bản nội dung PDF đã sửa và cần xem lại.", reviewed: false, requiresReview: true };
+  const pdfMaterial = { sourceId: pdf.id, name: pdf.name, type: "application/pdf", size: 81, status: "extracted", message: "Đã đọc" };
+  const aiMaterial = { sourceId: ai.id, name: ai.name, type: "text/plain", size: 64, status: "extracted", message: "Đã lưu" };
+
+  const records = collectRevisionMaterialRecords({
+    current: {
+      sessionId: "candidate-next", planId: "plan-a", stepId: "step-a", notes: "",
+      sources: [pdf, ai], materials: [pdfMaterial, aiMaterial],
+    },
+    drafts: [],
+    history: [
+      {
+        sessionId: "completed-session", planId: null, stepId: null, notes: "",
+        sources: [structuredClone(pdf), structuredClone(ai)], materials: [pdfMaterial, aiMaterial],
+      },
+      {
+        sessionId: "older-session", planId: null, stepId: null, notes: "",
+        sources: [editedPdf], materials: [{ ...pdfMaterial, size: 94 }],
+      },
+    ],
+  });
+
+  assert.deepEqual(records.map((record) => [record.sessionId, record.source.id, record.source.text]), [
+    ["candidate-next", "pdf-source", pdf.text],
+    ["candidate-next", "ai-source", ai.text],
+    ["older-session", "pdf-source", editedPdf.text],
+  ]);
+});
