@@ -80,7 +80,7 @@ test("unstarted notes and extracted sources are saved and restored for the exact
   const acceptStart = app.indexOf("function acceptStudyGuide(");
   const acceptEnd = app.indexOf("function discardStudyGuideDraft", acceptStart);
   const accept = app.slice(acceptStart, acceptEnd);
-  assert.match(accept, /if \(!persistStudyWorkspaceDraft\(\{ notes: nextNotes, sources: nextSources, materials: nextMaterials \}\)\) return;/u);
+  assert.match(accept, /if \(!persistStudyWorkspaceDraft\(\{ notes: nextNotes, sources: nextSources, materials: nextMaterials \}, \{ revokeSourceConsent: true \}\)\) return;/u);
   assert.ok(accept.indexOf("persistStudyWorkspaceDraft") < accept.indexOf("setSources(nextSources)"));
   assert.match(accept, /if \(mode === "replace"\)[\s\S]*?setDocumentText\(nextNotes\)/u);
 });
@@ -270,6 +270,52 @@ test("reusing a library source persists consent revocation in the same owner-loc
   assert.match(use, /record\.kind === "note" && draftTripId === record\.sessionId/u);
 });
 
+test("workspace source consent revokes atomically with saved content before publishing edits", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const persistStart = app.indexOf("function persistStudyWorkspaceDraft(");
+  const persistEnd = app.indexOf("function selectStudyPlanStep(", persistStart);
+  const persist = app.slice(persistStart, persistEnd);
+  const importStart = app.indexOf("async function importMaterials(");
+  const importEnd = app.indexOf("async function readHandwriting(", importStart);
+  const importMaterials = app.slice(importStart, importEnd);
+  const handwritingStart = importEnd;
+  const handwritingEnd = app.indexOf("async function generateStudyGuide(", handwritingStart);
+  const handwriting = app.slice(handwritingStart, handwritingEnd);
+  const acceptStart = app.indexOf("function acceptStudyGuide(");
+  const acceptEnd = app.indexOf("function discardStudyGuideDraft(", acceptStart);
+  const accept = app.slice(acceptStart, acceptEnd);
+  const notesStart = app.indexOf("<StudyNotesInput value={documentText}");
+  const notesEnd = app.indexOf("disabled={busy || studyGuideNeedsConfirmation", notesStart);
+  const notesChange = app.slice(notesStart, notesEnd);
+  const sourceStart = app.indexOf("textareaLabel={`Nội dung nguồn");
+  const sourceEnd = app.indexOf("}} />", sourceStart);
+  const sourceEdit = app.slice(sourceStart, sourceEnd);
+
+  assert.match(persist, /findStudyWorkspaceDraft\(storage, identity\)/u);
+  assert.match(persist, /studyWorkspaceSourceContentChanged\(previousWorkspaceDraft, nextWorkspaceDraft\)/u);
+  assert.match(persist, /sourceConsent: false/u);
+  assert.match(persist, /commit\(\{ \.\.\.value, studyPlanStorage: nextStorage \}\)/u);
+  assert.ok(importMaterials.indexOf("persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })") < importMaterials.indexOf("originalFiles.current.set"));
+  assert.ok(importMaterials.indexOf("persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })") < importMaterials.indexOf("setSources(nextSources)"));
+  assert.ok(handwriting.indexOf("persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })") < handwriting.indexOf("noteStudyExerciseSourceChange"));
+  assert.ok(handwriting.indexOf("noteStudyExerciseSourceChange") < handwriting.indexOf("setSources(nextSources)"));
+  assert.ok(accept.indexOf("persistStudyWorkspaceDraft({ notes: nextNotes, sources: nextSources, materials: nextMaterials }") < accept.indexOf("for (const existing of sources) noteStudyExerciseSourceChange"));
+  assert.ok(notesChange.indexOf("persistStudyWorkspaceDraft({ notes: text })") < notesChange.indexOf("setDocumentText(text)"));
+  assert.ok(sourceEdit.indexOf("persistStudyWorkspaceDraft({ sources: nextSources })") < sourceEdit.indexOf("noteStudyExerciseSourceChange"));
+  assert.ok(sourceEdit.indexOf("noteStudyExerciseSourceChange") < sourceEdit.indexOf("setSources(nextSources)"));
+  assert.doesNotMatch(app, /revokeQuizPrefetchSourceConsent/u);
+  assert.match(persist, /if \(!loaded \|\| !exclusive \|\| value\.active \|\| mode !== "solo"/u);
+  assert.match(persist, /setError\([\s\S]*?return false;/u);
+  const unavailableGuardEnd = persist.indexOf("let storage =", persist.indexOf("if (!loaded"));
+  assert.doesNotMatch(persist.slice(persist.indexOf("if (!loaded"), unavailableGuardEnd), /return true;/u);
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace");
+  const workspaceEnd = app.indexOf("</StudyPlanWorkspace>", workspaceStart);
+  const workspace = app.slice(workspaceStart, workspaceEnd);
+  assert.match(workspace, /<StudyNotesInput[\s\S]*?disabled=\{busy \|\| !!active/u);
+  assert.match(workspace, /<MaterialSourceReader[\s\S]*?disabled=\{busy \|\| !!active/u);
+  assert.match(workspace, /type="file"[\s\S]*?disabled=\{busy \|\| !!active/u);
+});
+
 test("restarting the selected plan step rotates completed and tombstoned candidates", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const start = app.indexOf("function selectStudyPlanStep(");
@@ -332,6 +378,41 @@ test("starting focus durably advances the selected candidate while the active se
   assert.ok(beginFocus.indexOf("advanceStudyPlanCandidateAfterStart") < beginFocus.indexOf("commit({"));
   assert.ok(beginFocus.indexOf("if (commit({") < beginFocus.indexOf("draftSessionIdsRef.current.solo = nextDraftTripId"));
   assert.ok(beginFocus.indexOf("if (commit({") < beginFocus.indexOf("setDraftTripId(nextDraftTripId)"));
+});
+
+test("legacy group replay suppresses personal automatic quiz prefetch while summary keeps manual retrieval", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const beginStart = app.indexOf("const beginFocus = (input:");
+  const beginEnd = app.indexOf('if (owner === "guest" && withExercises)', beginStart);
+  const beginFocus = app.slice(beginStart, beginEnd);
+  const quizPanelStart = app.indexOf("<QuizPanel");
+  const quizPanelEnd = app.indexOf("/>\n", quizPanelStart);
+  const quizPanel = app.slice(quizPanelStart, quizPanelEnd);
+
+  assert.match(beginFocus, /const useAutomaticQuizPrefetch = input\.groupId === null/u);
+  assert.match(beginFocus, /enabled: useAutomaticQuizPrefetch && quizPrefetchPreference\.enabled/u);
+  assert.match(beginFocus, /sourcePresent: useAutomaticQuizPrefetch && hasQuizSource/u);
+  assert.match(beginFocus, /sourceConsent: useAutomaticQuizPrefetch && quizPrefetchPreference\.sourceConsent/u);
+  assert.match(quizPanel, /onGenerate=\{\(count\) => generateQuiz\(summarySession, count\)\}/u);
+  assert.match(quizPanel, /canUseAI=\{owner === "guest" \? online && !authOffline : !!user && !needsLogin && online && !authOffline\}/u);
+});
+
+test("finishing a recovered group session restores the saved personal workspace and its source", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function finish()");
+  const end = app.indexOf("useEffect(() => {\n    finishRef.current", start);
+  const finish = app.slice(start, end);
+
+  assert.match(finish, /value\.notes\[s\.id\] = next\.document/u);
+  assert.match(finish, /const personalStorage = trip\.groupId\s*\?/u);
+  assert.match(finish, /if \(trip\.groupId && personalStorage\)[\s\S]*?selectedStudyWorkspaceIdentity\(personalStorage\)[\s\S]*?findStudyWorkspaceDraft\(personalStorage, personalIdentity\)/u);
+  assert.match(finish, /setMode\("solo"\)/u);
+  assert.match(finish, /setDraftTripId\(personalIdentity\.sessionId\)/u);
+  assert.match(finish, /const legacySessionId = personalIdentity\.sessionId === s\.id \? null : personalIdentity\.sessionId/u);
+  assert.match(finish, /setDocumentText\(personalWorkspace\?\.notes \?\? \(legacySessionId \? value\.notes\[legacySessionId\] \?\? "" : ""\)\)/u);
+  assert.match(finish, /setSources\(structuredClone\(personalWorkspace\?\.sources \?\? \(legacySessionId \? value\.sources\?\.\[legacySessionId\] \?\? \[\] : \[\]\)\)\)/u);
+  assert.match(finish, /setMaterials\(structuredClone\(personalWorkspace\?\.materials \?\? \(legacySessionId \? value\.materials\?\.\[legacySessionId\] \?\? \[\] : \[\]\)\)\)/u);
+  assert.ok(finish.indexOf("if (commit(value))") < finish.indexOf("setMode(\"solo\")"));
 });
 
 test("reloading an active personal session hydrates its next workspace without replacing the active focus goal", async () => {
@@ -398,4 +479,17 @@ test("retired group setup is not rendered while active group sessions retain the
   assert.match(legacyCleanup, /ownsWaitingLegacyTrip \? "Hủy chuyến chờ cũ" : "Rời đoàn cũ"/u);
   assert.match(app, /ownsWaitingLegacyTrip\s*\?\s*"Chuyến đang chờ sẽ bị hủy cho tất cả thành viên\.[\s\S]*?"/u);
   assert.match(app, /if \(!legacyGroupCleanupAvailable\) throw new Error\([\s\S]*?mutation\("leave", \{\}\)/u);
+});
+
+test("legacy group ticket preparation is restricted to exact departed bound-session recovery", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function prepareGroupTripTicket()");
+  const end = app.indexOf("function start(", start);
+  const prepare = app.slice(start, end);
+
+  assert.match(prepare, /!group \|\| !isSynchronizedTrip\(trip\) \|\| trip\.status !== "departed"/u);
+  assert.match(prepare, /memberStatus !== "bound"/u);
+  assert.match(prepare, /recoverBoundTripSessionId\(/u);
+  assert.match(prepare, /restoreSynchronizedDraft\(recoveredId, trip, group\.id\)/u);
+  assert.doesNotMatch(prepare, /trip\.status === "waiting"|groupDraftSessionId\([^\n]*reservationId|setGoal\(trip\.goal/u);
 });

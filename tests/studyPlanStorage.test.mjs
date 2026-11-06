@@ -10,6 +10,7 @@ import {
   normalizeStudyPlanStorage,
   saveStudyWorkspaceDraft,
   selectedStudyWorkspaceIdentity,
+  studyWorkspaceSourceContentChanged,
   updateStudyPlanDraftFromQuickTrip,
 } from "../src/adventure/studyPlanStorage.ts";
 import { reopenStudyOnboardingFromDraft } from "../src/adventure/studyOnboardingModel.ts";
@@ -489,4 +490,23 @@ test("explicit null clears optional level, confidence, and selected plan fields"
   assert.equal(updated.confidence, null);
   assert.equal(updated.selectedPlanId, null);
   assert.equal(updated.selectedStepId, null);
+});
+
+test("workspace source comparison detects notes, review, source, and material changes without treating clones as edits", () => {
+  const previous = {
+    sessionId: "candidate-1",
+    planId: null,
+    stepId: null,
+    notes: "Ghi chú đã lưu.",
+    sources: [{ id: "source-1", name: "Ghi chú.txt", text: "Nội dung đủ dài đã duyệt.", source: "notes", reviewed: true, requiresReview: false }],
+    materials: [{ sourceId: "source-1", name: "Ghi chú.txt", size: 27, type: "text/plain", status: "extracted", message: "Đã đọc." }],
+    updatedAt: 1_000,
+  };
+  const clone = structuredClone(previous);
+  assert.equal(studyWorkspaceSourceContentChanged(previous, clone), false);
+  assert.equal(studyWorkspaceSourceContentChanged(previous, { ...clone, notes: "Ghi chú mới." }), true);
+  assert.equal(studyWorkspaceSourceContentChanged(previous, { ...clone, sources: [{ ...clone.sources[0], text: "Nội dung thay đổi đủ dài." }] }), true);
+  assert.equal(studyWorkspaceSourceContentChanged(previous, { ...clone, sources: [{ ...clone.sources[0], reviewed: false }] }), true);
+  assert.equal(studyWorkspaceSourceContentChanged(previous, { ...clone, materials: [{ ...clone.materials[0], status: "empty" }] }), true);
+  assert.equal(studyWorkspaceSourceContentChanged(undefined, clone), true);
 });

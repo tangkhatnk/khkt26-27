@@ -54,6 +54,7 @@ import {
   findStudyWorkspaceDraft,
   saveStudyWorkspaceDraft,
   selectedStudyWorkspaceIdentity,
+  studyWorkspaceSourceContentChanged,
   updateStudyPlanDraftFromQuickTrip,
   type StudyPlanStorage,
 } from "./studyPlanStorage.ts";
@@ -1911,61 +1912,25 @@ function AdventureWorkspace() {
   }
   function prepareGroupTripTicket() {
     const trip = group?.trip;
-    if (!trip || !group) return;
-    if (trip.status === "closed") {
-      setError("Chuyến này đã đóng. Hãy lập một chuyến mới để bắt đầu phiên khác.");
+    if (!trip || !group || !isSynchronizedTrip(trip) || trip.status !== "departed") return;
+    const memberStatus = group.members.find((member) => member.id === user?.id)?.tripStatus;
+    if (memberStatus !== "bound") return;
+    const recoveredId = recoverBoundTripSessionId({
+      ownSessionId: trip.ownSessionId,
+      activeSessionId: saved.active?.id ?? null,
+      pendingSessionIds: saved.pending.map((session) => session.id),
+      savedSessionIds: saved.snapshot?.sessions.map((session) => session.id) ?? [],
+    });
+    if (!recoveredId) {
+      setError("Phiên đã liên kết nhưng chưa có bản cục bộ để tiếp tục. Hãy kết thúc và đồng bộ phiên đang chạy trước.");
       return;
     }
-    const memberStatus = group.members.find((member) => member.id === user?.id)?.tripStatus;
-    if (trip.status === "waiting" && group.owner !== user?.id && !isSynchronizedTrip(trip)) return;
-    let reservationId: string | undefined;
-    if (trip.status === "departed" && memberStatus === "bound") {
-      const recoveredId = recoverBoundTripSessionId({
-        ownSessionId: trip.ownSessionId,
-        activeSessionId: saved.active?.id ?? null,
-        pendingSessionIds: saved.pending.map((session) => session.id),
-        savedSessionIds: saved.snapshot?.sessions.map((session) => session.id) ?? [],
-      });
-      if (!recoveredId) {
-        setError("Phiên đã liên kết nhưng chưa có bản cục bộ để tiếp tục. Hãy kết thúc và đồng bộ phiên đang chạy trước.");
-        return;
-      }
-      reservationId = recoveredId;
-      if (isSynchronizedTrip(trip) && !restoreSynchronizedDraft(recoveredId, trip, group.id)) {
-        setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
-        return;
-      }
-    } else {
-      if (isSynchronizedTrip(trip)) {
-        if (trip.status !== "waiting" || (memberStatus !== "not-ready" && memberStatus !== "ready")) return;
-        if (memberStatus === "ready") {
-          reservationId = trip.ownSessionId;
-          if (!reservationId) {
-            setError("Không tìm thấy bản mục tiêu riêng trên thiết bị. Bỏ sẵn sàng rồi chuẩn bị lại.");
-            return;
-          }
-          if (!restoreSynchronizedDraft(reservationId, trip, group.id)) {
-            setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
-            return;
-          }
-        } else {
-          setMinutes(trip.target / 60);
-          setBreakCount(trip.breakPlan?.count ?? 0);
-          setBreakMinutes(trip.breakPlan ? trip.breakPlan.seconds / 60 : 5);
-        }
-      } else if (memberStatus !== "ready") return;
+    if (!restoreSynchronizedDraft(recoveredId, trip, group.id)) {
+      setError("Không tìm thấy kế hoạch riêng đã sẵn sàng trên thiết bị này. Hãy mở chuyến trên thiết bị đã chuẩn bị trước đó để khôi phục.");
+      return;
     }
-    const sessionId = groupDraftSessionId(draftSessionIdsRef.current, group.id, reservationId);
+    const sessionId = groupDraftSessionId(draftSessionIdsRef.current, group.id, recoveredId);
     setDraftTripId(sessionId);
-    if (!isSynchronizedTrip(trip)) {
-      const nextBreakCount = breakCount > 0 && !isValidBreakPlan(plannedBreaks, trip.target)
-        ? 0
-        : breakCount;
-      setGoal(trip.goal ?? "");
-      setTopic(trip.topic ?? "biology");
-      setMinutes(trip.target / 60);
-      if (nextBreakCount !== breakCount) setBreakCount(nextBreakCount);
-    }
     setMode("group");
     go("ticket", { preserveTicketPlan: true });
   }
@@ -2112,11 +2077,12 @@ function AdventureWorkspace() {
           enabled: false,
           sourceConsent: false,
         };
+        const useAutomaticQuizPrefetch = input.groupId === null;
         const hasQuizSource = Boolean(documentText.trim() || sources.length || materials.length);
         const initialQuizDraft = createSessionQuizDraft(quizCount, skipQuizReview, 0, {
-          enabled: quizPrefetchPreference.enabled,
-          sourcePresent: hasQuizSource,
-          sourceConsent: quizPrefetchPreference.sourceConsent,
+          enabled: useAutomaticQuizPrefetch && quizPrefetchPreference.enabled,
+          sourcePresent: useAutomaticQuizPrefetch && hasQuizSource,
+          sourceConsent: useAutomaticQuizPrefetch && quizPrefetchPreference.sourceConsent,
         });
         if (input.syncClock)
           trip = startSynchronizedSession(trip, Math.min(input.endsAt ?? Number.POSITIVE_INFINITY, observedAt),
@@ -2407,6 +2373,10 @@ function AdventureWorkspace() {
     (value.materials ??= {})[s.id] = next.materials ?? [];
     (value.sources ??= {})[s.id] = next.sources ?? [];
     value.summarySessionId = s.id;
+    const personalStorage = trip.groupId
+      ? value.studyPlanStorage ?? createStudyPlanStorage({ legacyActivity: true })
+      : undefined;
+    if (personalStorage) value.studyPlanStorage = personalStorage;
     if (owner === "guest") {
       try {
         const result = settle(value.local, s, at);
@@ -2418,6 +2388,35 @@ function AdventureWorkspace() {
       }
     } else value.pending.push(s);
     if (commit(value)) {
+      if (trip.groupId && personalStorage) {
+        const personalDraft = personalStorage.draft;
+        const personalIdentity = selectedStudyWorkspaceIdentity(personalStorage);
+        const personalWorkspace = findStudyWorkspaceDraft(personalStorage, personalIdentity);
+        const legacySessionId = personalIdentity.sessionId === s.id ? null : personalIdentity.sessionId;
+        updateQuickTripDraft(quickTripDraft, {
+          goal: personalDraft.goal,
+          topic: personalDraft.topicId,
+          topicLabel: personalDraft.topicLabel,
+          minutes: personalDraft.preferredMinutes,
+          breakCount: personalDraft.breakCount,
+          breakMinutes: personalDraft.breakMinutes,
+          level: personalDraft.level,
+          confidence: personalDraft.confidence,
+          selectedPlanId: personalDraft.selectedPlanId,
+          selectedStepId: personalDraft.selectedStepId,
+        });
+        draftSessionIdsRef.current.solo = personalIdentity.sessionId;
+        setDraftTripId(personalIdentity.sessionId);
+        setGoal(personalDraft.goal);
+        setTopic(personalDraft.topicId);
+        setMinutes(personalDraft.preferredMinutes);
+        setBreakCount(personalDraft.breakCount);
+        setBreakMinutes(personalDraft.breakMinutes);
+        setDocumentText(personalWorkspace?.notes ?? (legacySessionId ? value.notes[legacySessionId] ?? "" : ""));
+        setSources(structuredClone(personalWorkspace?.sources ?? (legacySessionId ? value.sources?.[legacySessionId] ?? [] : [])));
+        setMaterials(structuredClone(personalWorkspace?.materials ?? (legacySessionId ? value.materials?.[legacySessionId] ?? [] : [])));
+        setMode("solo");
+      }
       setConfirm(null);
       setSummary(s);
       go("summary");
@@ -2492,13 +2491,12 @@ function AdventureWorkspace() {
         originals.set(source.id, file);
         used += result.text.length + file.name.length + 12;
       }
-      for (const [sourceId, file] of originals) originalFiles.current.set(sourceId, file);
-      revokeQuizPrefetchSourceConsent();
       const nextSources = [...sources, ...importedSources];
       const nextMaterials = [...materials, ...imported];
+      if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
+      for (const [sourceId, file] of originals) originalFiles.current.set(sourceId, file);
       setSources(nextSources);
       setMaterials(nextMaterials);
-      if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
       setNotice("Đã giữ nguồn tài liệu riêng với ghi chú. Kiểm tra kết quả đọc trước khi tạo câu hỏi.");
     } catch (e) {
       if (isCurrent()) setError(e instanceof Error ? e.message : "Không đọc được tài liệu.");
@@ -2541,13 +2539,12 @@ function AdventureWorkspace() {
         ? await postGuestAi<{text:string;message?:string}>("/materials/read", requestBody, controller.signal)
         : await request<{text:string;message?:string}>("/materials/read", {method:"POST",body:JSON.stringify(requestBody),signal:controller.signal});
       if (!isCurrent()) return;
-      noteStudyExerciseSourceChange(draftTripId, sourceId);
-      revokeQuizPrefetchSourceConsent();
       const nextSources = sources.map((source) => source.id === sourceId ? {...source,text:result.text,source:"ai-vision",requiresReview:true,reviewed:false} : source);
       const nextMaterials = materials.map((item) => item.sourceId === sourceId ? {...item,status:result.text ? "extracted" : "empty",message:result.message ?? "AI đã đọc. Hãy kiểm tra từ vựng, nghĩa và các chỗ [không rõ]."} : item);
+      if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
+      noteStudyExerciseSourceChange(draftTripId, sourceId);
       setSources(nextSources);
       setMaterials(nextMaterials);
-      if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
       setNotice("AI đã đọc tệp và đề xuất khôi phục chỗ mờ khi có đủ ngữ cảnh. Kiểm tra các chỗ [suy luận] hoặc [không rõ] trước khi xác nhận.");
     } catch(e) { if (isCurrent()) setError(e instanceof Error ? e.message : "Không đọc được tài liệu."); }
     finally { if (materialRequest.current === controller) { materialRequest.current = null; if(workspaceLive.current && ownerRef.current === id) {setBusy(false);setMaterialProgress(null);} } }
@@ -2598,12 +2595,11 @@ function AdventureWorkspace() {
           return;
         }
       }
-      for (const existing of sources) noteStudyExerciseSourceChange(draftTripId, existing.id);
-      revokeQuizPrefetchSourceConsent();
       const nextNotes = mode === "replace" ? "" : documentText;
       const nextSources = mode === "replace" ? [reviewed] : [...sources, reviewed];
       const nextMaterials = mode === "replace" ? [material] : [...materials, material];
-      if (!persistStudyWorkspaceDraft({ notes: nextNotes, sources: nextSources, materials: nextMaterials })) return;
+      if (!persistStudyWorkspaceDraft({ notes: nextNotes, sources: nextSources, materials: nextMaterials }, { revokeSourceConsent: true })) return;
+      for (const existing of sources) noteStudyExerciseSourceChange(draftTripId, existing.id);
       if (mode === "replace") {
         originalFiles.current.clear();
         setDocumentText(nextNotes);
@@ -3159,7 +3155,16 @@ function AdventureWorkspace() {
   ): boolean {
     const value = current.current;
     if (!loaded || !exclusive || value.active || mode !== "solo" ||
-        (!isStudyWorkspaceView(view) && view !== "library")) return true;
+        (!isStudyWorkspaceView(view) && view !== "library")) {
+      setError(value.active
+        ? "Phiên đang chạy; không thể thay đổi nội dung nguồn hoặc sự đồng ý gửi quiz."
+        : !loaded || !exclusive
+          ? "Dữ liệu riêng trên thiết bị chưa sẵn sàng. Nội dung chưa được thay đổi."
+          : mode !== "solo"
+            ? "Chỉ có thể sửa nguồn trong bản nháp cá nhân."
+            : "Mở lại lộ trình cá nhân để sửa nội dung.");
+      return false;
+    }
     let storage = value.studyPlanStorage ?? createStudyPlanStorage();
     const selectedIdentity = selectedStudyWorkspaceIdentity(storage);
     if (selectedIdentity.planId && selectedIdentity.sessionId !== draftTripIdRef.current) {
@@ -3173,14 +3178,18 @@ function AdventureWorkspace() {
       storage = { ...storage, draft: { ...storage.draft, candidateSessionId: identity.sessionId } };
     }
     try {
-      const savedStorage = saveStudyWorkspaceDraft(storage, {
+      const nextWorkspaceDraft = {
         ...identity,
         notes: changes.notes ?? documentText,
         sources: changes.sources ?? sources,
         materials: changes.materials ?? materials,
         updatedAt: Date.now(),
-      });
-      const nextStorage = options.revokeSourceConsent
+      };
+      const previousWorkspaceDraft = findStudyWorkspaceDraft(storage, identity);
+      const savedStorage = saveStudyWorkspaceDraft(storage, nextWorkspaceDraft);
+      const revokeSourceConsent = options.revokeSourceConsent ||
+        studyWorkspaceSourceContentChanged(previousWorkspaceDraft, nextWorkspaceDraft);
+      const nextStorage = revokeSourceConsent
         ? {
             ...savedStorage,
             draft: {
@@ -3417,10 +3426,6 @@ function AdventureWorkspace() {
     if (!progress) return;
     const nextProgress = completeStudyOnboardingRetrievalChoice(progress);
     if (nextProgress !== progress) saveStudyOnboardingProgress(nextProgress);
-  }
-  function revokeQuizPrefetchSourceConsent() {
-    if (!current.current.studyPlanStorage?.draft.quizPrefetch.sourceConsent) return;
-    updateQuizPrefetchPreference({ sourceConsent: false });
   }
   function focusStudyTutorialControl(control: "goal" | "source" | "duration" | "retrieval"): boolean {
     const selector = control === "goal" ? "#study-workspace-goal"
@@ -3680,13 +3685,13 @@ function AdventureWorkspace() {
                       <h2>Nội dung ôn tập</h2>
                       <p className="departure-intro">Dán nội dung đã có, chọn tệp hoặc nhờ AI soạn bản ôn tập theo mục tiêu buổi học.</p>
                       <div className="departure-source-options" role="group" aria-label="Chọn cách chuẩn bị nội dung">
-                        <button disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} aria-pressed={studyInput === "notes"} onClick={() => setStudyInput("notes")}>Dán nội dung</button>
-                        <button disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} aria-pressed={studyInput === "files"} onClick={() => setStudyInput("files")}>Tải tài liệu</button>
-                        <button disabled={busy || privateTripDraftLocked} aria-pressed={studyInput === "ai"} onClick={() => setStudyInput("ai")}>Nhờ AI soạn</button>
+                        <button disabled={busy || !!active || studyGuideNeedsConfirmation || privateTripDraftLocked} aria-pressed={studyInput === "notes"} onClick={() => setStudyInput("notes")}>Dán nội dung</button>
+                        <button disabled={busy || !!active || studyGuideNeedsConfirmation || privateTripDraftLocked} aria-pressed={studyInput === "files"} onClick={() => setStudyInput("files")}>Tải tài liệu</button>
+                        <button disabled={busy || !!active || privateTripDraftLocked} aria-pressed={studyInput === "ai"} onClick={() => setStudyInput("ai")}>Nhờ AI soạn</button>
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "ai"}>
                         <StudyGuideComposer
-                          disabled={busy || tutorialActive || privateTripDraftLocked} canGenerate={owner === "guest" ? online && !authOffline : Boolean(user && !needsLogin && online)}
+                          disabled={busy || !!active || tutorialActive || privateTripDraftLocked} canGenerate={owner === "guest" ? online && !authOffline : Boolean(user && !needsLogin && online)}
                           unavailableReason={!online || authOffline ? "Kết nối mạng để tạo bản ôn tập bằng AI." : owner === "guest" ? "Nội dung gửi AI được giữ riêng trong phiên khách." : "Đăng nhập để tạo bản ôn tập bằng API Google AI Studio."}
                           review={studyGuideReview} onReviewAction={dispatchStudyGuideReview}
                           onGenerate={generateStudyGuide} onCancel={() => materialRequest.current?.abort()} onUse={acceptStudyGuide}
@@ -3696,15 +3701,14 @@ function AdventureWorkspace() {
                       </div>
                       <div className="departure-source-panel" data-revision-note-id={JSON.stringify([draftTripId, "notes"])} hidden={studyInput !== "notes"}>
                         <StudyNotesInput value={documentText} onChange={(text) => {
-                          revokeQuizPrefetchSourceConsent();
+                          if (!persistStudyWorkspaceDraft({ notes: text })) return;
                           setDocumentText(text);
-                          persistStudyWorkspaceDraft({ notes: text });
-                        }} disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked} hasDocuments={Boolean(materials.length || sources.length)} />
+                        }} disabled={busy || !!active || studyGuideNeedsConfirmation || privateTripDraftLocked} hasDocuments={Boolean(materials.length || sources.length)} />
                       </div>
                       <div className="departure-source-panel" hidden={studyInput !== "files"}>
                       <h3 className="material-title">Tài liệu học tập</h3>
                       <label className="material-ai-option">
-                          <input type="checkbox" checked={preferAiReading} disabled={busy || tutorialActive || studyGuideNeedsConfirmation || privateTripDraftLocked} onChange={(e) => setPreferAiReading(e.target.checked)} aria-describedby="material-ai-help" />
+                          <input type="checkbox" checked={preferAiReading} disabled={busy || !!active || tutorialActive || studyGuideNeedsConfirmation || privateTripDraftLocked} onChange={(e) => setPreferAiReading(e.target.checked)} aria-describedby="material-ai-help" />
                         <span>Ưu tiên dùng AI để đọc PDF/ảnh</span>
                       </label>
                       <p id="material-ai-help" className="material-hint">Thông thường, ứng dụng đọc chữ trên thiết bị. Với ảnh/PDF khó đọc, AI dùng chính API Google AI Studio (Gemini) đã tích hợp. Tệp chỉ được gửi khi bạn bấm “Đọc bằng AI”; phiên khách không cần tài khoản.</p>
@@ -3713,7 +3717,7 @@ function AdventureWorkspace() {
                         <input
                           type="file"
                           multiple
-                          disabled={busy || studyGuideNeedsConfirmation || privateTripDraftLocked}
+                          disabled={busy || !!active || studyGuideNeedsConfirmation || privateTripDraftLocked}
                           onChange={(e) => {
                             const files = Array.from(e.target.files ?? []);
                             e.target.value = "";
@@ -3754,34 +3758,31 @@ function AdventureWorkspace() {
                         const canGenerateSummary = canGeneratePrivateMaterialSummary(targetView, source);
                         return <details className="material-source" key={source.id} data-revision-source-id={JSON.stringify([draftTripId, source.id])} open={!source.reviewed}>
                         <summary>{source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra nội dung"}</summary>
-                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy || privateTripDraftLocked} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => {
-                          noteStudyExerciseSourceChange(draftTripId, source.id);
-                          revokeQuizPrefetchSourceConsent();
+                        <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy || !!active || privateTripDraftLocked} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => {
                           const nextSources = sources.map((item) => item.id === source.id ? editMaterialSourceText(item, text) : item);
+                          if (!persistStudyWorkspaceDraft({ sources: nextSources })) return;
+                          noteStudyExerciseSourceChange(draftTripId, source.id);
                           setSources(nextSources);
-                          persistStudyWorkspaceDraft({ sources: nextSources });
                         }} />
                         <div className="choice-row">
-                          <MaterialSourceReviewButton disabled={busy || privateTripDraftLocked || source.text.trim().length < 10} onClick={() => {
+                          <MaterialSourceReviewButton disabled={busy || !!active || privateTripDraftLocked || source.text.trim().length < 10} onClick={() => {
                             try {
                               const reviewed = reviewMaterialSource(source, source.text);
-                              noteStudyExerciseSourceChange(draftTripId, source.id);
-                              revokeQuizPrefetchSourceConsent();
                               const nextSources = sources.map((item) => item.id === source.id ? reviewed : item);
                               if (!persistStudyWorkspaceDraft({ sources: nextSources })) return;
+                              noteStudyExerciseSourceChange(draftTripId, source.id);
                               setSources(nextSources);
                               setError("");
                             } catch(e) { setError(e instanceof Error ? e.message : "Không xác nhận được tài liệu."); }
                           }} />
-                          {source.source !== "ai-generated" && <button disabled={busy || tutorialActive || privateTripDraftLocked || !originalFiles.current.has(source.id) || !/\.(pdf|png|jpe?g|webp)$/i.test(source.name)} onClick={() => void readHandwriting(source.id)}>Đọc bằng AI · gửi tệp này</button>}
+                          {source.source !== "ai-generated" && <button disabled={busy || !!active || tutorialActive || privateTripDraftLocked || !originalFiles.current.has(source.id) || !/\.(pdf|png|jpe?g|webp)$/i.test(source.name)} onClick={() => void readHandwriting(source.id)}>Đọc bằng AI · gửi tệp này</button>}
                           {source.source === "ai-generated" && <button disabled={busy || privateTripDraftLocked} onClick={() => downloadStudyGuide({title:source.name.replace(/\.txt$/i, ""),text:source.text})}>Tải bản ôn tập (.txt)</button>}
-                          <button disabled={busy || privateTripDraftLocked} onClick={() => {
-                            originalFiles.current.delete(source.id);
-                            noteStudyExerciseSourceChange(draftTripId, source.id);
-                            revokeQuizPrefetchSourceConsent();
+                          <button disabled={busy || !!active || privateTripDraftLocked} onClick={() => {
                             const nextSources = sources.filter((item) => item.id !== source.id);
                             const nextMaterials = materials.filter((file) => source.covers ? !source.covers.includes(file.name) : file.sourceId !== source.id);
                             if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials })) return;
+                            originalFiles.current.delete(source.id);
+                            noteStudyExerciseSourceChange(draftTripId, source.id);
                             setSources(nextSources);
                             setMaterials(nextMaterials);
                           }}>Gỡ tài liệu</button>

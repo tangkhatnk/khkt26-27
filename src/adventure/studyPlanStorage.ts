@@ -33,6 +33,15 @@ export type StudyWorkspaceDraft = StudyWorkspaceDraftIdentity & {
   updatedAt: number;
 };
 
+export function studyWorkspaceSourceContentChanged(
+  previous: Pick<StudyWorkspaceDraft, "notes" | "sources" | "materials"> | undefined,
+  next: Pick<StudyWorkspaceDraft, "notes" | "sources" | "materials">,
+): boolean {
+  return !previous || previous.notes !== next.notes ||
+    JSON.stringify(previous.sources) !== JSON.stringify(next.sources) ||
+    JSON.stringify(previous.materials) !== JSON.stringify(next.materials);
+}
+
 export type StudyPlanStep = {
   id: string;
   plannedSessionId: string;
