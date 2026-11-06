@@ -87,6 +87,16 @@ test("minute overflow uses a wide panel that remains responsive at phone width",
   assert.match(css, /\.flip-clock-panel--wide/u);
 });
 
+test("animated fold faces cover their static glyphs while steady halves stay transparent", async () => {
+  const css = await readFile(resolve(projectRoot, "src/adventure/flipClock.css"), "utf8");
+  const lightFolds = css.match(/\.flip-clock-fold-top,\s*\.flip-clock-fold-bottom\s*\{([^}]*)\}/u)?.[1] ?? "";
+
+  assert.match(lightFolds, /background:\s*#f0f3eb/u);
+  assert.match(css, /\.flip-clock-half\s*\{[^}]*background:\s*transparent/su);
+  assert.match(css, /html\[data-theme="dark"\] \.adventure \.focus-card \.flip-clock-half\s*\{[^}]*background:\s*transparent/su);
+  assert.match(css, /html\[data-theme="dark"\] \.adventure \.focus-card \.flip-clock-fold-top,\s*html\[data-theme="dark"\] \.adventure \.focus-card \.flip-clock-fold-bottom\s*\{[^}]*background:\s*#243229/su);
+});
+
 test("clock keeps its accessible label and disables flap animation when motion is disallowed", async () => {
   const markup = renderToStaticMarkup(React.createElement(FlipClock, {
     seconds: 59,

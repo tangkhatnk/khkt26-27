@@ -118,6 +118,7 @@
 .flip-clock-fold-top,
 .flip-clock-fold-bottom {
   z-index: 1;
+  background: #f0f3eb;
   backface-visibility: hidden;
 }
 
@@ -175,6 +176,11 @@ html[data-theme="dark"] .adventure .focus-card .flip-clock-digit {
 
 html[data-theme="dark"] .adventure .focus-card .flip-clock-half {
   background: transparent;
+}
+
+html[data-theme="dark"] .adventure .focus-card .flip-clock-fold-top,
+html[data-theme="dark"] .adventure .focus-card .flip-clock-fold-bottom {
+  background: #243229;
 }
 
 html[data-theme="dark"] .adventure .focus-card .flip-clock-upper {
