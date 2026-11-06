@@ -322,15 +322,17 @@ export function recordCompletedStudyPlanStep(
   if (!plan || stepIndex < 0) return null;
   if (storage.completedStepReceipts.some((receipt) => receipt.sessionId === binding.sessionId &&
       (receipt.planId !== binding.planId || receipt.stepId !== binding.stepId))) return null;
-  const existing = storage.completedStepReceipts.find((receipt) =>
+  const completedStepReceipts = normalizedCompletedStepReceipts(storage.completedStepReceipts, storage.plans);
+  const normalizedStorage = { ...storage, completedStepReceipts };
+  const existing = completedStepReceipts.find((receipt) =>
     receipt.planId === binding.planId && receipt.stepId === binding.stepId);
-  if (existing) return { ...storage, activePlanBinding: null };
-  if (stepIndex !== completedStudyPlanStepIds(storage, binding.planId).length ||
-      storage.completedStepReceipts.length >= MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS) return null;
+  if (existing) return { ...normalizedStorage, activePlanBinding: null };
+  if (stepIndex !== completedStudyPlanStepIds(normalizedStorage, binding.planId).length ||
+      completedStepReceipts.length >= MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS) return null;
   return {
-    ...storage,
+    ...normalizedStorage,
     activePlanBinding: null,
-    completedStepReceipts: [...storage.completedStepReceipts, { ...binding, completedAt }],
+    completedStepReceipts: [...completedStepReceipts, { ...binding, completedAt }],
   };
 }
 

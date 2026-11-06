@@ -821,6 +821,68 @@ test("the receipt bound retains every step across the maximum stored plan catalo
   assert.deepEqual(restored.completedStepReceipts.at(-1), receipts.at(-1));
 });
 
+test("completion prunes receipts for a trimmed plan before enforcing the live storage cap", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const makePlan = (planIndex) => {
+    const steps = Array.from({ length: 8 }, (_, stepIndex) => ({
+      id: `step-${stepIndex}`,
+      plannedSessionId: `candidate-${planIndex}-${stepIndex}`,
+      title: `Bước học ${stepIndex + 1}`,
+      action: "Đọc và ghi lại ý chính",
+      outcome: "Nêu được một ý quan trọng",
+      check: "Tự giải thích bằng lời mình",
+      preferredMinutes: 25,
+    }));
+    return {
+      id: `plan-${planIndex}`,
+      origin: "ai",
+      title: `Kế hoạch ${planIndex + 1}`,
+      goal: "Ôn cấu trúc tế bào",
+      topicId: "biology",
+      topicLabel: "Sinh học",
+      level: "",
+      preferredMinutes: 25,
+      selectedStepId: steps[0].id,
+      createdAt: 1_000 + planIndex,
+      updatedAt: 1_000 + planIndex,
+      steps,
+    };
+  };
+  const plans = Array.from({ length: 50 }, (_, index) => makePlan(index));
+  const receipts = plans.flatMap((plan, planIndex) => plan.steps.map((step, stepIndex) => ({
+    planId: plan.id,
+    stepId: step.id,
+    sessionId: `finished-${planIndex}-${stepIndex}`,
+    completedAt: 10_000 + planIndex * 10 + stepIndex,
+  })));
+  const full = normalizeStudyPlanStorage({ ...base, plans, completedStepReceipts: receipts });
+  const addedPlan = makePlan(50);
+  const firstStep = addedPlan.steps[0];
+  const binding = { planId: addedPlan.id, stepId: firstStep.id, sessionId: firstStep.plannedSessionId };
+  const updated = {
+    ...full,
+    plans: [...full.plans.slice(1), addedPlan],
+    draft: {
+      ...full.draft,
+      selectedPlanId: addedPlan.id,
+      selectedStepId: firstStep.id,
+      candidateSessionId: firstStep.plannedSessionId,
+    },
+    activePlanBinding: binding,
+  };
+
+  assert.equal(full.completedStepReceipts.length, MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS);
+  const completed = recordCompletedStudyPlanStep(updated, binding, 80_000);
+
+  assert.notEqual(completed, null);
+  assert.equal(completed.activePlanBinding, null);
+  assert.equal(completed.completedStepReceipts.length, 393);
+  assert.ok(completed.completedStepReceipts.length <= MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS);
+  assert.ok(completed.completedStepReceipts.every((receipt) => completed.plans.some((plan) =>
+    plan.id === receipt.planId && plan.steps.some((step) => step.id === receipt.stepId))));
+  assert.deepEqual(completed.completedStepReceipts.at(-1), { ...binding, completedAt: 80_000 });
+});
+
 test("starting a session advances the selected plan or manual candidate without changing the session ID", () => {
   const base = createStudyPlanStorage();
   const plan = {

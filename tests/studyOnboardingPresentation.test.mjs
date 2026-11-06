@@ -131,7 +131,7 @@ test("a rejected progress save keeps the active step and does not prepare the ch
     progress,
     { type: "tutorial/used", control: "source", choice: "notes" },
     () => false,
-    () => { sourceChoiceCalls += 1; },
+    { afterSave: () => { sourceChoiceCalls += 1; } },
   );
 
   assert.equal(result.status, "failed");
