@@ -530,6 +530,39 @@ test("disabled personal Start explains a missing goal or stale/locked step with 
   assert.match(startPanel, /document\.getElementById\("study-workspace-goal"\).*?\.focus\(\)/u);
   assert.match(startPanel, /Chọn bước đang mở/u);
   assert.match(startPanel, /selectStudyPlanStep\(firstStartableStudyPlanStep\.id, selectedStudyPlan\.id\)/u);
+  assert.match(startPanel, /Học tự do/u);
+  assert.match(startPanel, /onClick=\{\(\) => enterFreeStudyWorkspace\(\)\}/u);
+  assert.match(app, /studyPlanStepForRecovery\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+});
+
+test("free study saves and restores exact owner-local workspace identities without crossing live starts", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const enterStart = app.indexOf("function enterFreeStudyWorkspace()");
+  const returnStart = app.indexOf("function returnToSavedStudyPlan()");
+  const switchStart = app.indexOf("function selectStudyPlanStep(", returnStart);
+  const enter = app.slice(enterStart, returnStart);
+  const restore = app.slice(returnStart, switchStart);
+  const enterButtonAt = app.indexOf("Học tự do", app.indexOf("Bắt đầu buổi học ·"));
+  const returnButtonAt = app.indexOf("Quay lại lộ trình", enterButtonAt);
+
+  assert.notEqual(enterStart, -1);
+  assert.notEqual(returnStart, -1);
+  assert.notEqual(switchStart, -1);
+  assert.match(enter, /value\.active \|\| tripStartInFlight\.current/u);
+  assert.match(enter, /mode !== "solo"/u);
+  assert.match(enter, /enterFreeStudyWorkspaceStorage\(storage,[\s\S]*?notes: documentText,[\s\S]*?sources,[\s\S]*?materials/u);
+  assert.ok(enter.indexOf("commit({") < enter.indexOf("setDraftTripId(freeSessionId)"));
+  assert.match(enter, /updateQuickTripDraft\(quickTripDraft,[\s\S]*?selectedPlanId: null,[\s\S]*?selectedStepId: null/u);
+  assert.ok(enter.indexOf("commit({") < enter.indexOf("updateQuickTripDraft(quickTripDraft"));
+  assert.ok(enter.indexOf("updateQuickTripDraft(quickTripDraft") < enter.indexOf("setDraftTripId(freeSessionId)"));
+  assert.ok(enter.indexOf("setDraftTripId(freeSessionId)") < enter.indexOf("setDocumentText(\"\")"));
+  assert.match(restore, /value\.active \|\| tripStartInFlight\.current/u);
+  assert.match(restore, /returnFromFreeStudyWorkspace\(storage,[\s\S]*?currentSessionId: draftTripIdRef\.current,[\s\S]*?notes: documentText,[\s\S]*?sources,[\s\S]*?materials/u);
+  assert.match(restore, /const usedSessionIds = new Set\([\s\S]*?historySessions[\s\S]*?guestExerciseSessions[\s\S]*?removedSessionIds/u);
+  assert.ok(restore.indexOf("commit({") < restore.indexOf("setDraftTripId(identity.sessionId)"));
+  const actionControls = app.slice(enterButtonAt - 600, returnButtonAt + 500);
+  assert.match(actionControls, /onClick=\{\(\) => enterFreeStudyWorkspace\(\)\}[\s\S]*?>Học tự do/u);
+  assert.match(actionControls, /onClick=\{\(\) => returnToSavedStudyPlan\(\)\}[\s\S]*?>Quay lại lộ trình/u);
 });
 
 test("only a matching full solo focus receipt is committed with its completed session", async () => {

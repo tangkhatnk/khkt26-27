@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readSaved, writeSaved } from "../src/adventure/storage.ts";
 import { createLearningPathProgress } from "../src/adventure/learningPath.ts";
+import { createQuickTripDraft, updateQuickTripDraft } from "../src/adventure/quickTripDraft.ts";
 import {
   createStudyPlanStorage,
   applyStudyPlanStepPatch,
@@ -11,12 +12,15 @@ import {
   canSelectStudyPlanStep,
   clearStudyPlanActiveBinding,
   completedStudyPlanStepIds,
+  enterFreeStudyWorkspace,
   findStudyWorkspaceDraft,
   MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS,
   normalizeStudyPlanStorage,
   recordCompletedStudyPlanStep,
+  returnFromFreeStudyWorkspace,
   saveStudyWorkspaceDraft,
   selectedStudyWorkspaceIdentity,
+  studyPlanStepForRecovery,
   studyWorkspaceSourceContentChanged,
   updateStudyPlanDraftFromQuickTrip,
 } from "../src/adventure/studyPlanStorage.ts";
@@ -352,16 +356,261 @@ test("existing v1 plans migrate without inferred completion receipts or draft lo
   };
   delete legacyStorage.activePlanBinding;
   delete legacyStorage.completedStepReceipts;
+  delete legacyStorage.freeStudyReturn;
 
   const restored = normalizeStudyPlanStorage(legacyStorage);
 
   assert.equal(restored.activePlanBinding, null);
   assert.deepEqual(restored.completedStepReceipts, []);
+  assert.equal(restored.freeStudyReturn, null);
   assert.deepEqual(restored.plans, [plan]);
   assert.deepEqual(restored.workspaceDrafts, [workspaceDraft]);
   assert.equal(findStudyWorkspaceDraft(restored, {
     sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
   })?.notes, workspaceDraft.notes);
+
+  const malformedPointer = normalizeStudyPlanStorage({
+    ...legacyStorage,
+    freeStudyReturn: { planId: plan.id, stepId: "removed-step", candidateSessionId: "candidate-one" },
+  });
+  assert.equal(malformedPointer.freeStudyReturn, null);
+  assert.deepEqual(malformedPointer.plans, [plan]);
+  assert.deepEqual(malformedPointer.workspaceDrafts, [workspaceDraft]);
+});
+
+test("free study stores only a plan return pointer while keeping each workspace under its own identity", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-free-return",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "Lớp 10",
+    preferredMinutes: 45,
+    selectedStepId: "step-one",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const source = { id: "source-plan", name: "Ghi chú.txt", text: "Nội dung riêng của bước kế hoạch.", source: "notes", requiresReview: false, reviewed: true };
+  const material = { sourceId: source.id, name: source.name, size: 35, type: "text/plain", status: "extracted", message: "Đã đọc trên thiết bị." };
+  const planned = {
+    ...base,
+    draft: {
+      ...base.draft,
+      goal: "Mục tiêu đã sửa riêng",
+      topicId: "chemistry",
+      topicLabel: "Hóa học",
+      preferredMinutes: 90,
+      breakCount: 2,
+      breakMinutes: 8,
+      level: "Lớp 11",
+      confidence: 3,
+      selectedPlanId: plan.id,
+      selectedStepId: "step-one",
+      candidateSessionId: "candidate-one",
+      quizPrefetch: { enabled: true, sourceConsent: true },
+    },
+    plans: [plan],
+    workspaceDrafts: [{
+      sessionId: "candidate-one",
+      planId: plan.id,
+      stepId: "step-one",
+      notes: "Ghi chú của bước đã chọn.",
+      sources: [source],
+      materials: [material],
+      updatedAt: 2_000,
+    }],
+  };
+
+  const free = enterFreeStudyWorkspace(planned, {
+    currentSessionId: "candidate-one",
+    freeSessionId: "free-one",
+    notes: "Ghi chú của bước đã chọn.",
+    sources: [source],
+    materials: [material],
+    updatedAt: 3_000,
+  });
+
+  assert.deepEqual(free.freeStudyReturn, {
+    planId: plan.id,
+    stepId: "step-one",
+    candidateSessionId: "candidate-one",
+    goal: "Mục tiêu đã sửa riêng",
+    topicId: "chemistry",
+    topicLabel: "Hóa học",
+    preferredMinutes: 90,
+    breakCount: 2,
+    breakMinutes: 8,
+    level: "Lớp 11",
+    confidence: 3,
+    quizPrefetchEnabled: true,
+  });
+  assert.deepEqual(normalizeStudyPlanStorage(free).freeStudyReturn, free.freeStudyReturn);
+  assert.equal(free.draft.selectedPlanId, null);
+  assert.equal(free.draft.selectedStepId, null);
+  assert.equal(free.draft.candidateSessionId, "free-one");
+  assert.deepEqual(free.draft.quizPrefetch, { enabled: true, sourceConsent: false });
+  const quickTripDraft = { current: createQuickTripDraft({
+    goal: "Mục tiêu cũ", topic: "chemistry", minutes: 90,
+    selectedPlanId: plan.id, selectedStepId: "step-one",
+  }) };
+  updateQuickTripDraft(quickTripDraft, {
+    goal: free.draft.goal,
+    topic: free.draft.topicId,
+    topicLabel: free.draft.topicLabel,
+    minutes: free.draft.preferredMinutes,
+    breakCount: free.draft.breakCount,
+    breakMinutes: free.draft.breakMinutes,
+    selectedPlanId: free.draft.selectedPlanId,
+    selectedStepId: free.draft.selectedStepId,
+  });
+  updateQuickTripDraft(quickTripDraft, { goal: "Mục tiêu tự do mới", minutes: 45 });
+  const editedFreeDraft = updateStudyPlanDraftFromQuickTrip(free.draft, quickTripDraft.current, "Hóa học");
+  assert.equal(editedFreeDraft.goal, "Mục tiêu tự do mới");
+  assert.equal(editedFreeDraft.preferredMinutes, 45);
+  assert.equal(editedFreeDraft.selectedPlanId, null);
+  assert.equal(editedFreeDraft.selectedStepId, null);
+  assert.equal(editedFreeDraft.candidateSessionId, "free-one");
+  assert.deepEqual(findStudyWorkspaceDraft(free, {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+  }), {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+    notes: "Ghi chú của bước đã chọn.", sources: [source], materials: [material], updatedAt: 3_000,
+  });
+  assert.deepEqual(findStudyWorkspaceDraft(free, {
+    sessionId: "free-one", planId: null, stepId: null,
+  }), {
+    sessionId: "free-one", planId: null, stepId: null,
+    notes: "", sources: [], materials: [], updatedAt: 3_000,
+  });
+
+  const editedFree = {
+    ...free,
+    draft: { ...free.draft, goal: "Mục tiêu tự do", preferredMinutes: 25 },
+    workspaceDrafts: free.workspaceDrafts.map((draft) => draft.sessionId === "free-one"
+      ? { ...draft, notes: "Ghi chú riêng cho buổi học tự do." }
+      : draft),
+  };
+  const returned = returnFromFreeStudyWorkspace(editedFree, {
+    currentSessionId: "free-one",
+    notes: "Ghi chú riêng cho buổi học tự do.",
+    sources: [],
+    materials: [],
+    usedSessionIds: new Set(),
+    nextCandidateSessionId: "free-next",
+    updatedAt: 4_000,
+  });
+
+  assert.equal(returned.draft.goal, "Mục tiêu đã sửa riêng");
+  assert.equal(returned.draft.topicId, "chemistry");
+  assert.equal(returned.draft.preferredMinutes, 90);
+  assert.equal(returned.draft.breakCount, 2);
+  assert.equal(returned.draft.breakMinutes, 8);
+  assert.equal(returned.draft.level, "Lớp 11");
+  assert.equal(returned.draft.confidence, 3);
+  assert.equal(returned.draft.selectedPlanId, plan.id);
+  assert.equal(returned.draft.selectedStepId, "step-one");
+  assert.equal(returned.draft.candidateSessionId, "candidate-one");
+  assert.deepEqual(returned.draft.quizPrefetch, { enabled: true, sourceConsent: false });
+  assert.equal(returned.freeStudyReturn, null);
+  assert.equal(findStudyWorkspaceDraft(returned, {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+  })?.notes, "Ghi chú của bước đã chọn.");
+  assert.deepEqual(findStudyWorkspaceDraft(returned, {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+  })?.sources, [source]);
+  assert.deepEqual(findStudyWorkspaceDraft(returned, {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+  })?.materials, [material]);
+  assert.equal(findStudyWorkspaceDraft(returned, {
+    sessionId: "free-one", planId: null, stepId: null,
+  })?.notes, "Ghi chú riêng cho buổi học tự do.");
+  assert.deepEqual(findStudyWorkspaceDraft(returned, {
+    sessionId: "free-one", planId: null, stepId: null,
+  })?.sources, []);
+  assert.deepEqual(findStudyWorkspaceDraft(returned, {
+    sessionId: "free-one", planId: null, stepId: null,
+  })?.materials, []);
+});
+
+test("free-study return chooses the next open step and rotates a consumed candidate without copying its draft", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-return-open",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-three",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const planAtEntry = {
+    ...plan,
+    selectedStepId: "step-three",
+  };
+  const entryStorage = {
+    ...base,
+    draft: { ...base.draft, selectedPlanId: plan.id, selectedStepId: "step-three", candidateSessionId: "candidate-three" },
+    plans: [planAtEntry],
+  };
+  assert.equal(canStartSelectedStudyPlanStep(entryStorage, "candidate-three"), false);
+  const free = enterFreeStudyWorkspace(entryStorage, {
+    currentSessionId: "candidate-three", freeSessionId: "free-candidate", notes: "", sources: [], materials: [], updatedAt: 2_000,
+  });
+  const later = {
+    ...free,
+    completedStepReceipts: [{ planId: plan.id, stepId: "step-one", sessionId: "finished-one", completedAt: 2_500 }],
+    workspaceDrafts: [...free.workspaceDrafts, {
+      sessionId: "candidate-one", planId: plan.id, stepId: "step-one", notes: "Đã lưu ở phiên trước.", sources: [], materials: [], updatedAt: 2_500,
+    }, {
+      sessionId: "candidate-two", planId: plan.id, stepId: "step-two", notes: "Ghi chú của bước hai.",
+      sources: [{ id: "source-two", name: "Bước hai.txt", text: "Nguồn của bước hai.", source: "notes", requiresReview: false, reviewed: true }],
+      materials: [{ sourceId: "source-two", name: "Bước hai.txt", size: 21, type: "text/plain", status: "extracted", message: "Đã đọc trên thiết bị." }],
+      updatedAt: 2_500,
+    }],
+  };
+
+  const returned = returnFromFreeStudyWorkspace(later, {
+    currentSessionId: "free-candidate",
+    notes: "",
+    sources: [],
+    materials: [],
+    usedSessionIds: new Set(["candidate-two"]),
+    nextCandidateSessionId: "candidate-two-retry",
+    updatedAt: 3_000,
+  });
+
+  assert.equal(returned.draft.selectedStepId, "step-two");
+  assert.equal(returned.draft.candidateSessionId, "candidate-two-retry");
+  assert.equal(returned.plans[0].steps[1].plannedSessionId, "candidate-two-retry");
+  assert.equal(findStudyWorkspaceDraft(returned, {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+  })?.notes, "Đã lưu ở phiên trước.");
+  assert.equal(findStudyWorkspaceDraft(returned, {
+    sessionId: "candidate-two-retry", planId: plan.id, stepId: "step-two",
+  })?.notes, "Ghi chú của bước hai.");
+  assert.equal(findStudyWorkspaceDraft(returned, {
+    sessionId: "candidate-two-retry", planId: plan.id, stepId: "step-two",
+  })?.sources[0]?.id, "source-two");
+  assert.equal(findStudyWorkspaceDraft(returned, {
+    sessionId: "free-candidate", planId: null, stepId: null,
+  })?.notes, "");
 });
 
 test("receipt migration keeps one valid AI completion prefix and exact active binding only", () => {
@@ -442,6 +691,7 @@ test("AI plan receipts bind exact candidates and unlock only a completed prefix"
   const binding = { sessionId: "candidate-one", planId: plan.id, stepId: "step-one" };
 
   assert.deepEqual(completedStudyPlanStepIds(storage, plan.id), []);
+  assert.equal(studyPlanStepForRecovery(storage, plan.id)?.id, "step-one");
   assert.equal(canSelectStudyPlanStep(storage, plan.id, "step-one"), true);
   assert.equal(canSelectStudyPlanStep(storage, plan.id, "step-two"), false);
   assert.equal(canStartSelectedStudyPlanStep(storage, "candidate-one"), true);
@@ -475,9 +725,19 @@ test("AI plan receipts bind exact candidates and unlock only a completed prefix"
   assert.deepEqual(completed?.completedStepReceipts, [{ ...binding, completedAt: 60_000 }]);
   assert.equal(completed?.activePlanBinding, null);
   assert.deepEqual(completedStudyPlanStepIds(completed, plan.id), ["step-one"]);
+  assert.equal(studyPlanStepForRecovery(completed, plan.id)?.id, "step-two");
   assert.equal(canSelectStudyPlanStep(completed, plan.id, "step-one"), true);
   assert.equal(canSelectStudyPlanStep(completed, plan.id, "step-two"), true);
   assert.equal(canSelectStudyPlanStep(completed, plan.id, "step-three"), false);
+  const fullyCompleted = {
+    ...completed,
+    completedStepReceipts: [
+      ...completed.completedStepReceipts,
+      { planId: plan.id, stepId: "step-two", sessionId: "finished-two", completedAt: 70_000 },
+      { planId: plan.id, stepId: "step-three", sessionId: "finished-three", completedAt: 80_000 },
+    ],
+  };
+  assert.equal(studyPlanStepForRecovery(fullyCompleted, plan.id)?.id, "step-three");
   assert.equal(recordCompletedStudyPlanStep(started, { ...binding, sessionId: "other-session" }, 61_000), null);
   assert.equal(recordCompletedStudyPlanStep({ ...completed, activePlanBinding: binding }, binding, 62_000)?.completedStepReceipts.length, 1);
   assert.equal(clearStudyPlanActiveBinding(started, "other-session"), started);
