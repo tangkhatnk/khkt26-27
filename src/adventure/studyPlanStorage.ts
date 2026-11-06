@@ -143,6 +143,47 @@ export function updateStudyPlanDraftFromQuickTrip(
   };
 }
 
+/** Persist a fresh owner-local candidate after the current session has started. */
+export function advanceStudyPlanCandidateAfterStart(
+  storage: StudyPlanStorage,
+  startedSessionId: string,
+  nextSessionId: string,
+): StudyPlanStorage {
+  if (!isText(startedSessionId, 200, 1) || !isText(nextSessionId, 200, 1)) return storage;
+  const plan = storage.plans.find((item) => item.id === storage.draft.selectedPlanId);
+  const step = plan?.steps.find((item) => item.id === storage.draft.selectedStepId);
+  const matchingPlan = step?.plannedSessionId === startedSessionId ? plan : undefined;
+  const matchingStep = matchingPlan ? step : undefined;
+  const workspaceDraft = matchingPlan && matchingStep
+    ? findStudyWorkspaceDraft(storage, { sessionId: startedSessionId, planId: matchingPlan.id, stepId: matchingStep.id })
+    : storage.draft.selectedPlanId === null && storage.draft.selectedStepId === null
+      ? findStudyWorkspaceDraft(storage, { sessionId: startedSessionId, planId: null, stepId: null })
+      : undefined;
+  const workspaceDrafts = workspaceDraft
+    ? [...storage.workspaceDrafts.filter((draft) => draft.sessionId !== nextSessionId), {
+        ...workspaceDraft,
+        sessionId: nextSessionId,
+      }].slice(-MAX_LOCAL_STUDY_WORKSPACE_DRAFTS)
+    : storage.workspaceDrafts;
+  return {
+    ...storage,
+    draft: {
+      ...storage.draft,
+      candidateSessionId: nextSessionId,
+      selectedPlanId: matchingPlan?.id ?? null,
+      selectedStepId: matchingStep?.id ?? null,
+    },
+    plans: matchingPlan && matchingStep
+      ? storage.plans.map((item) => item.id === matchingPlan.id
+        ? { ...item, steps: item.steps.map((candidate) => candidate.id === matchingStep.id
+          ? { ...candidate, plannedSessionId: nextSessionId }
+          : candidate) }
+        : item)
+      : storage.plans,
+    workspaceDrafts,
+  };
+}
+
 function validStudyPlanStep(value: unknown): value is StudyPlanStep {
   return isRecord(value) && isText(value.id, 100, 1) && isText(value.plannedSessionId, 200, 1) &&
     isText(value.title, 120, 3) && isText(value.action, 400, 3) && isText(value.outcome, 400, 3) &&

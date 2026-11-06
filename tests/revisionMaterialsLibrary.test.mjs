@@ -94,6 +94,7 @@ test("populated library labels each review state and never renders source text o
 
   assert.match(markup, /Vật lý — Năng lượng tái tạo/u);
   assert.match(markup, /Tệp PDF/u);
+  assert.match(markup, /id="revision-materials-library-title" tabindex="-1"/u);
   assert.match(markup, /Đã kiểm tra/u);
   assert.match(markup, /Cần kiểm tra/u);
   assert.match(markup, /Không đọc được/u);
@@ -110,10 +111,11 @@ test("only reviewed entries can be used in a plan while every entry can open its
   const previewed = [];
   const planned = [];
   const interactiveTree = treeFor(callbackProps({
-    onPreview: (id) => previewed.push(id),
+    onPreview: (id, trigger) => previewed.push({ id, trigger }),
     onUseInPlan: (id) => planned.push(id),
   }));
   const interactiveButtons = buttonsIn(interactiveTree);
+  const trigger = { currentTarget: "preview-button" };
 
   assert.equal(useButtons.length, 3);
   assert.equal(useButtons[0].props.disabled, false);
@@ -121,9 +123,9 @@ test("only reviewed entries can be used in a plan while every entry can open its
   assert.equal(useButtons[2].props.disabled, true);
   assert.equal(previewButtons.length, 3);
   assert.match(markup, /aria-label="Xem trước: Vật lý — Năng lượng tái tạo"/u);
-  interactiveButtons.find((button) => button.props["aria-label"] === "Xem trước: Lược sử khí hậu Việt Nam").props.onClick();
+  interactiveButtons.find((button) => button.props["aria-label"] === "Xem trước: Lược sử khí hậu Việt Nam").props.onClick(trigger);
   interactiveButtons.find((button) => button.props["aria-label"] === "Dùng Vật lý — Năng lượng tái tạo cho kế hoạch").props.onClick();
-  assert.deepEqual(previewed, ["needs-review-id"]);
+  assert.deepEqual(previewed, [{ id: "needs-review-id", trigger: trigger.currentTarget }]);
   assert.deepEqual(planned, ["reviewed-id"]);
 });
 

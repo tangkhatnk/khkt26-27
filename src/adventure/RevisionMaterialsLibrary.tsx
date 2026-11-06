@@ -11,7 +11,7 @@ export type RevisionMaterialEntry = {
 
 export type RevisionMaterialsLibraryProps = {
   entries: readonly RevisionMaterialEntry[];
-  onPreview(id: string): void;
+  onPreview(id: string, trigger?: HTMLButtonElement): void;
   onUseInPlan(id: string): void;
   onAddNotes(): void;
   onAddFiles(): void;
@@ -41,7 +41,7 @@ export function RevisionMaterialsLibrary({
   return <section className="revision-materials-library" aria-labelledby="revision-materials-library-title">
     <header className="revision-materials-library__header">
       <div>
-        <h2 id="revision-materials-library-title">Thư viện tài liệu ôn tập</h2>
+        <h2 id="revision-materials-library-title" tabIndex={-1}>Thư viện tài liệu ôn tập</h2>
         <p>Kiểm tra nội dung trước khi dùng tài liệu trong kế hoạch ôn tập.</p>
       </div>
       <div className="revision-materials-library__add-actions" role="group" aria-label="Thêm tài liệu ôn tập">
@@ -76,7 +76,7 @@ export function RevisionMaterialsLibrary({
                   type="button"
                   className="revision-materials-library__entry-action"
                   aria-label={`Xem trước: ${entry.name}`}
-                  onClick={() => onPreview(entry.id)}
+                  onClick={(event) => onPreview(entry.id, event.currentTarget)}
                 >Xem trước</button>
                 <button
                   type="button"

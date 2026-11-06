@@ -5,6 +5,7 @@ import { createLearningPathProgress } from "../src/adventure/learningPath.ts";
 import {
   createStudyPlanStorage,
   applyStudyPlanStepPatch,
+  advanceStudyPlanCandidateAfterStart,
   findStudyWorkspaceDraft,
   normalizeStudyPlanStorage,
   saveStudyWorkspaceDraft,
@@ -271,6 +272,65 @@ test("plan storage keeps valid records, drops malformed plan entries, and does n
 
   assert.equal(restored.draft.preferredMinutes, 25);
   assert.deepEqual(restored.plans.map((plan) => plan.id), ["plan-1"]);
+});
+
+test("starting a session advances the selected plan or manual candidate without changing the session ID", () => {
+  const base = createStudyPlanStorage();
+  const plan = {
+    id: "manual-plan",
+    origin: "manual",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 25,
+    selectedStepId: "step-one",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [{
+      id: "step-one",
+      plannedSessionId: "candidate-in-focus",
+      title: "Ôn cấu trúc",
+      action: "Đọc ghi chú",
+      outcome: "Nêu chức năng chính",
+      check: "Giải thích bằng lời mình",
+      preferredMinutes: 25,
+    }],
+  };
+  const planned = {
+    ...base,
+    draft: { ...base.draft, selectedPlanId: plan.id, selectedStepId: "step-one", candidateSessionId: "candidate-in-focus" },
+    plans: [plan],
+    workspaceDrafts: [{
+      sessionId: "candidate-in-focus",
+      planId: plan.id,
+      stepId: "step-one",
+      notes: "Ghi chú đang soạn cho bước này.",
+      sources: [{ id: "source-private", name: "Ghi chú.txt", text: "Nguồn đã duyệt.", source: "notes", reviewed: true, requiresReview: false }],
+      materials: [{ sourceId: "source-private", name: "Ghi chú.txt", size: 28, type: "text/plain", status: "extracted", message: "Đã đọc trên thiết bị." }],
+      updatedAt: 2_000,
+    }],
+  };
+
+  const advancedPlan = advanceStudyPlanCandidateAfterStart(planned, "candidate-in-focus", "candidate-next");
+  const advancedManual = advanceStudyPlanCandidateAfterStart({
+    ...base,
+    draft: { ...base.draft, candidateSessionId: "manual-in-focus" },
+  }, "manual-in-focus", "manual-next");
+
+  assert.equal(advancedPlan.draft.selectedPlanId, plan.id);
+  assert.equal(advancedPlan.draft.selectedStepId, "step-one");
+  assert.equal(advancedPlan.draft.candidateSessionId, "candidate-next");
+  assert.equal(advancedPlan.plans[0].steps[0].plannedSessionId, "candidate-next");
+  assert.equal(plan.steps[0].plannedSessionId, "candidate-in-focus");
+  assert.deepEqual(advancedPlan.workspaceDrafts.map((draft) => draft.sessionId), ["candidate-in-focus", "candidate-next"]);
+  assert.deepEqual(advancedPlan.workspaceDrafts[1], {
+    ...planned.workspaceDrafts[0],
+    sessionId: "candidate-next",
+  });
+  assert.equal(advancedManual.draft.candidateSessionId, "manual-next");
+  assert.equal(advancedManual.draft.selectedPlanId, null);
 });
 
 test("one-step local manual plans remain readable while generated plans require three steps", () => {

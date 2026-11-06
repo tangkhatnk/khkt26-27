@@ -94,7 +94,7 @@ test("inactive legacy review runs hydrate the current draft and ticket recovery 
   const hydration = app.slice(loadStart, recoveryStart);
   const migration = app.slice(migrationStart, migrationEnd);
 
-  assert.match(hydration, /if \(!value\.active && \(!pathRun \|\| pathRun\.phase === "review"\)\)/u);
+  assert.match(hydration, /if \(\(!value\.active \|\| value\.active\.groupId === null\) && \(!pathRun \|\| pathRun\.phase === "review"\)\)/u);
   assert.match(migration, /candidateSessionId: pathRun\.sessionId/u);
   assert.match(migration, /saveStudyWorkspaceDraft\(/u);
   assert.match(migration, /planId: null,[\s\S]*?stepId: null,[\s\S]*?notes: recoveredText,[\s\S]*?sources: recoveredSources,[\s\S]*?materials: recoveredMaterials/u);
@@ -216,14 +216,17 @@ test("revision library aggregates notes through one tombstone-filtered owner bou
   assert.match(app, /material-source__notes/u);
 });
 
-test("step changes within one plan retain edited goal and subject, and failed previews do not navigate", async () => {
+test("step changes retain edited goal and subject while library preview stays read only", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const selectStart = app.indexOf("function selectStudyPlanStep(");
-  const selectEnd = app.indexOf("function selectManualWorkspaceCandidate", selectStart);
+  const selectEnd = app.indexOf("function focusRevisionSource", selectStart);
   const selection = app.slice(selectStart, selectEnd);
   const previewStart = app.indexOf("function previewRevisionMaterial(");
   const previewEnd = app.indexOf("function useRevisionMaterialInPlan", previewStart);
   const preview = app.slice(previewStart, previewEnd);
+  const closeStart = app.indexOf("function closeRevisionMaterialPreview(");
+  const closeEnd = app.indexOf("function useRevisionMaterialInPlan", closeStart);
+  const closePreview = app.slice(closeStart, closeEnd);
 
   assert.match(selection, /const samePlan =[^;]+;/u);
   assert.match(selection, /goal: nextGoal/u);
@@ -232,7 +235,20 @@ test("step changes within one plan retain edited goal and subject, and failed pr
   assert.match(selection, /const nextTopicId = samePlan \? storage\.draft\.topicId : plan\.topicId/u);
   assert.match(selection, /updateQuickTripDraft\(quickTripDraft,[\s\S]*?goal: nextGoal,[\s\S]*?topic: nextTopicId/u);
   assert.doesNotMatch(selection, /setMinutes\(/u);
-  assert.match(preview, /const restored = record\.planId && record\.stepId[\s\S]*?if \(!restored\) return;[\s\S]*?go\("station"\)/u);
+  assert.match(preview, /const record = revisionMaterialRecords\.find\(/u);
+  assert.match(preview, /trigger\?: HTMLButtonElement/u);
+  assert.match(preview, /setRevisionPreviewId\(entryId\)/u);
+  assert.match(preview, /revisionPreviewReturnFocus\.current = trigger/u);
+  assert.match(preview, /scrollIntoView\(\{ behavior: "auto", block: "start" \}\)/u);
+  assert.match(preview, /revision-material-preview-title/u);
+  assert.doesNotMatch(preview, /\b(?:selectStudyPlanStep|selectManualWorkspaceCandidate|go|setStudyInput|commit)\s*\(/u);
+  assert.doesNotMatch(app, /function selectManualWorkspaceCandidate\(/u);
+  assert.match(closePreview, /trigger\?\.isConnected\)[\s\S]*?trigger\.focus/u);
+  assert.doesNotMatch(closePreview, /trigger\.focus\(\{ preventScroll: true \}\)/u);
+  assert.match(closePreview, /revision-materials-library-title/u);
+  assert.match(app, /<h2 id="revision-material-preview-title" tabIndex=\{-1\}/u);
+  assert.match(app, /selectedRevisionMaterial && <section className="revision-material-preview"/u);
+  assert.match(app, /<MaterialSourceReader\s+title=\{selectedRevisionMaterial\.source\.name\}\s+text=\{selectedRevisionMaterial\.source\.text\}/u);
   assert.match(selection, /if \(!commit\([\s\S]*?\)\) return false;/u);
 });
 
@@ -254,6 +270,87 @@ test("reusing a library source persists consent revocation in the same owner-loc
   assert.match(use, /record\.kind === "note" && draftTripId === record\.sessionId/u);
 });
 
+test("restarting the selected plan step rotates completed and tombstoned candidates", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function selectStudyPlanStep(");
+  const end = app.indexOf("function focusRevisionSource", start);
+  const selectStep = app.slice(start, end);
+
+  assert.match(selectStep, /new Set\(\[[\s\S]*?historySessions\([\s\S]*?removedSessionIds[\s\S]*?\]\)/u);
+  assert.match(selectStep, /const candidateUsed = usedSessionIds\.has\(selectedStep\.plannedSessionId\)/u);
+  assert.match(selectStep, /samePlan && plan\.selectedStepId === stepId && !candidateUsed/u);
+  assert.match(selectStep, /candidateUsed\s*\? crypto\.randomUUID\(\)/u);
+  assert.ok(selectStep.indexOf("const candidateUsed") < selectStep.indexOf("samePlan && plan.selectedStepId"));
+});
+
+test("starting a history review clears source consent with its new candidate", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function startReviewTrip(");
+  const end = app.indexOf("function saveStudyOnboardingProgress", start);
+  const review = app.slice(start, end);
+
+  assert.match(review, /selectedPlanId: null,[\s\S]*?selectedStepId: null,[\s\S]*?candidateSessionId: reviewSessionId/u);
+  assert.match(review, /quizPrefetch: \{ \.\.\.storage\.draft\.quizPrefetch, sourceConsent: false \}/u);
+  assert.match(review, /const reviewSessionId = crypto\.randomUUID\(\)/u);
+  assert.match(review, /commit\(\{ \.\.\.current\.current, studyPlanStorage: savedStorage \}\)/u);
+  assert.ok(review.indexOf("commit({ ...current.current, studyPlanStorage: savedStorage })") < review.indexOf("draftSessionIdsRef.current.solo = reviewSessionId"));
+  assert.ok(review.indexOf("commit({ ...current.current, studyPlanStorage: savedStorage })") < review.indexOf("setDraftTripId(reviewSessionId)"));
+  assert.doesNotMatch(review, /rotateDraftSessionId\(draftSessionIdsRef\.current, "solo", null\)/u);
+  assert.doesNotMatch(review, /revokeQuizPrefetchSourceConsent\(/u);
+});
+
+test("first-use tutorial blocks new starts but not a validated authenticated bound-session recovery", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function start(skipPendingExercises");
+  const startEnd = app.indexOf("const hasReadyPreparation", start);
+  const body = app.slice(start, startEnd);
+
+  assert.match(app, /canResumeBoundSynchronizedTrip/u);
+  assert.match(body, /authenticatedMember: owner !== "guest" && Boolean\(user\) && !needsLogin && !authOffline && online/u);
+  assert.match(body, /ownSessionId: synchronizedTrip\?\.ownSessionId/u);
+  assert.match(body, /draftSessionId: draftTripId/u);
+  assert.match(body, /const localBoundDraftReady = Boolean\(synchronizedTrip && group && synchronizedTripDraftForSession/u);
+  assert.match(body, /localDraftReady: localBoundDraftReady/u);
+  assert.match(body, /activeSessionId: current\.current\.active\?\.id \?\? null/u);
+  assert.match(body, /onboarding\.phase !== "complete" && !canResumeBoundSession/u);
+});
+
+test("starting focus durably advances the selected candidate while the active session keeps its original ID", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("const beginFocus = (input:");
+  const end = app.indexOf('if (owner === "guest" && withExercises)', start);
+  const beginFocus = app.slice(start, end);
+
+  assert.notEqual(start, -1);
+  assert.match(beginFocus, /const nextDraftSessionId = input\.groupId \? null : crypto\.randomUUID\(\)/u);
+  assert.match(beginFocus, /advanceStudyPlanCandidateAfterStart\(/u);
+  assert.match(beginFocus, /studyPlanStorage: nextStudyPlanStorage/u);
+  assert.match(beginFocus, /active: trip/u);
+  assert.match(beginFocus, /setDraftTripId\(nextDraftTripId\)/u);
+  assert.match(beginFocus, /draftSessionIdsRef\.current\.solo = nextDraftTripId/u);
+  assert.match(beginFocus, /id: input\.id/u);
+  assert.ok(beginFocus.indexOf("advanceStudyPlanCandidateAfterStart") < beginFocus.indexOf("commit({"));
+  assert.ok(beginFocus.indexOf("if (commit({") < beginFocus.indexOf("draftSessionIdsRef.current.solo = nextDraftTripId"));
+  assert.ok(beginFocus.indexOf("if (commit({") < beginFocus.indexOf("setDraftTripId(nextDraftTripId)"));
+});
+
+test("reloading an active personal session hydrates its next workspace without replacing the active focus goal", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const lockStart = app.indexOf("const value = readSaved(owner)");
+  const lockEnd = app.indexOf("if (pathRun && (pathRun.phase === \"lesson\"", lockStart);
+  const hydration = app.slice(lockStart, lockEnd);
+  const activeFocusStart = app.indexOf("<QuietFocusCanvas");
+  const activeFocusEnd = app.indexOf("essentialControls=", activeFocusStart);
+  const activeFocus = app.slice(activeFocusStart, activeFocusEnd);
+
+  assert.match(hydration, /if \(\(!value\.active \|\| value\.active\.groupId === null\) && \(!pathRun \|\| pathRun\.phase === "review"\)\)/u);
+  assert.match(hydration, /const workspaceIdentity = selectedStudyWorkspaceIdentity\(storage\)/u);
+  assert.match(hydration, /setDraftTripId\(workspaceIdentity\.sessionId\)/u);
+  assert.match(hydration, /setDocumentText\(workspaceDraft\?\.notes \?\? ""\)/u);
+  assert.match(activeFocus, /goal=\{active\.goal\}/u);
+  assert.match(app, /value\.active = restore\(value\.active, tripClockNow\(value\.active, Date\.now\(\)\)\)/u);
+});
+
 test("active focus uses the quiet canvas without moving the session controls or clock ownership", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const focusStart = app.indexOf("{view === \"focus\" &&");
@@ -272,4 +369,33 @@ test("active focus uses the quiet canvas without moving the session controls or 
   assert.match(focus, /setConfirm\("finish"\)/u);
   assert.match(focus, /studyFullscreen\.toggle/u);
   assert.doesNotMatch(focus, /<FlipClock/u);
+});
+
+test("retired group setup is not rendered while active group sessions retain their existing status", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const workspaceStart = app.indexOf("(view === \"station\" || view === \"ticket\") && (");
+  const focusStart = app.indexOf("{view === \"focus\"", workspaceStart);
+  const mapStart = app.indexOf("{view === \"map\" && (");
+  const mapEnd = app.indexOf("{view === \"journal\" && (", mapStart);
+  const workspace = app.slice(workspaceStart, focusStart);
+  const map = app.slice(mapStart, mapEnd);
+  const focusStartBody = app.indexOf("<QuietFocusCanvas", focusStart);
+  const focusEnd = app.indexOf("{view === \"map\" && (", focusStartBody);
+  const focus = app.slice(focusStartBody, focusEnd);
+
+  assert.doesNotMatch(app, /view === "group"\s*&&/u);
+  assert.doesNotMatch(workspace, /Cùng chuyến|Khởi hành cùng lúc|Sẵn sàng →|prepareGroupTripTicket|markSynchronizedTripReady|Lập chuyến đi chung|Tham gia chuyến/u);
+  assert.doesNotMatch(map, /setMode\("group"\)|Bản đồ đoàn|Bản đồ chuyến đi chung/u);
+  assert.match(focus, /active\.groupId && <p className="overhead-hint">Tiến độ nhóm cập nhật/u);
+  assert.match(app, /canOfferLegacyGroupCleanup\(\{/u);
+  assert.match(app, /authenticatedMember: owner !== "guest" && Boolean\(user\) && !needsLogin && !authOffline && online/u);
+  assert.match(app, /ownStatus: ownGroupTripStatus/u);
+  assert.match(app, /hasActiveSession: Boolean\(group && saved\.active\?\.groupId === group\.id\)/u);
+  const accountStart = app.indexOf("{view === \"account\" && (");
+  const accountEnd = app.indexOf("</main>", accountStart);
+  const legacyCleanup = app.slice(accountStart, accountEnd);
+  assert.match(legacyCleanup, /legacyGroupCleanupAvailable &&[\s\S]*?setConfirm\("leave"\)/u);
+  assert.match(legacyCleanup, /ownsWaitingLegacyTrip \? "Hủy chuyến chờ cũ" : "Rời đoàn cũ"/u);
+  assert.match(app, /ownsWaitingLegacyTrip\s*\?\s*"Chuyến đang chờ sẽ bị hủy cho tất cả thành viên\.[\s\S]*?"/u);
+  assert.match(app, /if \(!legacyGroupCleanupAvailable\) throw new Error\([\s\S]*?mutation\("leave", \{\}\)/u);
 });

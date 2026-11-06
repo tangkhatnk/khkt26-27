@@ -114,3 +114,32 @@ export function shouldAutoResumeSynchronizedTrip(input: {
     !input.activeSessionId && !input.inFlight &&
     !input.pendingSessionIds?.includes(sessionId!) && !input.savedSessionIds?.includes(sessionId!);
 }
+
+/** Allow an authenticated member to recover only their already-bound local session. */
+export function canResumeBoundSynchronizedTrip(input: {
+  authenticatedMember: boolean;
+  tripStatus?: string;
+  ownStatus?: string;
+  ownSessionId?: string;
+  draftSessionId: string;
+  localDraftReady: boolean;
+  activeSessionId?: string | null;
+}): boolean {
+  return input.authenticatedMember && input.tripStatus === "departed" && input.ownStatus === "bound" &&
+    Boolean(input.ownSessionId) && input.ownSessionId === input.draftSessionId && input.localDraftReady &&
+    !input.activeSessionId;
+}
+
+/** Expose only a cleanup action for a stale membership that cannot own a session. */
+export function canOfferLegacyGroupCleanup(input: {
+  authenticatedMember: boolean;
+  isMember: boolean;
+  tripStatus?: string;
+  ownStatus?: string;
+  hasActiveSession: boolean;
+  hasPendingSession: boolean;
+}): boolean {
+  return input.authenticatedMember && input.isMember &&
+    (input.tripStatus === undefined || input.tripStatus === "waiting") &&
+    input.ownStatus !== "bound" && !input.hasActiveSession && !input.hasPendingSession;
+}
