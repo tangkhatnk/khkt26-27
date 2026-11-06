@@ -226,6 +226,7 @@ html[data-theme="dark"] .adventure .focus-card .flip-clock-separator {
 .adventure.adventure--quiet-focus .quiet-focus-canvas__clock {
   width: min(calc(100vw - 2rem), 112.5rem);
   max-width: none;
+  grid-template-columns: minmax(0, 1fr);
   justify-self: center;
 }
 

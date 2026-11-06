@@ -101,6 +101,11 @@ test("the full 240:00 readout scales to the available width across portrait and 
   assert.ok(appFocusWidthRule);
   assert.match(focusWidthRule[2], /width:\s*min\(calc\(100vw - 2rem\),\s*112\.5rem\)/u);
   assert.match(focusWidthRule[2], /max-width:\s*none/u);
+  assert.match(
+    focusWidthRule[2],
+    /grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
+    "the inline-size timer needs a definite track or its width can collapse to zero in the focus grid",
+  );
   assert.match(appFocusWidthRule[2], /width:\s*100%/u);
   assert.ok(
     (focusWidthRule[1].match(/\./gu) ?? []).length > (appFocusWidthRule[1].match(/\./gu) ?? []).length,
