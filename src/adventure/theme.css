@@ -186,14 +186,14 @@ html[data-theme="dark"] .adventure .little-ticket p {
   color: #c8d5c9;
 }
 
-html[data-theme="dark"] .adventure button:not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]),
+html[data-theme="dark"] .adventure button:not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]):not(.study-plan-workspace__route-node),
 html[data-theme="dark"] .adventure .experiment-export {
   background: var(--surface-raised);
   border-color: var(--line);
   color: var(--text);
 }
 
-html[data-theme="dark"] .adventure button:hover:not(:disabled):not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]),
+html[data-theme="dark"] .adventure button:hover:not(:disabled):not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]):not(.study-plan-workspace__route-node),
 html[data-theme="dark"] .adventure .experiment-export:hover {
   background: #304438;
 }

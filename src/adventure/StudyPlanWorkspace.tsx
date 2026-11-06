@@ -108,8 +108,7 @@ export function StudyPlanStepNavigation({
   selectedStepId: string;
   onSelectStep?: (stepId: string) => void;
 }) {
-  // Keep the exported standalone navigation helper compatible with legacy callers. The Workspace passes [] when its App-owned map is absent.
-  const resolvedStepStates = stepStates ?? steps.map((step) => ({ stepId: step.id, state: "available" as const }));
+  const resolvedStepStates = stepStates ?? [];
   const availableStepId = steps.find((step) => getStudyPlanStepState(step.id, resolvedStepStates) === "available")?.id;
   const hasLockedSteps = steps.some((step) => getStudyPlanStepState(step.id, resolvedStepStates) === "locked");
   return <div className="study-plan-workspace__route-frame">

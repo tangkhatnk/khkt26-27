@@ -136,6 +136,15 @@ test("missing route state is locked rather than inferred from the selected step"
   assert.equal(routeButtons.length, 3);
   assert.equal(routeButtons.every((button) => /disabled=""/u.test(button)), true);
   assert.match(view, /class="[^"]*is-locked is-selected"[^>]*aria-label="Bước 2:[^"]*" aria-current="step" disabled=""/u);
+
+  const standalone = StudyPlanStepNavigation({
+    steps,
+    selectedStepId: "step-now",
+    onSelectStep: (id) => assert.fail(`missing state must not enable ${id}`),
+  });
+  const standaloneButtons = collectElements(standalone).filter((node) => node.type === "button");
+  assert.equal(standaloneButtons.every((button) => button.props.disabled), true);
+  standaloneButtons[1].props.onClick();
 });
 
 test("staggered route wraps long Vietnamese titles and becomes a vertical mobile rail without horizontal scrolling", async () => {
@@ -154,8 +163,20 @@ test("staggered route wraps long Vietnamese titles and becomes a vertical mobile
   assert.match(css, /\.study-plan-workspace__plan-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*\.92fr\)\s+minmax\(0,\s*1\.08fr\)/su);
   assert.match(css, /@media\s*\(max-width:\s*860px\)[\s\S]*?\.study-plan-workspace__selected-step\s*\{[^}]*grid-row:\s*1/su);
   assert.match(css, /@media\s*\(max-width:\s*860px\)[\s\S]*?\.study-plan-workspace__route-frame\s*\{[^}]*grid-row:\s*2/su);
-  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.study-plan-workspace__step-route\s*\{[^}]*grid-template-columns:\s*56px\s+minmax\(0,\s*1fr\)/u);
-  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.study-plan-workspace__route-node-wrap--left\.study-plan-workspace__route-node-wrap--far\s*\{\s*left:\s*-8%/u);
+  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.study-plan-workspace__step-route\s*\{[^}]*grid-template-columns:\s*88px\s+minmax\(0,\s*1fr\)/u);
+  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.study-plan-workspace__route-node-wrap--left\.study-plan-workspace__route-node-wrap--far\s*\{\s*left:\s*-15%/u);
+  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.study-plan-workspace__route-node-wrap--left\.study-plan-workspace__route-node-wrap--near\s*\{\s*left:\s*-12%/u);
   assert.match(css, /\.study-plan-workspace__step-route\s*\{[^}]*overflow-x:\s*visible/su);
   assert.doesNotMatch(css, /\.study-plan-workspace__step-route[^}]*overflow-x:\s*(?:auto|scroll)/su);
+});
+
+test("route node dimensions and dark-theme exclusions survive generic button styles", async () => {
+  const css = await readFile(resolve(projectRoot, "src/adventure/studyPlanWorkspace.css"), "utf8");
+  const theme = await readFile(resolve(projectRoot, "src/adventure/theme.css"), "utf8");
+  const genericDarkButtonSelectors = (theme.match(/html\[data-theme="dark"\] \.adventure button[^{]+/gu) ?? [])
+    .filter((selector) => selector.includes(":not(.primary)"));
+
+  assert.match(css, /\.adventure button\.study-plan-workspace__route-node\s*\{[^}]*padding:\s*0;[^}]*border-radius:\s*50%/su);
+  assert.equal(genericDarkButtonSelectors.length, 2);
+  assert.equal(genericDarkButtonSelectors.every((selector) => selector.includes(":not(.study-plan-workspace__route-node)")), true);
 });
