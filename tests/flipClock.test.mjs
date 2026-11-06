@@ -89,14 +89,23 @@ test("minute overflow uses a wide panel that remains responsive at phone width",
 
 test("the full 240:00 readout scales to the available width across portrait and landscape sizes", async () => {
   const css = await readFile(resolve(projectRoot, "src/adventure/flipClock.css"), "utf8");
+  const appCss = await readFile(resolve(projectRoot, "src/adventure/adventure.css"), "utf8");
   const timerRule = css.match(/\.timer\.flip-clock\s*\{([^}]*)\}/u)?.[1] ?? "";
   const readoutRule = css.match(/\.flip-clock-readout\s*\{([^}]*)\}/u)?.[1] ?? "";
-  const focusWidthRule = css.match(/\.adventure--quiet-focus \.quiet-focus-canvas__clock\s*\{([^}]*)\}/u)?.[1] ?? "";
+  const focusWidthRule = css.match(/(\.adventure\.adventure--quiet-focus \.quiet-focus-canvas__clock)\s*\{([^}]*)\}/u);
+  const appFocusWidthRule = appCss.match(/(\.adventure--quiet-focus \.quiet-focus-canvas__clock),\s*\.adventure--quiet-focus \.quiet-focus-canvas__essentials\s*\{([^}]*)\}/u);
 
   assert.match(timerRule, /container-type:\s*inline-size/u);
   assert.match(readoutRule, /font-size:\s*clamp\(2rem,\s*min\(23vw,\s*42vh,\s*24cqi\),\s*27rem\)/u);
-  assert.match(focusWidthRule, /width:\s*min\(calc\(100vw - 2rem\),\s*112\.5rem\)/u);
-  assert.match(focusWidthRule, /max-width:\s*none/u);
+  assert.ok(focusWidthRule);
+  assert.ok(appFocusWidthRule);
+  assert.match(focusWidthRule[2], /width:\s*min\(calc\(100vw - 2rem\),\s*112\.5rem\)/u);
+  assert.match(focusWidthRule[2], /max-width:\s*none/u);
+  assert.match(appFocusWidthRule[2], /width:\s*100%/u);
+  assert.ok(
+    (focusWidthRule[1].match(/\./gu) ?? []).length > (appFocusWidthRule[1].match(/\./gu) ?? []).length,
+    "the clock wrapper selector must outrank the later app width rule",
+  );
   assert.match(css, /@media \(max-width: 920px\)[\s\S]*?\.flip-clock-readout\s*\{[^}]*23cqi/su);
 
   const viewports = [
