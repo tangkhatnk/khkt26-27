@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { isStudyWorkspaceView, useBrowserView } from "./navigation";
+import { canonicalStudyView, isStudyWorkspaceView, replaceBrowserView, useBrowserView } from "./navigation";
 import { useAuthStore } from "@/store/authStore";
 import { getAuthGeneration, post, request } from "@/services/api";
 import { postGuestAi, startGuestAiSession } from "@/services/guestAiApi";
@@ -98,6 +98,8 @@ import { buildQuizGenerationPayload, quizDraftFromQuestions, quizGenerationSourc
 import { guestPublicationNotice, permanentGuestFailure, publishGuestSessions, type GuestPublicationStatus } from "./guestPublication";
 import { GuestHistorySync } from "./GuestHistorySync";
 import { SessionCorrectionNotice } from "./SessionCorrectionNotice";
+import { RevisionMaterialsLibrary } from "./RevisionMaterialsLibrary";
+import { buildRevisionMaterialEntries, collectRevisionMaterialRecords } from "./revisionMaterialEntries";
 import { studyTopics } from "./topics";
 import {
   CURATED_COURSES,
@@ -187,7 +189,7 @@ const stories = [
 ];
 const nav = [
   { id: "station", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 7.5 10 3l6.5 4.5v9h-13v-9Z"/><path d="M8 16.5v-5h4v5"/></svg>, label: "Lộ trình", mobileLabel: "Lộ trình" },
-  { id: "group", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="6" r="2.5"/><path d="M2.5 17v-1.5a4.5 4.5 0 0 1 9 0V17m1-11a2.5 2.5 0 1 1 0 5m2 2a4 4 0 0 1 3 4v.5"/></svg>, label: "Học cùng bạn", mobileLabel: "Học nhóm" },
+  { id: "library", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 4.5h8.5a3 3 0 0 1 3 3v8H6a3 3 0 0 1-3-3z"/><path d="M6 4.5v11m3-8h3m-3 3h3"/></svg>, label: "Thư viện ôn tập", mobileLabel: "Tài liệu" },
   { id: "journal", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5h12v15H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M7 7h7m-7 4h7m-7 4h4"/></svg>, label: "Nhật ký học tập", mobileLabel: "Nhật ký" },
   { id: "experiments", icon: <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3v7l4 2.5M17 8a7.5 7.5 0 1 1-3-4"/><path d="M14 2.5h4v4"/></svg>, label: "Lịch sử phiên học", mobileLabel: "Lịch sử" },
   { id: "report", icon: <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 3.5v13h14" /><path d="M6 13v-3m4 3V6m4 7V8" strokeLinecap="round" /></svg>, label: "Báo cáo", mobileLabel: "Báo cáo" },
@@ -256,17 +258,16 @@ export default function AdventureApp() {
 }
 function AdventureWorkspace() {
   const [requestedView, setView] = useBrowserView();
-  const views = ["station", "lesson", "map", "carriage", "group", "library", "journal", "experiments", "report", "ticket", "focus", "summary", "account", "admin"];
   const { user, login, logout, offline: authOffline, needsLogin } = useAuthStore();
   const owner = user?.id ?? "guest";
   const [saved, setSaved] = useState<Saved>(emptySaved);
   const [loaded, setLoaded] = useState(false);
-  const requestedRoute = views.includes(requestedView)
-    ? requestedView === "lesson" ? (saved.active ? "focus" : "station") : requestedView
-    : "station";
   const firstUseNeedsWorkspace = loaded && !saved.active &&
     saved.studyPlanStorage?.onboarding.phase !== "complete";
-  const view = firstUseNeedsWorkspace ? "station" : requestedRoute;
+  const view = canonicalStudyView(requestedView, {
+    active: Boolean(saved.active),
+    firstUseNeedsWorkspace,
+  });
   const viewRef = useRef(view);
   viewRef.current = view;
   const current = useRef(saved),
@@ -300,8 +301,8 @@ function AdventureWorkspace() {
   const studyFullscreen = useStudyFullscreen(view === "focus" && hasActiveTrip);
   const [exclusive, setExclusive] = useState(false);
   useEffect(() => {
-    if (loaded && requestedView !== view) setView(view);
-  }, [loaded, requestedView, view, setView]);
+    if (loaded && requestedView !== view) replaceBrowserView(view);
+  }, [loaded, requestedView, view]);
   const [storageError, setStorageError] = useState(false);
   const [clockSkewUnsupported, setClockSkewUnsupported] = useState(false);
   const [serverClockReady, setServerClockReady] = useState(false);
@@ -982,6 +983,36 @@ function AdventureWorkspace() {
       topicLabel: (topicId) => availableTopics.find((item) => item.id === topicId)?.name ?? topicId,
     }),
   ), [owner, sessions, learningPathProgress, saved.quizDrafts, availableTopics]);
+  const revisionMaterialRecords = useMemo(() => collectRevisionMaterialRecords({
+    current: {
+      sessionId: draftTripId,
+      planId: studyPlanStorage.draft.selectedPlanId,
+      stepId: studyPlanStorage.draft.selectedStepId,
+      notes: documentText,
+      sources,
+      materials,
+    },
+    drafts: (saved.studyPlanStorage?.workspaceDrafts ?? []).map((draft) => ({
+      sessionId: draft.sessionId,
+      planId: draft.planId,
+      stepId: draft.stepId,
+      notes: draft.notes,
+      sources: draft.sources,
+      materials: draft.materials,
+    })),
+    history: sessions.filter((session) => session.userId === owner).map((session) => ({
+      sessionId: session.id,
+      planId: null,
+      stepId: null,
+      notes: saved.notes[session.id],
+      sources: saved.sources?.[session.id] ?? [],
+      materials: saved.materials?.[session.id] ?? [],
+    })),
+  }, removedSessionIds), [draftTripId, studyPlanStorage.draft.selectedPlanId,
+    studyPlanStorage.draft.selectedStepId, documentText, sources, materials,
+    saved.studyPlanStorage?.workspaceDrafts, sessions, owner, removedSessionIds,
+    saved.notes, saved.sources, saved.materials]);
+  const revisionMaterialEntries = useMemo(() => buildRevisionMaterialEntries(revisionMaterialRecords), [revisionMaterialRecords]);
   const selectedLearningCourse = CURATED_COURSES.find((course) => course.id === learningPathProgress.selectedCourseId) ?? CURATED_COURSES[0];
   const learningPathCourse = CURATED_COURSES.find((course) => course.id === learningPathProgress.activeRun?.courseId) ?? selectedLearningCourse;
   const learningPathStates = lessonStates(learningPathCourse, learningPathProgress);
@@ -3170,9 +3201,11 @@ function AdventureWorkspace() {
   }
   function persistStudyWorkspaceDraft(
     changes: Partial<{ notes: string; sources: MaterialSource[]; materials: MaterialInfo[] }> = {},
+    options: { revokeSourceConsent?: boolean } = {},
   ): boolean {
     const value = current.current;
-    if (!loaded || !exclusive || value.active || mode !== "solo" || !isStudyWorkspaceView(view)) return true;
+    if (!loaded || !exclusive || value.active || mode !== "solo" ||
+        (!isStudyWorkspaceView(view) && view !== "library")) return true;
     let storage = value.studyPlanStorage ?? createStudyPlanStorage();
     const selectedIdentity = selectedStudyWorkspaceIdentity(storage);
     if (selectedIdentity.planId && selectedIdentity.sessionId !== draftTripIdRef.current) {
@@ -3186,13 +3219,22 @@ function AdventureWorkspace() {
       storage = { ...storage, draft: { ...storage.draft, candidateSessionId: identity.sessionId } };
     }
     try {
-      const nextStorage = saveStudyWorkspaceDraft(storage, {
+      const savedStorage = saveStudyWorkspaceDraft(storage, {
         ...identity,
         notes: changes.notes ?? documentText,
         sources: changes.sources ?? sources,
         materials: changes.materials ?? materials,
         updatedAt: Date.now(),
       });
+      const nextStorage = options.revokeSourceConsent
+        ? {
+            ...savedStorage,
+            draft: {
+              ...savedStorage.draft,
+              quizPrefetch: { ...savedStorage.draft.quizPrefetch, sourceConsent: false },
+            },
+          }
+        : savedStorage;
       const saved = commit({ ...value, studyPlanStorage: nextStorage });
       if (!saved) return false;
       setError("");
@@ -3204,20 +3246,22 @@ function AdventureWorkspace() {
       return false;
     }
   }
-  function selectStudyPlanStep(stepId: string) {
+  function selectStudyPlanStep(stepId: string, targetPlanId?: string): boolean {
     const currentStorage = current.current.studyPlanStorage;
-    if (!currentStorage || current.current.active || mode !== "solo") return;
+    if (!currentStorage || current.current.active || mode !== "solo") return false;
     let storage = currentStorage;
-    const plan = currentStorage.plans.find((entry) => entry.id === currentStorage.draft.selectedPlanId);
-    if (!plan || plan.selectedStepId === stepId) return;
+    const plan = currentStorage.plans.find((entry) => entry.id === (targetPlanId ?? currentStorage.draft.selectedPlanId));
+    if (!plan) return false;
+    const samePlan = plan.id === currentStorage.draft.selectedPlanId;
+    if (samePlan && plan.selectedStepId === stepId) return true;
     if (busy || materialRequest.current || studyGuideNeedsConfirmation) {
       setError("Hãy kết thúc thao tác nội dung đang mở trước khi đổi bước học.");
-      return;
+      return false;
     }
     const selectedStep = plan.steps.find((step) => step.id === stepId);
-    if (!selectedStep) return;
+    if (!selectedStep) return false;
     const currentIdentity = selectedStudyWorkspaceIdentity(storage);
-    if (currentIdentity.planId && currentIdentity.sessionId === draftTripIdRef.current) {
+    if (currentIdentity.sessionId === draftTripIdRef.current) {
       try {
         storage = saveStudyWorkspaceDraft(storage, {
           ...currentIdentity,
@@ -3228,7 +3272,7 @@ function AdventureWorkspace() {
         });
       } catch {
         setError("Không thể lưu nội dung của bước hiện tại. Hãy kiểm tra dung lượng rồi thử lại.");
-        return;
+        return false;
       }
     }
     const usedSessionIds = new Set(historySessions(current.current, ownerRef.current).map((session) => session.id));
@@ -3241,10 +3285,18 @@ function AdventureWorkspace() {
       updatedAt: Date.now(),
       steps: plan.steps.map((step) => step.id === stepId ? { ...step, plannedSessionId } : step),
     };
+    const nextGoal = samePlan ? storage.draft.goal : plan.goal;
+    const nextTopicId = samePlan ? storage.draft.topicId : plan.topicId;
+    const nextTopicLabel = samePlan ? storage.draft.topicLabel : plan.topicLabel;
+    const nextLevel = samePlan ? storage.draft.level : plan.level;
     const nextStorage = {
       ...storage,
       draft: {
         ...storage.draft,
+        goal: nextGoal,
+        topicId: nextTopicId,
+        topicLabel: nextTopicLabel,
+        level: nextLevel,
         selectedPlanId: plan.id,
         selectedStepId: stepId,
         candidateSessionId: plannedSessionId,
@@ -3257,17 +3309,172 @@ function AdventureWorkspace() {
     if (!commit({
       ...current.current,
       studyPlanStorage: nextStorage,
-    })) return;
-    updateQuickTripDraft(quickTripDraft, { selectedPlanId: plan.id, selectedStepId: stepId });
+    })) return false;
+    updateQuickTripDraft(quickTripDraft, {
+      goal: nextGoal,
+      topic: nextTopicId,
+      topicLabel: nextTopicLabel,
+      level: nextLevel,
+      selectedPlanId: plan.id,
+      selectedStepId: stepId,
+    });
     cancelPendingStudyExerciseForStart(draftTripId);
     invalidateStudyExercisePreparationForSession(draftTripId);
     setDraftTripId(plannedSessionId);
     draftSessionIdsRef.current.solo = plannedSessionId;
+    setGoal(nextGoal);
+    setTopic(nextTopicId);
     setDocumentText(targetDraft?.notes ?? "");
     setSources(structuredClone(targetDraft?.sources ?? []));
     setMaterials(structuredClone(targetDraft?.materials ?? []));
     originalFiles.current.clear();
     setError("");
+    return true;
+  }
+  function selectManualWorkspaceCandidate(sessionId: string): boolean {
+    const value = current.current;
+    if (value.active || mode !== "solo" || busy || materialRequest.current || studyGuideNeedsConfirmation) {
+      setError("Hãy kết thúc thao tác đang mở trước khi xem nguồn trong bản nháp khác.");
+      return false;
+    }
+    if (sessionId === draftTripIdRef.current && !value.studyPlanStorage?.draft.selectedPlanId) return true;
+    let storage = value.studyPlanStorage ?? createStudyPlanStorage();
+    const currentIdentity = selectedStudyWorkspaceIdentity(storage);
+    if (currentIdentity.sessionId === draftTripIdRef.current) {
+      try {
+        storage = saveStudyWorkspaceDraft(storage, {
+          ...currentIdentity,
+          notes: documentText,
+          sources,
+          materials,
+          updatedAt: Date.now(),
+        });
+      } catch {
+        setError("Không thể lưu nội dung hiện tại. Hãy kiểm tra dung lượng rồi thử lại.");
+        return false;
+      }
+    }
+    const identity = { sessionId, planId: null, stepId: null } as const;
+    const nextStorage = {
+      ...storage,
+      draft: {
+        ...storage.draft,
+        selectedPlanId: null,
+        selectedStepId: null,
+        candidateSessionId: sessionId,
+        quizPrefetch: { ...storage.draft.quizPrefetch, sourceConsent: false },
+      },
+    };
+    const targetDraft = findStudyWorkspaceDraft(nextStorage, identity);
+    if (!commit({ ...value, studyPlanStorage: nextStorage })) return false;
+    updateQuickTripDraft(quickTripDraft, { selectedPlanId: null, selectedStepId: null });
+    cancelPendingStudyExerciseForStart(draftTripId);
+    invalidateStudyExercisePreparationForSession(draftTripId);
+    setDraftTripId(sessionId);
+    draftSessionIdsRef.current.solo = sessionId;
+    setDocumentText(targetDraft?.notes ?? "");
+    setSources(structuredClone(targetDraft?.sources ?? []));
+    setMaterials(structuredClone(targetDraft?.materials ?? []));
+    originalFiles.current.clear();
+    setStudyPlanStatus("idle");
+    setStudyPlanError("");
+    setError("");
+    return true;
+  }
+  function focusRevisionSource(sourceId: string) {
+    requestAnimationFrame(() => {
+      const details = [...document.querySelectorAll<HTMLDetailsElement>("details[data-revision-source-id]")]
+        .find((item) => item.dataset.revisionSourceId === sourceId);
+      if (!details) return;
+      details.open = true;
+      details.scrollIntoView({ behavior: "auto", block: "center" });
+      details.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+    });
+  }
+  function focusRevisionNote(entryId: string) {
+    requestAnimationFrame(() => {
+      const panel = [...document.querySelectorAll<HTMLElement>("[data-revision-note-id]")]
+        .find((item) => item.dataset.revisionNoteId === entryId);
+      const field = panel?.querySelector<HTMLTextAreaElement>("textarea");
+      if (!field) return;
+      field.scrollIntoView({ behavior: "auto", block: "center" });
+      field.focus({ preventScroll: true });
+    });
+  }
+  function previewRevisionMaterial(entryId: string) {
+    const record = revisionMaterialRecords.find((item) => item.id === entryId);
+    if (!record || removedSessionIds.includes(record.sessionId ?? "")) return;
+    const session = sessions.find((item) => item.id === record.sessionId && item.userId === owner &&
+      !removedSessionIds.includes(item.id));
+    if (session) {
+      if (!commit({ ...current.current, summarySessionId: session.id })) return;
+      setSummary(session as Session);
+      go("summary");
+      focusRevisionSource(record.id);
+      return;
+    }
+    const restored = record.planId && record.stepId
+      ? selectStudyPlanStep(record.stepId, record.planId)
+      : selectManualWorkspaceCandidate(record.sessionId ?? "");
+    if (!restored) return;
+    if (record.kind === "note") setStudyInput("notes");
+    go("station");
+    if (record.kind === "note") focusRevisionNote(record.id);
+    else focusRevisionSource(record.id);
+  }
+  function useRevisionMaterialInPlan(entryId: string) {
+    const record = revisionMaterialRecords.find((item) => item.id === entryId);
+    if (!record || removedSessionIds.includes(record.sessionId ?? "") ||
+        !record.source.reviewed || record.source.text.trim().length < 10) return;
+    if (saved.active || mode !== "solo" || busy || tutorialActive || !loaded || !exclusive) {
+      setError("Hãy mở một buổi học cá nhân đang được lưu để dùng tài liệu.");
+      return;
+    }
+    const existing = sources.find((item) => item.id === record.source.id && draftTripId === record.sessionId);
+    if (existing) {
+      go("station");
+      focusRevisionSource(JSON.stringify([draftTripId, existing.id]));
+      return;
+    }
+    if (record.kind === "note" && draftTripId === record.sessionId) {
+      setStudyInput("notes");
+      go("station");
+      focusRevisionNote(record.id);
+      return;
+    }
+    const copiedSource = { ...record.source, id: crypto.randomUUID() };
+    const appendCheck = validateStudyGuideAppend(sources, materials, copiedSource);
+    if (!appendCheck.ok) {
+      setError(appendCheck.message);
+      setNotice("");
+      return;
+    }
+    const copiedMaterial: MaterialInfo = {
+      sourceId: copiedSource.id,
+      name: copiedSource.name,
+      size: record.material?.size ?? new TextEncoder().encode(copiedSource.text).length,
+      type: record.material?.type ?? "text/plain",
+      status: record.material?.status ?? "extracted",
+      message: record.material?.message ?? "Nguồn đã được kiểm tra trong thư viện.",
+    };
+    const nextSources = [...sources, copiedSource];
+    const nextMaterials = [...materials, copiedMaterial];
+    if (!persistStudyWorkspaceDraft({ sources: nextSources, materials: nextMaterials }, { revokeSourceConsent: true })) return;
+    setSources(nextSources);
+    setMaterials(nextMaterials);
+    setStudyInput("files");
+    go("station");
+    setError("");
+    setNotice("Đã thêm bản sao riêng của tài liệu vào buổi học. Hãy xem lại nguồn trước khi gửi cho AI.");
+    focusRevisionSource(JSON.stringify([draftTripId, copiedSource.id]));
+  }
+  function openWorkspaceSourceMode(mode: "notes" | "files" | "ai") {
+    if (saved.active) {
+      go("focus");
+      return;
+    }
+    setStudyInput(mode);
+    go("station");
   }
   function persistQuickTripStudyDraft(changes: Partial<QuickTripDraft>) {
     const draft = "minutes" in changes
@@ -3577,7 +3784,7 @@ function AdventureWorkspace() {
                           hasExistingContent={Boolean(materials.length || sources.length || documentText.trim())}
                         />
                       </div>
-                      <div className="departure-source-panel" hidden={studyInput !== "notes"}>
+                      <div className="departure-source-panel" data-revision-note-id={JSON.stringify([draftTripId, "notes"])} hidden={studyInput !== "notes"}>
                         <StudyNotesInput value={documentText} onChange={(text) => {
                           revokeQuizPrefetchSourceConsent();
                           setDocumentText(text);
@@ -3635,7 +3842,7 @@ function AdventureWorkspace() {
                           ? ui.error
                           : "";
                         const canGenerateSummary = canGeneratePrivateMaterialSummary(targetView, source);
-                        return <details className="material-source" key={source.id} open={!source.reviewed}>
+                        return <details className="material-source" key={source.id} data-revision-source-id={JSON.stringify([draftTripId, source.id])} open={!source.reviewed}>
                         <summary>{source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra nội dung"}</summary>
                         <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} disabled={busy || privateTripDraftLocked} maxLength={source.source === "ai-generated" ? 20000 : 50000} textareaLabel={`Nội dung nguồn · ${source.name}`} placeholder="Nhập hoặc sửa bản chép đúng của tài liệu. Không tự dịch nội dung." onChange={(text) => {
                           noteStudyExerciseSourceChange(draftTripId, source.id);
@@ -4229,6 +4436,14 @@ function AdventureWorkspace() {
                   </div>
                 </>
               )}
+              {view === "library" && <RevisionMaterialsLibrary
+                entries={revisionMaterialEntries}
+                onPreview={previewRevisionMaterial}
+                onUseInPlan={useRevisionMaterialInPlan}
+                onAddNotes={() => openWorkspaceSourceMode("notes")}
+                onAddFiles={() => openWorkspaceSourceMode("files")}
+                onComposeWithAI={() => openWorkspaceSourceMode("ai")}
+              />}
               {view === "group" && (
                 <>
                   <Heading
@@ -4714,6 +4929,10 @@ function AdventureWorkspace() {
                     <section className="panel">
                       <h2>Ôn tập phiên học</h2>
                       {!!saved.materials?.[summarySession.id]?.length && <details className="material-history"><summary>Tài liệu của phiên · {saved.materials[summarySession.id].length} tệp</summary><ul className="material-list">{saved.materials[summarySession.id].map((file, i) => <li key={`${i}:${file.name}`}><strong>{file.name}</strong><span>{file.message}</span></li>)}</ul></details>}
+                      {!!saved.notes[summarySession.id]?.trim() && <details className="material-source" data-revision-source-id={JSON.stringify([summarySession.id, "notes"])}>
+                        <summary>Ghi chú buổi học</summary>
+                        <div className="material-source__notes">{saved.notes[summarySession.id]}</div>
+                      </details>}
                       <p>
                         Bạn có thể xem lại câu hỏi và tài liệu. Phần học của bạn đã được lưu.
                       </p>
@@ -4739,7 +4958,7 @@ function AdventureWorkspace() {
                         const summaryUnavailableReason = !canGenerateSummary
                           ? privateMaterialSummaryUnavailableReason("summary")
                           : owner === "guest" ? "Tóm tắt được lưu riêng trên thiết bị này." : "";
-                        return <details className="material-source" key={source.id} open={!source.reviewed}>
+                        return <details className="material-source" key={source.id} data-revision-source-id={JSON.stringify([summarySession.id, source.id])} open={!source.reviewed}>
                           <summary>Nguồn câu hỏi · {source.name} · {source.reviewed ? "Đã kiểm tra" : "Cần kiểm tra"}</summary>
                           <MaterialSourceReader title={source.name} text={source.text} aiGenerated={source.source === "ai-generated"} illustrations={source.illustrations} textareaLabel="Bản chép tài liệu" onChange={(text) => {
                             const value = current.current;

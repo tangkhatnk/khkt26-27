@@ -2005,6 +2005,7 @@ body {
 .material-source summary { cursor: pointer; font-weight: 650; margin-bottom: .75rem; overflow-wrap: anywhere; }
 .material-source label { display: grid; gap: .6rem; }
 .material-source textarea { width: 100%; line-height: 1.6; }
+.material-source__notes { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .material-source .choice-row { flex-wrap: wrap; margin-top: .7rem; }
 .material-summary-control { display: grid; gap: .6rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--line, #d7e0d5); }
 .material-summary-control > p { margin: 0; }

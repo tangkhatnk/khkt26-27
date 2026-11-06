@@ -476,7 +476,7 @@ test("retrieval tutorial asks for a local preference change rather than an ackno
 
 test("selected plan steps bind their planned session id without changing the manual duration", async () => {
   const app = (await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8")).replace(/\r\n?/gu, "\n");
-  const selectStart = app.indexOf("function selectStudyPlanStep(stepId: string)");
+  const selectStart = app.indexOf("function selectStudyPlanStep(");
   const persistStart = app.indexOf("function persistQuickTripStudyDraft", selectStart);
   const selection = app.slice(selectStart, persistStart);
 
@@ -519,9 +519,8 @@ test("old lesson and ticket URLs recover a pending legacy run as a personal draf
   assert.match(normalizedApp, /updateStudyPlanDraftFromQuickTrip\(studyStorage\.draft, draft, topicLabel\)/u);
   assert.match(normalizedApp, /value\.notes = \{ \.\.\.value\.notes, \[pathRun\.sessionId\]: recoveredText \}/u);
   assert.match(normalizedApp, /value\.sources = \{ \.\.\.value\.sources, \[pathRun\.sessionId\]: recoveredSources \}/u);
-  assert.match(normalizedApp, /requestedView === "lesson" \? \(saved\.active \? "focus" : "station"\) : requestedView/u);
-  assert.match(normalizedApp, /if \(loaded && requestedView !== view\) setView\(view\)/u);
-  assert.match(normalizedApp, /const views = \[[^\]]*"lesson"[^\]]*"ticket"/u);
+  assert.match(normalizedApp, /canonicalStudyView\(requestedView/u);
+  assert.match(normalizedApp, /if \(loaded && requestedView !== view\) replaceBrowserView\(view\)/u);
   assert.match(normalizedApp, /view === "station" \|\| view === "ticket"/u);
 });
 

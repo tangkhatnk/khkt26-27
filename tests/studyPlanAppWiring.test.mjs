@@ -17,7 +17,7 @@ test("planner generation and step selection update the synchronous draft before 
   const generateStart = app.indexOf("const planId = crypto.randomUUID()");
   const generateEnd = app.indexOf('setStudyPlanStatus("ready")', generateStart);
   const generation = app.slice(generateStart, generateEnd);
-  const selectStart = app.indexOf("function selectStudyPlanStep(stepId: string)");
+  const selectStart = app.indexOf("function selectStudyPlanStep(");
   const persistStart = app.indexOf("function persistQuickTripStudyDraft", selectStart);
   const selection = app.slice(selectStart, persistStart);
 
@@ -54,7 +54,7 @@ test("unstarted notes and extracted sources are saved and restored for the exact
   const saveStart = app.indexOf("function persistStudyWorkspaceDraft(");
   const saveEnd = app.indexOf("function updateQuizPrefetchPreference", saveStart);
   const save = app.slice(saveStart, saveEnd);
-  const switchStart = app.indexOf("function selectStudyPlanStep(stepId: string)");
+  const switchStart = app.indexOf("function selectStudyPlanStep(");
   const switchEnd = app.indexOf("function persistQuickTripStudyDraft", switchStart);
   const switchStep = app.slice(switchStart, switchEnd);
 
@@ -139,4 +139,117 @@ test("selected-step source controls keep private summaries inside the workspace 
   assert.match(request, /onboarding\.phase === "complete"/u);
   assert.match(responseGuard, /canApplyMaterialSummaryResponse\(/u);
   assert.doesNotMatch(responseGuard, /hasEligibleAccess\(/u);
+});
+
+test("legacy group bookmarks resolve to the revision library and automatic corrections replace history", async () => {
+  const navigation = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/navigation.ts"), "utf8"));
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+
+  assert.match(navigation, /export function canonicalStudyView\(/u);
+  assert.match(navigation, /requestedView === "group" \? "library"/u);
+  assert.match(navigation, /export function replaceBrowserView\(/u);
+  assert.match(app, /canonicalStudyView\(requestedView/u);
+  assert.match(app, /replaceBrowserView\(view\)/u);
+  assert.match(app, /id: "library"[\s\S]*?label: "Thư viện ôn tập"/u);
+  assert.doesNotMatch(app, /id: "group"[\s\S]*?label: "Học cùng bạn"/u);
+});
+
+test("revision library wiring maps only owner history and private workspace metadata", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const libraryStart = app.indexOf("<RevisionMaterialsLibrary");
+  const libraryEnd = app.indexOf("/>", libraryStart);
+  const library = app.slice(libraryStart, libraryEnd);
+
+  assert.notEqual(libraryStart, -1);
+  assert.match(app, /import \{ RevisionMaterialsLibrary \}/u);
+  assert.match(app, /buildRevisionMaterialEntries\(/u);
+  assert.match(app, /sessions\.filter\(\(session\) => session\.userId === owner\)/u);
+  assert.match(library, /entries=\{revisionMaterialEntries\}/u);
+  assert.match(library, /onPreview=\{previewRevisionMaterial\}/u);
+  assert.match(library, /onUseInPlan=\{useRevisionMaterialInPlan\}/u);
+  assert.match(library, /onAddNotes=/u);
+  assert.match(library, /onAddFiles=/u);
+  assert.match(library, /onComposeWithAI=/u);
+});
+
+test("opening a saved plan source switches to its exact step while retaining manual duration", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const selectStart = app.indexOf("function selectStudyPlanStep(");
+  const selectEnd = app.indexOf("function persistQuickTripStudyDraft", selectStart);
+  const selection = app.slice(selectStart, selectEnd);
+
+  assert.match(selection, /targetPlanId\?: string/u);
+  assert.match(selection, /currentStorage\.plans\.find\(\(entry\) => entry\.id === \(targetPlanId \?\? currentStorage\.draft\.selectedPlanId\)\)/u);
+  assert.match(selection, /findStudyWorkspaceDraft\(nextStorage, targetIdentity\)/u);
+  assert.match(selection, /setSources\(structuredClone\(targetDraft\?\.sources \?\? \[\]\)\)/u);
+  assert.doesNotMatch(selection, /setMinutes\(/u);
+  assert.doesNotMatch(selection, /^\s*minutes:/mu);
+});
+
+test("legacy ticket bookmarks use the same single workspace and plan editor", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const workspaceStart = app.indexOf("(view === \"station\" || view === \"ticket\") && (");
+  const workspaceEnd = app.indexOf("view === \"focus\"", workspaceStart);
+  const workspace = app.slice(workspaceStart, workspaceEnd);
+
+  assert.notEqual(workspaceStart, -1);
+  assert.notEqual(workspaceEnd, -1);
+  assert.equal((workspace.match(/<StudyPlanWorkspace\b/gu) ?? []).length, 1);
+  assert.equal((workspace.match(/<BoardingTicket\b/gu) ?? []).length, 1);
+});
+
+test("revision library aggregates notes through one tombstone-filtered owner boundary", async () => {
+  const helper = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/revisionMaterialEntries.ts"), "utf8"));
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const collectionStart = app.indexOf("const revisionMaterialRecords = useMemo(() => collectRevisionMaterialRecords(");
+  const collectionEnd = app.indexOf("const revisionMaterialEntries =", collectionStart);
+  const collection = app.slice(collectionStart, collectionEnd);
+
+  assert.match(helper, /export function collectRevisionMaterialRecords\(/u);
+  assert.match(app, /collectRevisionMaterialRecords\(/u);
+  assert.match(collection, /removedSessionIds/u);
+  assert.match(collection, /documentText/u);
+  assert.match(collection, /saved\.studyPlanStorage\?\.workspaceDrafts/u);
+  assert.match(collection, /sessions\.filter\(\(session\) => session\.userId === owner\)/u);
+  assert.match(collection, /removedSessionIds\)/u);
+  assert.match(app, /data-revision-note-id=\{JSON\.stringify\(\[draftTripId, "notes"\]\)\}/u);
+  assert.match(app, /material-source__notes/u);
+});
+
+test("step changes within one plan retain edited goal and subject, and failed previews do not navigate", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const selectStart = app.indexOf("function selectStudyPlanStep(");
+  const selectEnd = app.indexOf("function selectManualWorkspaceCandidate", selectStart);
+  const selection = app.slice(selectStart, selectEnd);
+  const previewStart = app.indexOf("function previewRevisionMaterial(");
+  const previewEnd = app.indexOf("function useRevisionMaterialInPlan", previewStart);
+  const preview = app.slice(previewStart, previewEnd);
+
+  assert.match(selection, /const samePlan =[^;]+;/u);
+  assert.match(selection, /goal: nextGoal/u);
+  assert.match(selection, /topicId: nextTopicId/u);
+  assert.match(selection, /const nextGoal = samePlan \? storage\.draft\.goal : plan\.goal/u);
+  assert.match(selection, /const nextTopicId = samePlan \? storage\.draft\.topicId : plan\.topicId/u);
+  assert.match(selection, /updateQuickTripDraft\(quickTripDraft,[\s\S]*?goal: nextGoal,[\s\S]*?topic: nextTopicId/u);
+  assert.doesNotMatch(selection, /setMinutes\(/u);
+  assert.match(preview, /const restored = record\.planId && record\.stepId[\s\S]*?if \(!restored\) return;[\s\S]*?go\("station"\)/u);
+  assert.match(selection, /if \(!commit\([\s\S]*?\)\) return false;/u);
+});
+
+test("reusing a library source persists consent revocation in the same owner-local commit", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const persistStart = app.indexOf("function persistStudyWorkspaceDraft(");
+  const persistEnd = app.indexOf("function selectStudyPlanStep(", persistStart);
+  const persist = app.slice(persistStart, persistEnd);
+  const useStart = app.indexOf("function useRevisionMaterialInPlan(");
+  const useEnd = app.indexOf("function openWorkspaceSourceMode", useStart);
+  const use = app.slice(useStart, useEnd);
+
+  assert.match(persist, /options: \{ revokeSourceConsent\?: boolean \} = \{\}/u);
+  assert.match(persist, /sourceConsent: false/u);
+  assert.match(persist, /commit\(\{ \.\.\.value, studyPlanStorage: nextStorage \}\)/u);
+  assert.match(use, /persistStudyWorkspaceDraft\(\{ sources: nextSources, materials: nextMaterials \}, \{ revokeSourceConsent: true \}\)/u);
+  assert.doesNotMatch(use, /revokeQuizPrefetchSourceConsent\(/u);
+  assert.match(persist, /notes: changes\.notes \?\? documentText/u);
+  assert.match(use, /record\.kind === "note" && draftTripId === record\.sessionId/u);
 });
