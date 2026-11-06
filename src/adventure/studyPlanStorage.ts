@@ -10,6 +10,7 @@ import type { QuickTripDraft } from "./quickTripDraft.ts";
 export const STUDY_PLAN_STORAGE_VERSION = 1 as const;
 export const MAX_LOCAL_STUDY_PLANS = 50;
 export const MAX_LOCAL_STUDY_WORKSPACE_DRAFTS = 12;
+export const MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS = MAX_LOCAL_STUDY_PLANS * 8;
 
 export type StudyWorkspaceMaterial = {
   sourceId?: string;
@@ -88,6 +89,18 @@ export type StudyPlanStorage = {
   draft: StudyPlanDraft;
   plans: SavedStudyPlan[];
   workspaceDrafts: StudyWorkspaceDraft[];
+  activePlanBinding: StudyPlanSessionBinding | null;
+  completedStepReceipts: StudyPlanStepReceipt[];
+};
+
+export type StudyPlanSessionBinding = {
+  sessionId: string;
+  planId: string;
+  stepId: string;
+};
+
+export type StudyPlanStepReceipt = StudyPlanSessionBinding & {
+  completedAt: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -127,6 +140,8 @@ export function createStudyPlanStorage(options: { legacyActivity?: boolean } = {
     draft: createStudyPlanDraft(onboarding.survey),
     plans: [],
     workspaceDrafts: [],
+    activePlanBinding: null,
+    completedStepReceipts: [],
   };
 }
 
@@ -193,6 +208,78 @@ export function advanceStudyPlanCandidateAfterStart(
   };
 }
 
+/** Return the completed prefix for one generated plan; manual plans stay ungated. */
+export function completedStudyPlanStepIds(storage: StudyPlanStorage, planId: string): string[] {
+  const plan = storage.plans.find((item) => item.id === planId && item.origin === "ai");
+  if (!plan) return [];
+  const completed = new Set(storage.completedStepReceipts
+    .filter((receipt) => receipt.planId === planId).map((receipt) => receipt.stepId));
+  const prefix: string[] = [];
+  for (const step of plan.steps) {
+    if (!completed.has(step.id)) break;
+    prefix.push(step.id);
+  }
+  return prefix;
+}
+
+/** Completed steps remain revisitable; only steps after the prefix are locked. */
+export function canSelectStudyPlanStep(storage: StudyPlanStorage, planId: string, stepId: string): boolean {
+  const plan = storage.plans.find((item) => item.id === planId);
+  const index = plan?.steps.findIndex((step) => step.id === stepId) ?? -1;
+  if (!plan || index < 0) return false;
+  if (plan.origin === "manual") return true;
+  return index <= completedStudyPlanStepIds(storage, planId).length;
+}
+
+/** Bind a generated step to its exact local candidate before focus starts. */
+export function bindStudyPlanStepSession(
+  storage: StudyPlanStorage,
+  binding: StudyPlanSessionBinding,
+): StudyPlanStorage | null {
+  if (!isText(binding.sessionId, 200, 1) || !isText(binding.planId, 100, 1) || !isText(binding.stepId, 100, 1)) return null;
+  const plan = storage.plans.find((item) => item.id === binding.planId && item.origin === "ai");
+  const step = plan?.steps.find((item) => item.id === binding.stepId);
+  if (!plan || !step || step.plannedSessionId !== binding.sessionId ||
+      storage.draft.selectedPlanId !== binding.planId || storage.draft.selectedStepId !== binding.stepId ||
+      !canSelectStudyPlanStep(storage, binding.planId, binding.stepId)) return null;
+  const current = storage.activePlanBinding;
+  if (current && (current.sessionId !== binding.sessionId || current.planId !== binding.planId || current.stepId !== binding.stepId)) return null;
+  return current ? storage : { ...storage, activePlanBinding: { ...binding } };
+}
+
+/**
+ * Record only the next unlocked step for an exact active binding. Callers must
+ * first verify owner identity and the existing full scheduled-focus proof.
+ */
+export function recordCompletedStudyPlanStep(
+  storage: StudyPlanStorage,
+  binding: StudyPlanSessionBinding,
+  completedAt: number,
+): StudyPlanStorage | null {
+  const current = storage.activePlanBinding;
+  if (!current || current.sessionId !== binding.sessionId || current.planId !== binding.planId ||
+      current.stepId !== binding.stepId || !isTimestamp(completedAt)) return null;
+  const plan = storage.plans.find((item) => item.id === binding.planId && item.origin === "ai");
+  const stepIndex = plan?.steps.findIndex((step) => step.id === binding.stepId) ?? -1;
+  if (!plan || stepIndex < 0) return null;
+  const existing = storage.completedStepReceipts.find((receipt) =>
+    receipt.planId === binding.planId && receipt.stepId === binding.stepId);
+  if (existing) return { ...storage, activePlanBinding: null };
+  if (stepIndex !== completedStudyPlanStepIds(storage, binding.planId).length ||
+      storage.completedStepReceipts.length >= MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS) return null;
+  return {
+    ...storage,
+    activePlanBinding: null,
+    completedStepReceipts: [...storage.completedStepReceipts, { ...binding, completedAt }],
+  };
+}
+
+export function clearStudyPlanActiveBinding(storage: StudyPlanStorage, sessionId: string): StudyPlanStorage {
+  return storage.activePlanBinding?.sessionId === sessionId
+    ? { ...storage, activePlanBinding: null }
+    : storage;
+}
+
 function validStudyPlanStep(value: unknown): value is StudyPlanStep {
   return isRecord(value) && isText(value.id, 100, 1) && isText(value.plannedSessionId, 200, 1) &&
     isText(value.title, 120, 3) && isText(value.action, 400, 3) && isText(value.outcome, 400, 3) &&
@@ -213,6 +300,50 @@ function validStudyPlan(value: unknown): value is SavedStudyPlan {
       (value.finalCheck !== undefined && !isText(value.finalCheck, 500, 3)) ||
       (value.verificationNote !== undefined && !isText(value.verificationNote, 500, 3))) return false;
   return true;
+}
+
+function validStudyPlanSessionBinding(
+  value: unknown,
+  plans: readonly SavedStudyPlan[],
+): value is StudyPlanSessionBinding {
+  if (!isRecord(value) || !isText(value.sessionId, 200, 1) ||
+      !isText(value.planId, 100, 1) || !isText(value.stepId, 100, 1)) return false;
+  const plan = plans.find((item) => item.id === value.planId && item.origin === "ai");
+  return Boolean(plan?.steps.some((step) => step.id === value.stepId));
+}
+
+function validStudyPlanStepReceipt(value: unknown, plans: readonly SavedStudyPlan[]): value is StudyPlanStepReceipt {
+  return isRecord(value) && isTimestamp(value.completedAt) && validStudyPlanSessionBinding(value, plans);
+}
+
+function normalizedCompletedStepReceipts(value: unknown, plans: readonly SavedStudyPlan[]): StudyPlanStepReceipt[] {
+  if (!Array.isArray(value)) return [];
+  const candidates = new Map<string, Map<string, StudyPlanStepReceipt>>();
+  for (const raw of value) {
+    if (!validStudyPlanStepReceipt(raw, plans)) continue;
+    const planReceipts = candidates.get(raw.planId) ?? new Map<string, StudyPlanStepReceipt>();
+    if (!planReceipts.has(raw.stepId)) planReceipts.set(raw.stepId, {
+      sessionId: raw.sessionId,
+      planId: raw.planId,
+      stepId: raw.stepId,
+      completedAt: raw.completedAt,
+    });
+    candidates.set(raw.planId, planReceipts);
+  }
+
+  const receipts: StudyPlanStepReceipt[] = [];
+  const usedSessionIds = new Set<string>();
+  for (const plan of plans) {
+    if (plan.origin !== "ai") continue;
+    for (const step of plan.steps) {
+      const receipt = candidates.get(plan.id)?.get(step.id);
+      if (!receipt || usedSessionIds.has(receipt.sessionId)) break;
+      usedSessionIds.add(receipt.sessionId);
+      receipts.push(receipt);
+    }
+  }
+  // There can be at most 50 retained plans with at most 8 steps each.
+  return receipts.slice(0, MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS);
 }
 
 function normalizedDraft(value: unknown): StudyPlanDraft {
@@ -332,6 +463,10 @@ export function normalizeStudyPlanStorage(
   const plans = Array.isArray(value.plans)
     ? value.plans.filter(validStudyPlan).slice(-MAX_LOCAL_STUDY_PLANS)
     : [];
+  const activePlanBinding = validStudyPlanSessionBinding(value.activePlanBinding, plans)
+    ? { sessionId: value.activePlanBinding.sessionId, planId: value.activePlanBinding.planId, stepId: value.activePlanBinding.stepId }
+    : null;
+  const completedStepReceipts = normalizedCompletedStepReceipts(value.completedStepReceipts, plans);
   const workspaceDraftValues = Array.isArray(value.workspaceDrafts)
     ? value.workspaceDrafts.filter(validWorkspaceDraft).filter((draft) => workspaceDraftMatchesPlan(draft, plans))
     : [];
@@ -347,7 +482,7 @@ export function normalizeStudyPlanStorage(
     draft.selectedStepId = plans.find((plan) => plan.id === draft.selectedPlanId)?.selectedStepId ?? null;
   }
 
-  return { version: STUDY_PLAN_STORAGE_VERSION, onboarding, draft, plans, workspaceDrafts };
+  return { version: STUDY_PLAN_STORAGE_VERSION, onboarding, draft, plans, workspaceDrafts, activePlanBinding, completedStepReceipts };
 }
 
 export function hasLegacyStudyActivity(value: unknown): boolean {

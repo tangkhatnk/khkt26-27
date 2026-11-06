@@ -6,8 +6,14 @@ import {
   createStudyPlanStorage,
   applyStudyPlanStepPatch,
   advanceStudyPlanCandidateAfterStart,
+  bindStudyPlanStepSession,
+  canSelectStudyPlanStep,
+  clearStudyPlanActiveBinding,
+  completedStudyPlanStepIds,
   findStudyWorkspaceDraft,
+  MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS,
   normalizeStudyPlanStorage,
+  recordCompletedStudyPlanStep,
   saveStudyWorkspaceDraft,
   selectedStudyWorkspaceIdentity,
   studyWorkspaceSourceContentChanged,
@@ -306,6 +312,202 @@ test("plan storage keeps valid records, drops malformed plan entries, and does n
 
   assert.equal(restored.draft.preferredMinutes, 25);
   assert.deepEqual(restored.plans.map((plan) => plan.id), ["plan-1"]);
+});
+
+test("existing v1 plans migrate without inferred completion receipts or draft loss", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-existing",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-one",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const workspaceDraft = {
+    sessionId: "candidate-one",
+    planId: plan.id,
+    stepId: "step-one",
+    notes: "Ý chính đã ghi trước khi nâng cấp.",
+    sources: [{ id: "source-old", name: "Ghi chú.txt", text: "Màng tế bào điều hòa trao đổi chất.", source: "notes", requiresReview: false, reviewed: true }],
+    materials: [{ sourceId: "source-old", name: "Ghi chú.txt", size: 37, type: "text/plain", status: "extracted", message: "Đã đọc trên thiết bị." }],
+    updatedAt: 2_000,
+  };
+  const legacyStorage = {
+    ...base,
+    draft: { ...base.draft, selectedPlanId: plan.id, selectedStepId: "step-one" },
+    plans: [plan],
+    workspaceDrafts: [workspaceDraft],
+  };
+  delete legacyStorage.activePlanBinding;
+  delete legacyStorage.completedStepReceipts;
+
+  const restored = normalizeStudyPlanStorage(legacyStorage);
+
+  assert.equal(restored.activePlanBinding, null);
+  assert.deepEqual(restored.completedStepReceipts, []);
+  assert.deepEqual(restored.plans, [plan]);
+  assert.deepEqual(restored.workspaceDrafts, [workspaceDraft]);
+  assert.equal(findStudyWorkspaceDraft(restored, {
+    sessionId: "candidate-one", planId: plan.id, stepId: "step-one",
+  })?.notes, workspaceDraft.notes);
+});
+
+test("receipt migration keeps one valid AI completion prefix and exact active binding only", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-receipts",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-one",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const manualPlan = {
+    ...plan,
+    id: "manual-plan",
+    origin: "manual",
+    steps: [plan.steps[0]],
+    selectedStepId: "step-one",
+  };
+  const firstReceipt = { planId: plan.id, stepId: "step-one", sessionId: "finished-session-one", completedAt: 10_000 };
+  const restored = normalizeStudyPlanStorage({
+    ...base,
+    plans: [plan, manualPlan],
+    activePlanBinding: { sessionId: "active-session-two", planId: plan.id, stepId: "step-two" },
+    completedStepReceipts: [
+      firstReceipt,
+      { ...firstReceipt, sessionId: "duplicate-session", completedAt: 11_000 },
+      { planId: plan.id, stepId: "step-two", sessionId: firstReceipt.sessionId, completedAt: 11_500 },
+      { planId: plan.id, stepId: "step-three", sessionId: "out-of-order-session", completedAt: 12_000 },
+      { planId: manualPlan.id, stepId: "step-one", sessionId: "manual-session", completedAt: 13_000 },
+      { planId: "removed-plan", stepId: "step-one", sessionId: "removed-session", completedAt: 14_000 },
+      { planId: plan.id, stepId: "step-two", sessionId: "bad-time", completedAt: -1 },
+    ],
+  });
+
+  assert.deepEqual(restored.activePlanBinding, {
+    sessionId: "active-session-two", planId: plan.id, stepId: "step-two",
+  });
+  assert.deepEqual(restored.completedStepReceipts, [firstReceipt]);
+  assert.deepEqual(restored.plans.map((item) => item.id), [plan.id, manualPlan.id]);
+});
+
+test("AI plan receipts bind exact candidates and unlock only a completed prefix", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plan = {
+    id: "plan-progress",
+    origin: "ai",
+    title: "Ôn cấu trúc tế bào",
+    goal: "Giải thích vai trò của màng tế bào",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-one",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nhận biết cấu trúc", action: "Đọc ghi chú đã chọn", outcome: "Nêu chức năng chính", check: "Giải thích bằng lời mình", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ trao đổi chất", action: "Mô tả chất đi qua màng", outcome: "Phân biệt hai cách vận chuyển", check: "Nêu dấu hiệu cần năng lượng", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra kiến thức", action: "Trả lời câu hỏi ôn tập", outcome: "Tìm điểm cần ôn", check: "Nêu điều còn chưa chắc", preferredMinutes: 45 },
+    ],
+  };
+  const storage = {
+    ...base,
+    draft: { ...base.draft, selectedPlanId: plan.id, selectedStepId: "step-one" },
+    plans: [plan],
+  };
+  const binding = { sessionId: "candidate-one", planId: plan.id, stepId: "step-one" };
+
+  assert.deepEqual(completedStudyPlanStepIds(storage, plan.id), []);
+  assert.equal(canSelectStudyPlanStep(storage, plan.id, "step-one"), true);
+  assert.equal(canSelectStudyPlanStep(storage, plan.id, "step-two"), false);
+  assert.equal(bindStudyPlanStepSession(storage, { ...binding, sessionId: "wrong-candidate" }), null);
+  const futureBinding = { sessionId: "candidate-two", planId: plan.id, stepId: "step-two" };
+  assert.equal(bindStudyPlanStepSession(storage, futureBinding), null);
+  assert.equal(bindStudyPlanStepSession({
+    ...storage,
+    draft: { ...storage.draft, selectedStepId: "step-two" },
+  }, futureBinding), null);
+  const started = bindStudyPlanStepSession(storage, binding);
+  assert.deepEqual(started?.activePlanBinding, binding);
+  assert.equal(bindStudyPlanStepSession(started, binding), started);
+
+  const completed = recordCompletedStudyPlanStep(started, binding, 60_000);
+  assert.deepEqual(completed?.completedStepReceipts, [{ ...binding, completedAt: 60_000 }]);
+  assert.equal(completed?.activePlanBinding, null);
+  assert.deepEqual(completedStudyPlanStepIds(completed, plan.id), ["step-one"]);
+  assert.equal(canSelectStudyPlanStep(completed, plan.id, "step-one"), true);
+  assert.equal(canSelectStudyPlanStep(completed, plan.id, "step-two"), true);
+  assert.equal(canSelectStudyPlanStep(completed, plan.id, "step-three"), false);
+  assert.equal(recordCompletedStudyPlanStep(started, { ...binding, sessionId: "other-session" }, 61_000), null);
+  assert.equal(recordCompletedStudyPlanStep({ ...completed, activePlanBinding: binding }, binding, 62_000)?.completedStepReceipts.length, 1);
+  assert.equal(clearStudyPlanActiveBinding(started, "other-session"), started);
+  assert.equal(clearStudyPlanActiveBinding(started, binding.sessionId).activePlanBinding, null);
+});
+
+test("the receipt bound retains every step across the maximum stored plan catalog", () => {
+  const base = createStudyPlanStorage({ legacyActivity: true });
+  const plans = Array.from({ length: 50 }, (_, planIndex) => {
+    const planId = `plan-${planIndex}`;
+    const steps = Array.from({ length: 8 }, (_, stepIndex) => ({
+      id: `step-${stepIndex}`,
+      plannedSessionId: `candidate-${planIndex}-${stepIndex}`,
+      title: `Bước học ${stepIndex + 1}`,
+      action: "Đọc và ghi lại ý chính",
+      outcome: "Nêu được một ý quan trọng",
+      check: "Tự giải thích bằng lời mình",
+      preferredMinutes: 25,
+    }));
+    return {
+      id: planId,
+      origin: "ai",
+      title: `Kế hoạch ${planIndex + 1}`,
+      goal: "Ôn cấu trúc tế bào",
+      topicId: "biology",
+      topicLabel: "Sinh học",
+      level: "",
+      preferredMinutes: 25,
+      selectedStepId: steps[0].id,
+      createdAt: 1_000 + planIndex,
+      updatedAt: 1_000 + planIndex,
+      steps,
+    };
+  });
+  const receipts = plans.flatMap((plan, planIndex) => plan.steps.map((step, stepIndex) => ({
+    planId: plan.id,
+    stepId: step.id,
+    sessionId: `finished-${planIndex}-${stepIndex}`,
+    completedAt: 10_000 + planIndex * 10 + stepIndex,
+  })));
+
+  const restored = normalizeStudyPlanStorage({ ...base, plans, completedStepReceipts: receipts });
+
+  assert.equal(MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS, 400);
+  assert.equal(restored.plans.length, 50);
+  assert.equal(restored.completedStepReceipts.length, MAX_LOCAL_STUDY_PLAN_STEP_RECEIPTS);
+  assert.deepEqual(restored.completedStepReceipts.at(-1), receipts.at(-1));
 });
 
 test("starting a session advances the selected plan or manual candidate without changing the session ID", () => {
