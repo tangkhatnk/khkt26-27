@@ -8,6 +8,8 @@ import {
   tripDraftLocks,
   synchronizedTripQuizPreferences,
   shouldAutoResumeSynchronizedTrip,
+  canResumeBoundSynchronizedTrip,
+  canOfferLegacyGroupCleanup,
 } from '../src/adventure/synchronizedTripUi.ts';
 
 const group = (statuses, owner = 'owner', tripStatus = 'waiting') => ({
@@ -56,6 +58,45 @@ test('a ready member auto-resumes only after a foreground poll observes the boun
   assert.equal(synchronizedTripDraftForSession({}, 'member-session', 'group'), undefined);
   assert.equal(synchronizedTripDraftForSession({ 'solo-session': localDraft }, 'member-session', 'group'), undefined);
   assert.equal(synchronizedTripDraftForSession({ 'member-session': { ...localDraft, groupId: 'other' } }, 'member-session', 'group'), undefined);
+});
+
+test('only an authenticated member with the exact local draft can resume a bound session before first use', () => {
+  const bound = {
+    authenticatedMember: true,
+    tripStatus: 'departed',
+    ownStatus: 'bound',
+    ownSessionId: 'bound-session',
+    draftSessionId: 'bound-session',
+    localDraftReady: true,
+    activeSessionId: null,
+  };
+
+  assert.equal(canResumeBoundSynchronizedTrip(bound), true);
+  assert.equal(canResumeBoundSynchronizedTrip({ ...bound, authenticatedMember: false }), false);
+  assert.equal(canResumeBoundSynchronizedTrip({ ...bound, ownStatus: 'ready' }), false);
+  assert.equal(canResumeBoundSynchronizedTrip({ ...bound, draftSessionId: 'other-session' }), false);
+  assert.equal(canResumeBoundSynchronizedTrip({ ...bound, localDraftReady: false }), false);
+  assert.equal(canResumeBoundSynchronizedTrip({ ...bound, activeSessionId: 'another-active' }), false);
+});
+
+test('legacy group cleanup is offered only to an authenticated member with no active or bound session', () => {
+  const eligible = {
+    authenticatedMember: true,
+    isMember: true,
+    tripStatus: 'waiting',
+    ownStatus: 'ready',
+    hasActiveSession: false,
+    hasPendingSession: false,
+  };
+  assert.equal(canOfferLegacyGroupCleanup(eligible), true);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, tripStatus: undefined }), true);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, authenticatedMember: false }), false);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, isMember: false }), false);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, tripStatus: 'departed' }), false);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, tripStatus: 'closed' }), false);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, ownStatus: 'bound' }), false);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, hasActiveSession: true }), false);
+  assert.equal(canOfferLegacyGroupCleanup({ ...eligible, hasPendingSession: true }), false);
 });
 
 test('readiness requires a valid enabled quiz count and no pending exercise generation', () => {

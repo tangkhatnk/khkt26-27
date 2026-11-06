@@ -13,6 +13,7 @@ let MaterialSummaryControl;
 let summarizeReviewedMaterial;
 let publicSummary;
 let api;
+let guestAiApi;
 
 before(async () => {
   vite = await createServer({
@@ -28,6 +29,7 @@ before(async () => {
   ({ summarizeReviewedMaterial } = await vite.ssrLoadModule("/src/services/materialSummary.ts"));
   publicSummary = await vite.ssrLoadModule("/src/services/publicMaterialSummary.ts");
   api = await vite.ssrLoadModule("/src/services/api.ts");
+  guestAiApi = await vite.ssrLoadModule("/src/services/guestAiApi.ts");
 });
 
 after(async () => {
@@ -58,10 +60,95 @@ test("source fingerprint covers the exact text and request identity covers owner
     sourceId: "source-a",
     sourceFingerprint: fingerprint,
     requestGeneration: 12,
+    view: "summary",
+    planId: null,
+    stepId: null,
   };
   assert.equal(summaryHelpers.isCurrentMaterialSummaryScope(request, { ...request }), true);
   for (const key of Object.keys(request))
     assert.equal(summaryHelpers.isCurrentMaterialSummaryScope(request, { ...request, [key]: "changed" }), false, key);
+});
+
+test("workspace material summaries require an eligible current owner, reviewed source, and completed guide", () => {
+  const base = {
+    view: "station",
+    ownerReady: true,
+    online: true,
+    authOffline: false,
+    loaded: true,
+    exclusive: true,
+    workspaceLive: true,
+    onboardingComplete: true,
+    activeSession: false,
+    source: source(),
+  };
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, targetView: "station" }), true);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, targetView: "summary" }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, onboardingComplete: false }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, activeSession: true }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, ownerReady: false }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, online: false }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, exclusive: false }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, workspaceLive: false }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, source: source({ reviewed: false }) }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, source: source({ text: "short" }) }), false);
+});
+
+test("workspace summary request identity expires when route, candidate, or step changes", async () => {
+  const fingerprint = await summaryHelpers.fingerprintMaterialSourceText(source().text);
+  const request = {
+    ownerId: "guest",
+    workspaceGeneration: 4,
+    authGeneration: 8,
+    sessionId: "candidate-a",
+    sourceId: "source-a",
+    sourceFingerprint: fingerprint,
+    requestGeneration: 12,
+    view: "station",
+    planId: "plan-a",
+    stepId: "step-a",
+  };
+  assert.equal(summaryHelpers.isCurrentMaterialSummaryScope(request, { ...request }), true);
+  for (const change of [
+    { view: "summary" },
+    { sessionId: "candidate-b" },
+    { planId: "plan-b" },
+    { stepId: "step-b" },
+    { sourceFingerprint: "b".repeat(64) },
+  ])
+    assert.equal(summaryHelpers.isCurrentMaterialSummaryScope(request, { ...request, ...change }), false);
+});
+
+test("an offline summary failure can settle for the same owner and source instead of staying pending", () => {
+  const fingerprint = "a".repeat(64);
+  const scope = {
+    ownerId: "guest", workspaceGeneration: 4, authGeneration: 8,
+    sessionId: "candidate-a", sourceId: "source-a", sourceFingerprint: fingerprint,
+    requestGeneration: 12, view: "station", planId: "plan-a", stepId: "step-a",
+  };
+  const availability = {
+    targetView: "station", view: "station", ownerReady: true, online: true, authOffline: false,
+    loaded: true, exclusive: true, workspaceLive: true, onboardingComplete: true,
+    activeSession: false, source: source(),
+  };
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...availability, online: false }), false);
+  const responseContext = {
+    expected: scope, current: scope, ownerMatches: true, workspaceLive: true,
+    sessionValid: true, source: source(), sourceText: source().text,
+    onboardingComplete: true, activeSession: false,
+  };
+  assert.equal(summaryHelpers.canApplyMaterialSummaryResponse(responseContext), true);
+  for (const change of [
+    { ownerMatches: false },
+    { workspaceLive: false },
+    { sessionValid: false },
+    { source: source({ reviewed: false }) },
+    { sourceText: "different source text" },
+    { onboardingComplete: false },
+    { activeSession: true },
+    { current: { ...scope, stepId: "step-b" } },
+  ])
+    assert.equal(summaryHelpers.canApplyMaterialSummaryResponse({ ...responseContext, ...change }), false);
 });
 
 test("cached material summary is visible only for the same confirmed source fingerprint", () => {
@@ -193,6 +280,13 @@ test("summary button is unavailable when authenticated AI access is unavailable"
   assert.match(markup, /Đăng nhập để tạo tóm tắt/u);
 });
 
+test("pending private summary offers an explicit cancellation action", () => {
+  const markup = renderToStaticMarkup(React.createElement(MaterialSummaryControl, {
+    source: source(), pending: true, onGenerate() {}, onCancel() {},
+  }));
+  assert.match(markup, /Hủy tạo tóm tắt/u);
+});
+
 test("authenticated summary client sends only selected source text and accepts the summary response", async () => {
   const previousWindow = globalThis.window;
   const previousStorage = globalThis.sessionStorage;
@@ -227,6 +321,46 @@ test("authenticated summary client sends only selected source text and accepts t
     const generationBeforeLogout = api.getAuthGeneration();
     await api.clearTokens();
     assert.notEqual(api.getAuthGeneration(), generationBeforeLogout);
+    globalThis.window = previousWindow;
+    globalThis.sessionStorage = previousStorage;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("guest summary client uses the private GuestAI route without an account token", async () => {
+  const previousWindow = globalThis.window;
+  const previousStorage = globalThis.sessionStorage;
+  const previousFetch = globalThis.fetch;
+  const values = new Map();
+  const storage = {
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+  globalThis.window = { sessionStorage: storage };
+  globalThis.sessionStorage = storage;
+  guestAiApi.clearGuestAiCredential();
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/ai/guest/credential"))
+      return new Response(JSON.stringify({ token: "private-summary-token", expiresAt: new Date(Date.now() + 60_000).toISOString() }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    return new Response(JSON.stringify({ summary: "Private source summary" }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const controller = new AbortController();
+    const result = await summarizeReviewedMaterial(source().text, controller.signal, true);
+    assert.deepEqual(result, { summary: "Private source summary" });
+    assert.match(calls[0].url, /\/ai\/guest\/credential$/u);
+    assert.match(calls[1].url, /\/ai\/guest\/materials\/summarize$/u);
+    assert.deepEqual(JSON.parse(calls[1].init.body), { text: source().text });
+    assert.equal(new Headers(calls[1].init.headers).get("Authorization"), "GuestAI private-summary-token");
+  } finally {
+    guestAiApi.clearGuestAiCredential();
     globalThis.window = previousWindow;
     globalThis.sessionStorage = previousStorage;
     globalThis.fetch = previousFetch;

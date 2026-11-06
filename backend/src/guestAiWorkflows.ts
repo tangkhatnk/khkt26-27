@@ -29,6 +29,8 @@ import {
 } from "./materialReadingSchemas.js";
 import { generateStudyGuide } from "./studyGuide.js";
 import { studyGuideRequestSchema, STUDY_GUIDE_BODY_LIMIT_BYTES } from "./studyGuideSchemas.js";
+import { generateStudyPlan } from "./studyPlan.js";
+import { studyPlanRequestSchema, STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES } from "./studyPlanSchemas.js";
 import { generateGeminiQuiz } from "./gemini.js";
 import { geminiRequestSchema, type GeneratedQuizQuestion } from "./geminiSchemas.js";
 import {
@@ -204,6 +206,7 @@ export type GuestAiWorkflowProviders = {
   readMaterialDocument: typeof readMaterialDocument;
   summarizeMaterialText: typeof summarizeMaterialText;
   generateStudyGuide: typeof generateStudyGuide;
+  generateStudyPlan: typeof generateStudyPlan;
   generateGeminiQuiz: typeof generateGeminiQuiz;
   generateStudyExerciseQuestions: typeof generateStudyExerciseQuestions;
   generateStudyExerciseSolutions: typeof generateStudyExerciseSolutions;
@@ -213,6 +216,7 @@ const defaultProviders: GuestAiWorkflowProviders = {
   readMaterialDocument,
   summarizeMaterialText,
   generateStudyGuide,
+  generateStudyPlan,
   generateGeminiQuiz,
   generateStudyExerciseQuestions,
   generateStudyExerciseSolutions,
@@ -268,6 +272,19 @@ export function guestAiWorkflowRoutes(
     await reserve(redis, request, "tutor", estimateGuestAiProviderUnits({ task: "tutor", operation: "study-guide" }));
     const signal = signalForRequest(request, reply);
     try { return await providers.generateStudyGuide(input, signal.signal); }
+    finally { signal.dispose(); }
+  });
+
+  app.post("/api/v1/ai/guest/study-plans", {
+    ...authenticated,
+    bodyLimit: STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES,
+    config: { rateLimit: { max: 3, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const input = studyPlanRequestSchema.parse(request.body);
+    await reserve(redis, request, "tutor", estimateGuestAiProviderUnits({ task: "tutor", operation: "study-plan" }));
+    const signal = signalForRequest(request, reply);
+    try { return await providers.generateStudyPlan(input, signal.signal); }
     finally { signal.dispose(); }
   });
 

@@ -937,6 +937,26 @@ body,
   padding-top: 30px;
   border: 1px solid #dce3d6;
 }
+.focus-card.quiet-focus-shell {
+  max-width: 980px;
+  padding: 0;
+  overflow: visible;
+  background: var(--surface, #eef2e8);
+  border-color: var(--line, #dce3d6);
+  color: var(--ink, #263d34);
+}
+.quiet-focus-shell .quiet-focus-canvas { max-width: 100%; }
+.quiet-focus-shell .quiet-focus-canvas__status { display: grid; gap: .55rem; }
+.quiet-focus-shell .quiet-focus-canvas__status .focus-phase-label,
+.quiet-focus-shell .quiet-focus-canvas__status .focus-next { margin: 0; }
+.quiet-focus-shell .quiet-focus-canvas__essentials .focus-controls {
+  width: 100%;
+  padding: 0;
+  justify-content: center;
+  gap: .75rem;
+}
+.quiet-focus-shell .quiet-focus-canvas__warnings .info-box { margin: 0; }
+.quiet-focus-shell .quiet-focus-canvas__disclosure-content .study-companion { margin: .75rem 0; }
 .timer {
   font-size: clamp(70px, 8vw, 105px);
   letter-spacing: -5px;
@@ -1343,6 +1363,20 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   align-items: flex-start;
   gap: 4px;
 }
+.quiz-prefetch-options {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 620px);
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--ink);
+}
+.quiz-prefetch-options legend { padding: 0 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.quiz-prefetch-options label { display: flex; align-items: flex-start; gap: 9px; line-height: 1.45; }
+.quiz-prefetch-options input { flex: 0 0 18px; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--accent, #47735a); }
+.quiz-prefetch-options small { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .departure-quiz-skip {
   display: inline-flex;
   align-items: center;
@@ -1622,18 +1656,20 @@ html[data-theme="dark"] .adventure .trip-state--closed {
   }
   .topbar {
     padding: 0 20px;
+    gap: 12px;
   }
   .topbar > span {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 10px;
   }
   .top-actions {
+    flex: 0 0 auto;
     gap: 12px;
   }
   .connection {
-    font-size: 0;
-  }
-  .connection:first-letter {
-    font-size: 13px;
+    font-size: 10px;
+    white-space: nowrap;
   }
   .page-footer {
     gap: 20px;
@@ -1991,6 +2027,7 @@ body {
 .material-source summary { cursor: pointer; font-weight: 650; margin-bottom: .75rem; overflow-wrap: anywhere; }
 .material-source label { display: grid; gap: .6rem; }
 .material-source textarea { width: 100%; line-height: 1.6; }
+.material-source__notes { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .material-source .choice-row { flex-wrap: wrap; margin-top: .7rem; }
 .material-summary-control { display: grid; gap: .6rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--line, #d7e0d5); }
 .material-summary-control > p { margin: 0; }
@@ -2001,3 +2038,158 @@ body {
 .form .material-ai-option { flex-direction: row; align-items: flex-start; gap: .6rem; line-height: 1.5; }
 .adventure .material-ai-option input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 1px 0 0; padding: 0; flex: 0 0 18px; accent-color: var(--green); }
 .form #notes-help, .form #material-ai-help { margin-top: -8px; color: #596c60; line-height: 1.65; }
+
+.adventure--onboarding .brand[aria-disabled="true"] {
+  cursor: default;
+  opacity: .82;
+  pointer-events: none;
+}
+
+.adventure--onboarding button.nav:disabled {
+  cursor: default;
+  opacity: .72;
+}
+
+.adventure--onboarding .account:disabled,
+.adventure--onboarding .top-actions .avatar:disabled {
+  cursor: default;
+  opacity: .68;
+}
+
+.adventure--quiet-focus {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #f0f2ec;
+}
+
+.adventure--quiet-focus .sidebar,
+.adventure--quiet-focus .topbar {
+  display: none;
+}
+
+.adventure--quiet-focus .main-area {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin-left: 0;
+}
+
+.adventure.adventure--quiet-focus main.view-entrance {
+  display: grid;
+  align-content: center;
+  justify-items: stretch;
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  padding: clamp(16px, 4vh, 44px) clamp(16px, 5vw, 72px);
+  animation: none;
+}
+
+.adventure--quiet-focus .focus-card.quiet-focus-shell {
+  width: min(100%, 1200px);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas {
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-height: calc(100dvh - clamp(32px, 8vh, 88px));
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: clamp(16px, 3vh, 30px);
+  text-align: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__intro {
+  justify-items: center;
+  text-align: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__status {
+  max-width: 48rem;
+  text-align: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__clock,
+.adventure--quiet-focus .quiet-focus-canvas__essentials {
+  width: 100%;
+  justify-items: center;
+  justify-content: center;
+}
+
+.adventure--quiet-focus .quiet-focus-canvas__warnings,
+.adventure--quiet-focus .quiet-focus-canvas__optional {
+  width: min(100%, 54rem);
+  text-align: left;
+}
+
+.adventure--quiet-focus .page-footer {
+  display: none;
+}
+
+.focus-away-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+html[data-theme="dark"] .adventure.adventure--quiet-focus,
+html[data-theme="dark"] .adventure.adventure--quiet-focus .main-area,
+html[data-theme="dark"] .adventure.adventure--quiet-focus main.view-entrance {
+  background: #0b100d;
+  color: #e7eee5;
+}
+
+html[data-theme="dark"] .adventure.adventure--quiet-focus .focus-card.quiet-focus-shell {
+  background: transparent;
+  border-color: transparent;
+}
+
+@media (max-width: 600px) {
+  .adventure.adventure--quiet-focus main.view-entrance {
+    padding: 12px 14px;
+  }
+
+  .adventure--quiet-focus .quiet-focus-canvas {
+    min-height: calc(100dvh - 24px);
+    padding: 12px 4px;
+  }
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    height: auto;
+    min-height: 59px;
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .topbar > span {
+    line-height: 1.3;
+  }
+
+  .topbar .slash {
+    margin: 0 5px;
+  }
+
+  .top-actions {
+    gap: 8px;
+  }
+
+  .top-actions .connection {
+    font-size: 10px;
+    white-space: nowrap;
+  }
+}

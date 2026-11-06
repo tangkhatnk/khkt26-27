@@ -9,6 +9,12 @@ import {
 import { isDeviceCategory } from "./device.ts";
 import { isQuizCount, isValidQuizAssessment, isValidQuizDraftMap, type QuizDraft } from "./quizDrafts.ts";
 import {
+  createStudyPlanStorage,
+  hasLegacyStudyActivity,
+  normalizeStudyPlanStorage,
+  type StudyPlanStorage,
+} from "./studyPlanStorage.ts";
+import {
   emptyWorld,
   type BreakPlan,
   type Snapshot,
@@ -52,6 +58,8 @@ export type Saved = {
   readyTripDrafts?: Record<string, SynchronizedTripDraft>;
   /** Curated lesson progress stays on this owner-local device record. */
   learningPath?: LearningPathProgress;
+  /** Goal-first plans and onboarding remain private to the current owner/device. */
+  studyPlanStorage?: StudyPlanStorage;
 };
 export const MAX_MATERIAL_SUMMARY_CACHE_ENTRIES = 20;
 export const MAX_MATERIAL_SUMMARY_LENGTH = 4_000;
@@ -123,6 +131,7 @@ export const emptySaved = (): Saved => ({
   guestExerciseSessions: [],
   quizDrafts: {},
   learningPath: createLearningPathProgress(),
+  studyPlanStorage: createStudyPlanStorage(),
 });
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -359,8 +368,16 @@ export function readSaved(owner: string): Saved {
   return {
     ...value,
     learningPath: normalizeLearningPathProgress(value.learningPath),
+    studyPlanStorage: normalizeStudyPlanStorage(value.studyPlanStorage, {
+      legacyActivity: hasLegacyStudyActivity(value),
+    }),
   };
 }
 export function writeSaved(owner: string, value: Saved) {
-  localStorage.setItem(`train-adventure:v1:${owner}`, JSON.stringify(value));
+  localStorage.setItem(`train-adventure:v1:${owner}`, JSON.stringify({
+    ...value,
+    studyPlanStorage: normalizeStudyPlanStorage(value.studyPlanStorage, {
+      legacyActivity: hasLegacyStudyActivity(value),
+    }),
+  }));
 }

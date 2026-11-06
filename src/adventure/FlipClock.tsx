@@ -68,8 +68,14 @@ function ClockDigits({ digits, unit, motionAllowed }: {
   unit: "minutes" | "seconds";
   motionAllowed: boolean;
 }) {
+  const panelClasses = [
+    "flip-clock-panel",
+    `flip-clock-panel--${unit}`,
+    ...(digits.length > 2 ? ["flip-clock-panel--wide"] : []),
+  ].join(" ");
+
   return (
-    <span className="flip-clock-group">
+    <span className={panelClasses} data-digit-count={digits.length}>
       <span className="flip-clock-digits">
         {digits.map((digit, index) => (
           <FlipDigit
@@ -79,7 +85,9 @@ function ClockDigits({ digits, unit, motionAllowed }: {
           />
         ))}
       </span>
-      <span className="flip-clock-unit" aria-hidden="true">{unit === "minutes" ? "PHÚT" : "GIÂY"}</span>
+      <span className="flip-clock-unit" aria-hidden="true">
+        {unit === "minutes" ? "PHÚT" : "GIÂY"}
+      </span>
     </span>
   );
 }
@@ -135,7 +143,7 @@ export function FlipClock({
     >
       <span className="flip-clock-readout" aria-hidden="true">
         <ClockDigits digits={time.minuteDigits} unit="minutes" motionAllowed={canAnimate} />
-        <span className="flip-clock-separator" aria-hidden="true" />
+        <span className="flip-clock-separator" aria-hidden="true">:</span>
         <ClockDigits digits={time.secondDigits} unit="seconds" motionAllowed={canAnimate} />
       </span>
     </time>

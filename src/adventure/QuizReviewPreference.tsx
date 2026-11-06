@@ -6,12 +6,24 @@ export function QuizReviewPreference({
   disabled = false,
   onCountChange,
   onToggleSkip,
+  prefetchEnabled = false,
+  sourcePresent = false,
+  sourceReviewed = false,
+  sourceConsent = false,
+  onPrefetchChange = () => {},
+  onSourceConsentChange = () => {},
 }: {
   count: string;
   skipped: boolean;
   disabled?: boolean;
   onCountChange: (value: string) => void;
   onToggleSkip: () => void;
+  prefetchEnabled?: boolean;
+  sourcePresent?: boolean;
+  sourceReviewed?: boolean;
+  sourceConsent?: boolean;
+  onPrefetchChange?: (enabled: boolean) => void;
+  onSourceConsentChange?: (consent: boolean) => void;
 }) {
   return <div className="quiz-review-preference">
     {!skipped && <>
@@ -32,10 +44,27 @@ export function QuizReviewPreference({
       </label>
       <small id="departure-quiz-hint" className="departure-quiz-hint">
         {isQuizCount(Number(count))
-          ? "Quiz AI là tùy chọn. Bạn có thể tạo câu hỏi sau buổi học mà không cần tài khoản. Khi đăng nhập và bật ôn tập, ứng dụng có thể chuẩn bị trước câu hỏi từ nguồn đã xác nhận trong lúc bạn học. Bạn có thể đổi số lượng ở phần thành quả."
+          ? "Quiz AI là tùy chọn. Bạn có thể tạo câu hỏi sau buổi học mà không cần tài khoản. Chuẩn bị trước chỉ bắt đầu nếu bạn bật tùy chọn bên dưới."
           : "Chọn số câu hỏi là số nguyên từ 1 đến 30."}
       </small>
     </>}
+    <fieldset className="quiz-prefetch-options">
+      <legend>Chuẩn bị Quiz AI</legend>
+      <label>
+        <input type="checkbox" checked={prefetchEnabled} disabled={disabled || skipped}
+          onChange={(event) => onPrefetchChange(event.currentTarget.checked)} />
+        <span>Chuẩn bị câu hỏi trong lúc học (tùy chọn)</span>
+      </label>
+      {prefetchEnabled && sourcePresent && sourceReviewed && <label>
+        <input type="checkbox" checked={sourceConsent} disabled={disabled || skipped}
+          onChange={(event) => onSourceConsentChange(event.currentTarget.checked)} />
+        <span>Cho phép gửi nội dung đã kiểm tra để chuẩn bị Quiz AI</span>
+      </label>}
+      {prefetchEnabled && sourcePresent && !sourceReviewed && <small role="status">
+        Hãy kiểm tra nguồn trước. Câu hỏi sẽ chưa được chuẩn bị cho tới khi bạn xác nhận nguồn và cho phép gửi.
+      </small>}
+      {!prefetchEnabled && <small>Không gửi nội dung hay chuẩn bị câu hỏi khi tùy chọn này đang tắt.</small>}
+    </fieldset>
     <button
       type="button"
       className="departure-quiz-skip"

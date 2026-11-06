@@ -98,6 +98,51 @@ test("a skipped review survives storage and disables focus-time prefetch while l
   assert.equal(isValidQuizDraft({ ...skipped, reviewSkipped: "yes" }), false);
 });
 
+test("new quiz prefetch requires opt-in and reviewed-source consent while legacy drafts retain their prior default", () => {
+  assert.equal(shouldPrefetchQuizReview({
+    count: 3, questions: [], answers: {}, prefetchEnabled: false,
+    prefetchSourcePresent: false, prefetchSourceConsent: false,
+  }), false);
+  assert.equal(shouldPrefetchQuizReview({
+    count: 3, questions: [], answers: {}, prefetchEnabled: true,
+    prefetchSourcePresent: true, prefetchSourceConsent: false,
+  }), false);
+  assert.equal(shouldPrefetchQuizReview({
+    count: 3, questions: [], answers: {}, prefetchEnabled: true,
+    prefetchSourcePresent: true, prefetchSourceConsent: true,
+  }), true);
+  assert.equal(shouldPrefetchQuizReview({
+    count: 3, questions: [], answers: {}, prefetchEnabled: true,
+    prefetchSourcePresent: false, prefetchSourceConsent: false,
+  }), true);
+  assert.equal(shouldPrefetchQuizReview({ count: 3, questions: [], answers: {} }), true);
+  assert.equal(shouldPrefetchQuizReview(undefined), true);
+  assert.equal(isValidQuizDraft({
+    count: 3, questions: [], answers: {}, prefetchEnabled: true,
+    prefetchSourcePresent: true, prefetchSourceConsent: "yes",
+  }), false);
+});
+
+test("new sessions persist explicit prefetch choice independently from review skipping", () => {
+  const draft = createSessionQuizDraft("4", false, 0, {
+    enabled: true,
+    sourcePresent: true,
+    sourceConsent: false,
+  });
+  assert.deepEqual({
+    reviewSkipped: draft.reviewSkipped,
+    prefetchEnabled: draft.prefetchEnabled,
+    prefetchSourcePresent: draft.prefetchSourcePresent,
+    prefetchSourceConsent: draft.prefetchSourceConsent,
+  }, {
+    reviewSkipped: undefined,
+    prefetchEnabled: true,
+    prefetchSourcePresent: true,
+    prefetchSourceConsent: false,
+  });
+  assert.equal(shouldPrefetchQuizReview(draft), false);
+});
+
 test("skipping quiz review permits session start with an empty count and persists the skip marker", () => {
   assert.equal(canStartSessionWithQuizReview("", true), true);
   assert.equal(canStartSessionWithQuizReview("", false), false);

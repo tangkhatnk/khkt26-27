@@ -4,6 +4,7 @@ import { publicMaterialSummaryRoutes } from "./publicMaterialSummaries.js";
 import { publicReportRoutes } from "./publicReport.js";
 import { studyExerciseRoutes } from "./studyExercises.js";
 import { guestAiRoutes } from "./guestAi.js";
+import { signalForRequest } from "./guestAiWorkflows.js";
 import { adminRoutes } from "./admin.js";
 import { localRead, verifyLocalUrl } from "./localStorage.js";
 import { Metrics } from "./metrics.js";
@@ -61,6 +62,8 @@ import {
 import { readMaterialDocument, summarizeMaterialText } from "./materialReading.js";
 import { STUDY_GUIDE_BODY_LIMIT_BYTES, studyGuideRequestSchema } from "./studyGuideSchemas.js";
 import { generateStudyGuide } from "./studyGuide.js";
+import { STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES, studyPlanRequestSchema } from "./studyPlanSchemas.js";
+import { generateStudyPlan } from "./studyPlan.js";
 import { geminiRequestSchema } from "./geminiSchemas.js";
 import { realtime } from "./realtime.js";
 
@@ -727,6 +730,19 @@ export async function buildApp(deps?: {
         } finally {
           req.raw.off("aborted", abort);
           reply.raw.off("close", closed);
+        }
+      });
+      api.post("/study-plans", {
+        bodyLimit: STUDY_PLAN_REQUEST_BODY_LIMIT_BYTES,
+        config: { rateLimit: { max: 3, timeWindow: "1 minute" } },
+      }, async (req, reply) => {
+        reply.header("Cache-Control", "no-store");
+        const body = studyPlanRequestSchema.parse(req.body);
+        const signal = signalForRequest(req, reply);
+        try {
+          return await generateStudyPlan(body, signal.signal);
+        } finally {
+          signal.dispose();
         }
       });
       api.post("/quiz/generate", {

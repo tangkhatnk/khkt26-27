@@ -11,6 +11,7 @@ import {
   studyExerciseSourcesForSession,
   startStudyExerciseFocusIfAllowed,
   shouldInvalidateStudyExerciseForSourceChange,
+  isGuestExerciseStartScopeCurrent,
 } from "../src/adventure/studyExerciseSessionFlow.ts";
 
 test("account exercise solutions require server completion while guests may use full local timing evidence", () => {
@@ -38,6 +39,27 @@ test("account exercise solutions require server completion while guests may use 
   assert.equal(isPersistedStudyExerciseSessionCompleted("guest", guestEarlyEnd), false);
   assert.equal(isPersistedStudyExerciseSessionCompleted("guest", guestInvalidBreakPlan), false);
   assert.equal(isPersistedStudyExerciseSessionCompleted("guest", serverIncompleteSession), false);
+});
+
+test("guest exercise start remains current on the primary station workspace", () => {
+  const scope = {
+    ownerId: "guest",
+    expectedOwnerId: "guest",
+    currentOwnerId: "guest",
+    view: "station",
+    sessionId: "planned-a",
+    currentDraftSessionId: "planned-a",
+    authGenerationMatches: true,
+    workspaceGenerationMatches: true,
+    workspaceLive: true,
+    hasActiveSession: false,
+    preparationReady: true,
+  };
+
+  assert.equal(isGuestExerciseStartScopeCurrent(scope), true);
+  assert.equal(isGuestExerciseStartScopeCurrent({ ...scope, view: "journal" }), false);
+  assert.equal(isGuestExerciseStartScopeCurrent({ ...scope, hasActiveSession: true }), false);
+  assert.equal(isGuestExerciseStartScopeCurrent({ ...scope, preparationReady: false }), false);
 });
 
 test("rehydrated generated sets match reviewed local source hashes and tolerate unavailable local source", async () => {

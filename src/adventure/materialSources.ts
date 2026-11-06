@@ -57,6 +57,21 @@ export function validMaterialSources(value: unknown): value is MaterialSource[] 
       (source.source === "ai-generated" && isValidStudyGuideIllustrations(source.illustrations))));
 }
 
+export function validateStudyGuideAppend(
+  sources: readonly MaterialSource[],
+  materials: readonly { name: string; sourceId?: string }[],
+  candidate: MaterialSource,
+): { ok: true } | { ok: false; message: string } {
+  if (sources.length >= 10 || materials.length >= 10)
+    return { ok: false, message: "Mỗi buổi học lưu tối đa 10 nguồn. Hãy thay nội dung hoặc gỡ bớt nguồn trước khi thêm." };
+  const combined = [...sources, candidate]
+    .map((source) => `--- ${source.name} ---\n${source.text.trim()}`)
+    .join("\n\n");
+  if (combined.length > 50_000)
+    return { ok: false, message: "Tổng nội dung nguồn vượt 50.000 ký tự. Hãy thay nội dung hoặc chọn phần ngắn hơn." };
+  return { ok: true };
+}
+
 export function recoveredMaterialSource(notes: string, materials: {name:string}[]): MaterialSource {
   return {...createMaterialSource(crypto.randomUUID(),{name:"Tài liệu cũ đã nhập (bản gộp)",text:notes,source:"recovered",quality:"needs-review"}),covers:materials.map(file=>file.name)};
 }

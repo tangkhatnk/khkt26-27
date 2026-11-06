@@ -19,6 +19,103 @@ function inputValue(value: number): number | "" {
   return Number.isFinite(value) ? value : "";
 }
 
+type DurationPickerControlsProps = {
+  id: string;
+  value: number;
+  onChange: (minutes: number) => void;
+  durationValid: boolean;
+  durationLocked: boolean;
+  durationHelpId: string;
+  durationErrorId: string;
+};
+
+export function DurationPickerControls({
+  id,
+  value,
+  onChange,
+  durationValid,
+  durationLocked,
+  durationHelpId,
+  durationErrorId,
+}: DurationPickerControlsProps) {
+  const sliderValue = durationValid ? value : 1;
+  const currentValueText = Number.isFinite(value)
+    ? `${value} phút${durationValid ? "" : " · không hợp lệ"}`
+    : "Chưa nhập số phút";
+  const sliderValueText = durationValid
+    ? `${value} phút`
+    : `Giá trị nhập hiện tại: ${currentValueText}. Chọn từ 1 đến 240 phút.`;
+
+  return (
+    <>
+      <div className="quick-times" role="group" aria-label="Thời gian gợi ý">
+        {QUICK_TIMES.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            aria-pressed={value === minutes}
+            className={value === minutes ? "selected" : ""}
+            disabled={durationLocked}
+            onClick={() => onChange(minutes)}
+          >
+            {minutes} phút
+          </button>
+        ))}
+      </div>
+      <div className="duration-range-field">
+        <label htmlFor={`${id}-slider`}>Thời lượng học</label>
+        <input
+          id={`${id}-slider`}
+          className="duration-slider"
+          type="range"
+          min={1}
+          max={240}
+          step={1}
+          value={sliderValue}
+          disabled={durationLocked}
+          onChange={(event) => onChange(Number(event.currentTarget.value))}
+          aria-label="Thời lượng học"
+          aria-valuetext={sliderValueText}
+          aria-describedby={`${durationHelpId}${durationValid ? "" : ` ${durationErrorId}`}`}
+          aria-invalid={!durationValid}
+        />
+        <output
+          className={`duration-current-value${durationValid ? "" : " is-invalid"}`}
+          htmlFor={`${id}-slider ${id}-duration`}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {currentValueText}
+        </output>
+      </div>
+      <label className="custom-duration" htmlFor={`${id}-duration`}>
+        Thời gian tùy chỉnh
+        <span>
+          <input
+            id={`${id}-duration`}
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={240}
+            step={1}
+            disabled={durationLocked}
+            value={inputValue(value)}
+            onChange={(event) =>
+              onChange(event.target.value === "" ? NaN : Number(event.target.value))
+            }
+            aria-describedby={`${durationHelpId}${durationValid ? "" : ` ${durationErrorId}`}`}
+            aria-invalid={!durationValid}
+          />
+          <span>phút</span>
+        </span>
+      </label>
+      <small id={durationHelpId}>
+        {durationLocked ? "Thời lượng này do chủ chuyến đặt." : "Nhập từ 1 đến 240 phút, theo nhịp học của bạn."}
+      </small>
+    </>
+  );
+}
+
 export function DurationPicker({
   value,
   onChange,
@@ -40,6 +137,7 @@ export function DurationPicker({
 }) {
   const id = useId();
   const durationHelpId = `${id}-duration-help`;
+  const durationErrorId = `${id}-duration-error`;
   const breakHelpId = `${id}-break-help`;
   const breakErrorId = `${id}-break-error`;
   const canConfigureBreaks = Boolean(onBreakCountChange && onBreakMinutesChange);
@@ -85,44 +183,15 @@ export function DurationPicker({
 
   return (
     <div className="duration-picker">
-      <div className="quick-times" role="group" aria-label="Thời gian gợi ý">
-        {QUICK_TIMES.map((minutes) => (
-          <button
-            key={minutes}
-            type="button"
-            aria-pressed={value === minutes}
-            className={value === minutes ? "selected" : ""}
-            disabled={durationLocked}
-            onClick={() => onChange(minutes)}
-          >
-            {minutes} phút
-          </button>
-        ))}
-      </div>
-      <label className="custom-duration" htmlFor={`${id}-duration`}>
-        Thời gian tùy chỉnh
-        <span>
-          <input
-            id={`${id}-duration`}
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={240}
-            step={1}
-            disabled={durationLocked}
-            value={inputValue(value)}
-            onChange={(event) =>
-              onChange(event.target.value === "" ? NaN : Number(event.target.value))
-            }
-            aria-describedby={durationHelpId}
-            aria-invalid={!durationValid}
-          />
-          <span>phút</span>
-        </span>
-      </label>
-      <small id={durationHelpId}>
-        {durationLocked ? "Thời lượng này do chủ chuyến đặt." : "Nhập từ 1 đến 240 phút, theo nhịp học của bạn."}
-      </small>
+      <DurationPickerControls
+        id={id}
+        value={value}
+        onChange={onChange}
+        durationValid={durationValid}
+        durationLocked={durationLocked}
+        durationHelpId={durationHelpId}
+        durationErrorId={durationErrorId}
+      />
 
       {canConfigureBreaks && (
         <fieldset className="duration-breaks">
@@ -177,7 +246,7 @@ export function DurationPicker({
       )}
 
       {!durationValid && (
-        <p role="alert" className="duration-error">
+        <p id={durationErrorId} role="alert" className="duration-error">
           Vui lòng nhập số phút nguyên từ 1 đến 240.
         </p>
       )}

@@ -8,6 +8,7 @@ export function MaterialSummaryControl({
   canGenerate = true,
   disabledReason = "",
   onGenerate,
+  onCancel,
 }: {
   source: MaterialSource;
   summary?: string;
@@ -16,6 +17,7 @@ export function MaterialSummaryControl({
   canGenerate?: boolean;
   disabledReason?: string;
   onGenerate: () => void;
+  onCancel?: () => void;
 }) {
   if (!source.reviewed)
     return <p className="material-hint" role="status">Xác nhận nội dung nguồn trước khi yêu cầu tóm tắt.</p>;
@@ -25,6 +27,7 @@ export function MaterialSummaryControl({
     <button type="button" disabled={pending || !canGenerate} onClick={onGenerate}>
       {pending ? "Đang tạo tóm tắt…" : "Tóm tắt tài liệu"}
     </button>
+    {pending && onCancel && <button type="button" onClick={onCancel}>Hủy tạo tóm tắt</button>}
     {!canGenerate && disabledReason && <p className="material-hint">{disabledReason}</p>}
     {error && <p role="alert" className="material-hint">{error}</p>}
     {summary && <section className="material-summary-result" aria-label="Tóm tắt tài liệu">

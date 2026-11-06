@@ -83,7 +83,7 @@ export function apiRequestTimeoutMs(path: string): number {
     ? path.slice("/ai/guest".length)
     : path;
   if (pathWithoutGuestPrefix === "/materials/read") return 115000;
-  if (["/quizzes/generate", "/quiz/generate", "/materials/generate", "/materials/summarize", "/study-exercises"].includes(pathWithoutGuestPrefix) ||
+  if (["/quizzes/generate", "/quiz/generate", "/materials/generate", "/materials/summarize", "/study-exercises", "/study-plans"].includes(pathWithoutGuestPrefix) ||
       /^\/study-exercises\/[^/]+\/solution$/u.test(pathWithoutGuestPrefix)) return 100000;
   return 30000;
 }

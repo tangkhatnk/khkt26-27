@@ -4,7 +4,9 @@ import { StudyGuideArticle } from "./StudyGuideRenderer";
 import type { StudyGuideReviewAction, StudyGuideReviewState } from "./studyGuideReview";
 import "./studyGuide.css";
 
-export function StudyGuideComposer({ disabled, canGenerate, unavailableReason, review, onReviewAction, onGenerate, onCancel, onUse, onDiscard, onDownload }: {
+export type StudyGuideUseMode = "append" | "replace";
+
+export function StudyGuideComposer({ disabled, canGenerate, unavailableReason, review, onReviewAction, onGenerate, onCancel, onUse, onDiscard, onDownload, hasExistingContent = false }: {
   disabled: boolean;
   canGenerate: boolean;
   unavailableReason: string;
@@ -12,9 +14,10 @@ export function StudyGuideComposer({ disabled, canGenerate, unavailableReason, r
   onReviewAction: (action: StudyGuideReviewAction) => void;
   onGenerate: (prompt: string) => Promise<StudyGuideDraft | undefined>;
   onCancel: () => void;
-  onUse: (draft: StudyGuideDraft) => void;
+  onUse: (draft: StudyGuideDraft, mode: StudyGuideUseMode) => void;
   onDiscard: () => void;
   onDownload: (draft: StudyGuideDraft) => void;
+  hasExistingContent?: boolean;
 }) {
   const [prompt, setPrompt] = useState("");
   const { draft } = review;
@@ -50,11 +53,19 @@ export function StudyGuideComposer({ disabled, canGenerate, unavailableReason, r
         <label htmlFor="study-guide-draft-text">Nội dung Markdown<textarea id="study-guide-draft-text" rows={14} maxLength={20000} value={draft.text} disabled={disabled} onChange={event => onReviewAction({ type: "edit-text", text: event.target.value })} /></label>
         <p className="material-hint">Bạn đang sửa bản Markdown gốc. Chuyển về bản xem trước để kiểm tra cách trình bày.</p>
       </div>}
-      <div className="choice-row">
-        <button className="primary" disabled={disabled || !validDraft} onClick={() => onUse(draft)}>Xác nhận và dùng làm tài liệu</button>
+      {hasExistingContent ? <div className="study-guide__use-options" role="group" aria-label="Cách dùng bản ôn tập">
+        <p>Nội dung hiện có được giữ nguyên cho đến khi bạn chọn cách dùng bản nháp.</p>
+        <div className="choice-row">
+          <button className="primary" type="button" disabled={disabled || !validDraft} onClick={() => onUse(draft, "append")}>Thêm vào nội dung hiện có</button>
+          <button type="button" disabled={disabled || !validDraft} onClick={() => onUse(draft, "replace")}>Thay thế nội dung hiện có</button>
+          <button type="button" disabled={disabled || !validDraft} onClick={() => onDownload(draft)}>Tải bản ôn tập (.txt)</button>
+          <button type="button" disabled={disabled} onClick={onDiscard}>Giữ nguyên nội dung, hủy bản nháp</button>
+        </div>
+      </div> : <div className="choice-row">
+        <button className="primary" disabled={disabled || !validDraft} onClick={() => onUse(draft, "replace")}>Xác nhận và dùng làm tài liệu</button>
         <button disabled={disabled || !validDraft} onClick={() => onDownload(draft)}>Tải bản ôn tập (.txt)</button>
         <button className="danger-button" disabled={disabled} onClick={onDiscard}>Bỏ bản nháp AI</button>
-      </div>
+      </div>}
     </div>}
   </section>;
 }
