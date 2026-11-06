@@ -78,18 +78,50 @@ function collectElements(element, result = []) {
   return result;
 }
 
-test("goal-first workspace summarizes goal, subject, breaks, and total time with one inline content column", () => {
+test("goal-first workspace prioritizes the objective and keeps subject and focus time as support", () => {
   const view = render();
 
   assert.match(view, /aria-labelledby="study-plan-workspace-title"/u);
   assert.match(view, /<h1 id="study-plan-workspace-title">Bạn muốn đạt điều gì\?<\/h1>/u);
-  assert.match(view, /<dt>Môn học<\/dt><dd>Sinh học<\/dd>/u);
-  assert.match(view, /<dt>Thời lượng học<\/dt><dd>45 phút<\/dd>/u);
+  assert.match(view, /class="study-plan-workspace__hero-meta"[^>]*>[\s\S]*?Sinh học[\s\S]*?45 phút học/u);
+  assert.doesNotMatch(view, /<dt>Môn học<\/dt>|<dt>Thời lượng học<\/dt>/u);
   assert.match(view, /<dt>Giải lao<\/dt><dd>2 lượt × 5 phút<\/dd>/u);
-  assert.match(view, /<dt>Tổng thời gian<\/dt><dd>55 phút<\/dd>/u);
+  assert.match(view, /<dt>Tổng buổi<\/dt><dd>55 phút<\/dd>/u);
   assert.match(view, /data-testid="materials">Nội dung học/u);
   assert.match(view, /<details class="study-plan-workspace__legacy"><summary>Chi tiết hành trình cũ<\/summary>/u);
   assert.doesNotMatch(view, /<details[^>]*\bopen(?:=|>)/u);
+});
+
+test("selected step position is truthful and plan generation is the single highlighted plan action", () => {
+  const view = render({
+    plan: {
+      id: "plan-a",
+      title: "Ôn tập tế bào",
+      origin: "manual",
+      selectedStepId: "step-b",
+      steps: [
+        { id: "step-a", title: "Đọc ý chính", action: "Đọc ghi chú", outcome: "Nêu được ý", check: "Tự nhắc lại", preferredMinutes: 20 },
+        { id: "step-b", title: "Tự kiểm tra", action: "Trả lời câu hỏi", outcome: "Tìm điểm chưa rõ", check: "Giải thích lại", preferredMinutes: 25 },
+        { id: "step-c", title: "Củng cố", action: "Viết tóm tắt", outcome: "Ghi lại ý chính", check: "Đối chiếu ghi chú", preferredMinutes: 25 },
+      ],
+    },
+    onGeneratePlan: () => {},
+  });
+
+  assert.match(view, /class="[^"]*study-plan-workspace__step-position[^"]*">BƯỚC 2 \/ 3<\/p>/u);
+  assert.equal((view.match(/class="study-plan-workspace__generate"/gu) ?? []).length, 1);
+  assert.doesNotMatch(view, /class="[^"]*\bprimary\b[^"]*"/u);
+});
+
+test("step navigation and selected details stay compact while long Vietnamese text can wrap", async () => {
+  const css = await readFile(resolve(projectRoot, "src/adventure/studyPlanWorkspace.css"), "utf8");
+
+  assert.match(css, /\.study-plan-workspace__steps\s*\{[^}]*overflow-x:\s*auto/su);
+  assert.match(css, /\.study-plan-workspace__selected-content\s*\{[^}]*grid-template-columns:\s*repeat\(3,/su);
+  assert.match(css, /\.study-plan-workspace__goal h1\s*\{[^}]*overflow-wrap:\s*anywhere/su);
+  assert.match(css, /\.study-plan-workspace__selected-content dd\s*\{[^}]*overflow-wrap:\s*anywhere/su);
+  assert.match(css, /\.adventure \.study-plan-workspace__generate\s*\{[^}]*border:\s*2px solid #59856a[^}]*font-weight:\s*700/su);
+  assert.match(css, /@media\s*\(max-width:\s*640px\)/u);
 });
 
 test("invalid manual minutes stay visible without a NaN summary or AI start action", () => {
@@ -99,8 +131,8 @@ test("invalid manual minutes stay visible without a NaN summary or AI start acti
     onGeneratePlan: () => {},
   });
 
-  assert.match(view, /<dt>Thời lượng học<\/dt><dd>Chưa hợp lệ<\/dd>/u);
-  assert.match(view, /<dt>Tổng thời gian<\/dt><dd>Chưa xác định<\/dd>/u);
+  assert.match(view, /class="study-plan-workspace__hero-meta"[^>]*>[\s\S]*?Thời lượng chưa hợp lệ/u);
+  assert.match(view, /<dt>Tổng buổi<\/dt><dd>Chưa xác định<\/dd>/u);
   assert.doesNotMatch(view, /NaN/u);
   assert.match(view, /class="study-plan-workspace__generate"[^>]*disabled/u);
 });

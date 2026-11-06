@@ -1,6 +1,6 @@
 .study-plan-workspace {
   display: grid;
-  gap: 18px;
+  gap: 12px;
   width: min(100%, 1180px);
   margin: 0 auto;
   color: var(--ink, #263d34);
@@ -8,10 +8,10 @@
 
 .study-plan-workspace__summary {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(250px, .9fr);
+  grid-template-columns: minmax(0, 1.3fr) minmax(210px, .7fr);
   align-items: center;
-  gap: 24px;
-  padding: 24px 28px;
+  gap: 16px 24px;
+  padding: 18px 22px;
   border: 1px solid var(--border, #dce3d9);
   border-radius: 16px;
   background: var(--surface, #fffefa);
@@ -27,54 +27,64 @@
 
 .study-plan-workspace__goal h1 {
   margin: 0;
-  font-size: clamp(25px, 3vw, 36px);
+  font-size: clamp(25px, 2.8vw, 34px);
   line-height: 1.18;
   overflow-wrap: anywhere;
 }
 
-.study-plan-workspace__subject {
-  margin: 9px 0 0;
+.study-plan-workspace__hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 7px 0 0;
   color: var(--muted, #707a72);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .study-plan-workspace__timing {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 20px;
   margin: 0;
 }
 
-.study-plan-workspace__timing div { min-width: 0; }
+.study-plan-workspace__timing div { min-width: 90px; }
 .study-plan-workspace__timing dt { color: var(--muted, #707a72); font-size: 12px; }
 .study-plan-workspace__timing dd { margin: 3px 0 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 
 .study-plan-workspace__plan {
   display: grid;
-  gap: 12px;
-  padding: 19px 22px;
+  gap: 10px;
+  padding: 15px 18px;
   border: 1px solid var(--border, #dce3d9);
   border-radius: 14px;
   background: var(--surface, #fffefa);
 }
 
-.study-plan-workspace__plan-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
-.study-plan-workspace__plan-heading h2 { margin: 0; font-size: 20px; }
+.study-plan-workspace__plan-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 15px; }
+.study-plan-workspace__plan-heading h2 { margin: 0; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
 .study-plan-workspace__draft-label { padding: 6px 10px; border-radius: 20px; background: #edf1e7; color: #536d5a; font-size: 12px; font-weight: 700; }
-.study-plan-workspace__steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
-.study-plan-workspace__step-select { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border, #dce3d9); border-radius: 10px; background: var(--surface, #fffefa); color: var(--ink, #263d34); text-align: left; }
+.study-plan-workspace__steps { display: flex; gap: 7px; margin: 0; padding: 2px 2px 6px; overflow-x: auto; overscroll-behavior-inline: contain; list-style: none; scrollbar-width: thin; }
+.study-plan-workspace__steps li { flex: 0 0 auto; width: min(210px, 30vw); min-width: 140px; scroll-snap-align: start; }
+.study-plan-workspace__step-select { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border, #dce3d9); border-radius: 9px; background: var(--surface, #fffefa); color: var(--ink, #263d34); text-align: left; }
 button.study-plan-workspace__step-select { cursor: pointer; }
 button.study-plan-workspace__step-select:disabled { cursor: default; opacity: .72; }
-.study-plan-workspace__step-select strong { min-width: 0; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.study-plan-workspace__step-select strong { min-width: 0; font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
 .study-plan-workspace__step-select[aria-current="step"] { border-color: #59856a; box-shadow: inset 3px 0 #59856a; }
-.study-plan-workspace__step-number { display: grid; flex: 0 0 30px; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: #e8efe5; color: #3b6549; font-weight: 750; }
-.study-plan-workspace__selected-step { display: grid; gap: 14px; padding-top: 15px; border-top: 1px solid var(--border, #dce3d9); }
-.study-plan-workspace__selected-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.study-plan-workspace__step-number { display: grid; flex: 0 0 25px; width: 25px; height: 25px; place-items: center; border-radius: 50%; background: #e8efe5; color: #3b6549; font-size: 12px; font-weight: 750; }
+.study-plan-workspace__selected-step { display: grid; gap: 9px; padding-top: 10px; border-top: 1px solid var(--border, #dce3d9); }
+.study-plan-workspace__selected-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 14px; }
 .study-plan-workspace__selected-heading .study-plan-workspace__eyebrow { margin-bottom: 4px; }
-.study-plan-workspace__selected-heading h3 { margin: 0; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
-.study-plan-workspace__selected-content { display: grid; gap: 12px; margin: 0; }
+.study-plan-workspace__selected-heading h3 { margin: 0; font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; }
+.study-plan-workspace__step-position { margin-bottom: 4px; }
+.study-plan-workspace__selected-content { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
 .study-plan-workspace__selected-content div { min-width: 0; }
 .study-plan-workspace__selected-content dt { color: var(--muted, #707a72); font-size: 12px; font-weight: 700; }
-.study-plan-workspace__selected-content dd { margin: 3px 0 0; font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.study-plan-workspace__selected-content dd { margin: 3px 0 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
 .study-plan-workspace__editor { display: grid; min-width: 0; gap: 12px; margin: 0; padding: 0; border: 0; }
 .study-plan-workspace__editor legend { padding: 0; color: var(--ink, #263d34); font-size: 14px; font-weight: 700; }
 .study-plan-workspace__editor-field { display: grid; gap: 5px; }
@@ -97,6 +107,8 @@ button.study-plan-workspace__step-select:disabled { cursor: default; opacity: .7
 .study-plan-workspace__source-consent { display: flex; align-items: flex-start; gap: 10px; color: var(--ink, #263d34); font-size: 13px; line-height: 1.5; }
 .study-plan-workspace__source-consent input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; accent-color: #47735a; }
 .study-plan-workspace__generate { justify-self: start; min-height: 44px; }
+.adventure .study-plan-workspace__generate { border: 2px solid #59856a; font-weight: 700; }
+.adventure .study-plan-workspace__generate:hover:not(:disabled) { border-color: #47735a; }
 .study-plan-workspace__cancel { justify-self: start; min-height: 44px; }
 .study-plan-workspace__generate:focus-visible,
 .study-plan-workspace__cancel:focus-visible,
@@ -108,18 +120,22 @@ button.study-plan-workspace__step-select:disabled { cursor: default; opacity: .7
 
 @media (max-width: 760px) {
   .study-plan-workspace__summary { grid-template-columns: minmax(0, 1fr); padding: 18px; }
-  .study-plan-workspace__timing { max-width: 480px; }
+  .study-plan-workspace__timing { justify-content: flex-start; }
+  .study-plan-workspace__steps li { width: min(220px, 46vw); }
+  .study-plan-workspace__selected-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-@media (max-width: 440px) {
+@media (max-width: 640px) {
   .study-plan-workspace { gap: 12px; }
-  .study-plan-workspace__summary { gap: 16px; padding: 16px; }
-  .study-plan-workspace__timing { gap: 10px 12px; }
+  .study-plan-workspace__summary { gap: 10px; padding: 15px 16px; }
+  .study-plan-workspace__timing { gap: 8px 16px; }
   .study-plan-workspace__timing dd { font-size: 14px; }
-  .study-plan-workspace__plan { padding: 16px; }
-  .study-plan-workspace__plan-heading { align-items: flex-start; flex-direction: column; }
-  .study-plan-workspace__steps { grid-template-columns: minmax(0, 1fr); }
-  .study-plan-workspace__selected-heading { flex-direction: column; }
+  .study-plan-workspace__plan { gap: 9px; padding: 13px 14px; }
+  .study-plan-workspace__steps li { width: min(220px, 62vw); }
+}
+
+@media (max-width: 420px) {
+  .study-plan-workspace__selected-content { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -181,6 +181,7 @@ export function StudyPlanWorkspace({
   const [editNotice, setEditNotice] = useState("");
   const [stepSaveError, setStepSaveError] = useState("");
   const selectedStep = plan?.steps.find((step) => step.id === plan.selectedStepId) ?? plan?.steps[0];
+  const selectedStepIndex = selectedStep && plan ? plan.steps.findIndex((step) => step.id === selectedStep.id) : -1;
   const editingSelectedStep = Boolean(plan && selectedStep && editingPlanId === plan.id && editingStepId === selectedStep.id && stepDraft);
   const draftErrors = stepDraft ? getStudyPlanStepDraftErrors(stepDraft) : {};
   const stepDraftDirty = Boolean(editingSelectedStep && selectedStep && stepDraft && isStudyPlanStepDraftDirty(selectedStep, stepDraft));
@@ -234,13 +235,15 @@ export function StudyPlanWorkspace({
       <div className="study-plan-workspace__goal">
         <p className="study-plan-workspace__eyebrow">BUỔI HỌC THEO MỤC TIÊU</p>
         <h1 id="study-plan-workspace-title">{goal.trim() || "Bạn muốn đạt điều gì?"}</h1>
-        <p className="study-plan-workspace__subject">{subject}</p>
+        <p className="study-plan-workspace__hero-meta">
+          <span>{subject}</span>
+          <span aria-hidden="true">·</span>
+          <span>{durationValid ? `${preferredMinutes} phút học` : "Thời lượng chưa hợp lệ"}</span>
+        </p>
       </div>
       <dl className="study-plan-workspace__timing">
-        <div><dt>Môn học</dt><dd>{subject}</dd></div>
-        <div><dt>Thời lượng học</dt><dd>{durationValid ? `${preferredMinutes} phút` : "Chưa hợp lệ"}</dd></div>
         <div><dt>Giải lao</dt><dd>{breakCount > 0 ? `${breakCount} lượt × ${breakMinutes} phút` : "Không có"}</dd></div>
-        <div><dt>Tổng thời gian</dt><dd>{totalMinutes === null ? "Chưa xác định" : `${totalMinutes} phút`}</dd></div>
+        <div><dt>Tổng buổi</dt><dd>{totalMinutes === null ? "Chưa xác định" : `${totalMinutes} phút`}</dd></div>
       </dl>
     </header>
 
@@ -259,7 +262,9 @@ export function StudyPlanWorkspace({
         {selectedStep && <section className="study-plan-workspace__selected-step" aria-labelledby="study-plan-workspace-selected-step-title">
           <div className="study-plan-workspace__selected-heading">
             <div>
-              <p className="study-plan-workspace__eyebrow">BƯỚC ĐANG CHỌN</p>
+              <p className="study-plan-workspace__eyebrow study-plan-workspace__step-position">
+                BƯỚC {selectedStepIndex + 1} / {plan.steps.length}
+              </p>
               <h3 id="study-plan-workspace-selected-step-title">{selectedStep.title}</h3>
             </div>
             {onSaveStep && !editingSelectedStep && <button type="button" className="study-plan-workspace__edit" disabled={planStatus === "pending"} onClick={startStepEditing}>Chỉnh sửa bước</button>}
