@@ -802,7 +802,7 @@ test("goal-first workspace shares one desktop editing surface and quiet focus ce
   assert.match(themeCss, /html\[data-theme="dark"\] \.adventure \.main-area[\s\S]*?background:\s*var\(--page-bg\)/u);
 });
 
-test("mandatory onboarding disables navigation that cannot be opened and gives a blocked-state label", async () => {
+test("mandatory onboarding disables unavailable navigation while the guide remains skippable", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const navStart = app.indexOf("{nav.map((n) => {");
   const navEnd = app.indexOf("})}", navStart);
@@ -811,7 +811,8 @@ test("mandatory onboarding disables navigation that cannot be opened and gives a
   assert.match(nav, /if \(firstUseNeedsWorkspace && n\.id !== "station"\) return null/u);
   assert.match(nav, /disabled=\{firstUseNeedsWorkspace\}/u);
   assert.match(app, /disabled=\{firstUseNeedsWorkspace\}[\s\S]*?go\("account"\)/u);
-  assert.match(app, /firstUseNeedsWorkspace\s*\?\s*"Hoàn tất hướng dẫn để bắt đầu"\s*:\s*online/u);
+  assert.match(app, /firstUseNeedsWorkspace\s*\?\s*"Hướng dẫn có thể bỏ qua"\s*:\s*online/u);
+  assert.doesNotMatch(app, /Hoàn tất hướng dẫn để bắt đầu/u);
   assert.match(app, /online && !authOffline && !needsLogin\s*\?\s*"Trực tuyến"/u);
 });
 

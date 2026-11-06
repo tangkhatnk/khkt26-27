@@ -3813,7 +3813,7 @@ function AdventureWorkspace() {
             <ThemeToggle />
             <span className={`connection ${online && !authOffline && !needsLogin ? "" : "offline"}`}>
               {firstUseNeedsWorkspace
-                ? "Hoàn tất hướng dẫn để bắt đầu"
+                ? "Hướng dẫn có thể bỏ qua"
                 : online && !authOffline && !needsLogin
                 ? "Trực tuyến"
                 : needsLogin
