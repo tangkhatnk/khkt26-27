@@ -7,6 +7,7 @@ import {
   applyStudyPlanStepPatch,
   advanceStudyPlanCandidateAfterStart,
   bindStudyPlanStepSession,
+  canStartSelectedStudyPlanStep,
   canSelectStudyPlanStep,
   clearStudyPlanActiveBinding,
   completedStudyPlanStepIds,
@@ -443,6 +444,8 @@ test("AI plan receipts bind exact candidates and unlock only a completed prefix"
   assert.deepEqual(completedStudyPlanStepIds(storage, plan.id), []);
   assert.equal(canSelectStudyPlanStep(storage, plan.id, "step-one"), true);
   assert.equal(canSelectStudyPlanStep(storage, plan.id, "step-two"), false);
+  assert.equal(canStartSelectedStudyPlanStep(storage, "candidate-one"), true);
+  assert.equal(canStartSelectedStudyPlanStep(storage, "stale-candidate"), false);
   assert.equal(bindStudyPlanStepSession(storage, { ...binding, sessionId: "wrong-candidate" }), null);
   const futureBinding = { sessionId: "candidate-two", planId: plan.id, stepId: "step-two" };
   assert.equal(bindStudyPlanStepSession(storage, futureBinding), null);
@@ -450,6 +453,10 @@ test("AI plan receipts bind exact candidates and unlock only a completed prefix"
     ...storage,
     draft: { ...storage.draft, selectedStepId: "step-two" },
   }, futureBinding), null);
+  assert.equal(canStartSelectedStudyPlanStep({
+    ...storage,
+    draft: { ...storage.draft, selectedStepId: "step-two" },
+  }, "candidate-two"), false);
   const started = bindStudyPlanStepSession(storage, binding);
   assert.deepEqual(started?.activePlanBinding, binding);
   assert.equal(bindStudyPlanStepSession(started, binding), started);
@@ -607,6 +614,11 @@ test("one-step local manual plans remain readable while generated plans require 
   const restored = normalizeStudyPlanStorage({ ...base, plans: [manual] });
 
   assert.deepEqual(restored.plans.map((plan) => plan.id), ["manual-plan"]);
+  assert.equal(canStartSelectedStudyPlanStep({
+    ...createStudyPlanStorage(),
+    draft: { ...createStudyPlanStorage().draft, selectedPlanId: "manual-plan", selectedStepId: "step-one" },
+    plans: restored.plans,
+  }, "manual-session"), true);
 });
 
 test("workspace material drafts restore only for the exact owner-local plan step and candidate", () => {

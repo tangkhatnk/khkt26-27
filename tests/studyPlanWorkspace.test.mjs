@@ -473,25 +473,40 @@ test("AdventureApp wires the planner response fence and cancel action to its con
   assert.match(app, /const firstUseNeedsWorkspace = loaded && !saved\.active/u);
 });
 
-test("the station goal and duration controls stay visible and match tutorial targets", async () => {
+test("the focused tutorial uses the same owner-local goal, duration, and retrieval values", async () => {
   const app = (await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8")).replace(/\r\n?/gu, "\n");
   const settingsStart = app.indexOf('<section className="panel form departure-settings">');
   const settingsEnd = app.indexOf("</section>", settingsStart);
   const settings = app.slice(settingsStart, settingsEnd);
+  const guideStart = app.indexOf("canShowStudyOnboarding(loaded, saved.active, saved.studyPlanStorage?.onboarding) ? (");
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace", guideStart);
+  const guide = app.slice(guideStart, workspaceStart);
+  const goalStart = app.indexOf("const studyTutorialGoalControl =");
+  const durationStart = app.indexOf("const studyTutorialDurationControl =", goalStart);
+  const goal = app.slice(goalStart, durationStart);
+  const retrievalStart = app.indexOf("const studyTutorialRetrievalControl =", durationStart);
+  const retrievalEnd = app.indexOf(";\n  return (", retrievalStart);
+  const duration = app.slice(durationStart, retrievalStart);
+  const retrieval = app.slice(retrievalStart, retrievalEnd);
 
   assert.notEqual(settingsStart, -1);
   assert.notEqual(settingsEnd, -1);
-  assert.doesNotMatch(settings, /<TicketEditor/u);
-  assert.doesNotMatch(settings, /<TicketEditor/u);
   assert.match(settings, /<StudyWorkspaceSettings[\s\S]*?legacyDisclosure=\{view === "ticket"\}/u);
   assert.match(settings, /<QuizReviewPreference[\s\S]*?disabled=\{busy \|\| privateTripDraftLocked\}/u);
-  assert.match(app, /function focusStudyTutorialControl[\s\S]*?target\.getClientRects\(\)\.length === 0\) return false/u);
-  assert.match(app, /function recordStudyTutorialRetrievalChoice[\s\S]*?completeStudyOnboardingRetrievalChoice/u);
-  assert.match(app, /onCountChange=\{\(value\) => \{\s*setQuizCount\(value\);\s*recordStudyTutorialRetrievalChoice\(value\);\s*\}\}/u);
-  assert.match(app, /quiz-review-preference input:not\(:disabled\), \.quiz-review-preference button:not\(:disabled\)/u);
+  assert.match(guide, /goalControl=\{studyTutorialGoalControl\}/u);
+  assert.match(guide, /durationControl=\{studyTutorialDurationControl\}/u);
+  assert.match(guide, /retrievalControl=\{studyTutorialRetrievalControl\}/u);
+  assert.match(goal, /id="study-workspace-goal" value=\{goal\}/u);
+  assert.match(goal, /onChange=\{\(event\) => persistQuickTripStudyDraft\(\{ goal: event\.currentTarget\.value \}\)\}/u);
+  assert.match(duration, /value=\{minutes\}[\s\S]*?onChange=\{\(value\) => persistQuickTripStudyDraft\(\{ minutes: value \}\)\}/u);
+  assert.doesNotMatch(duration, /onBreakCountChange|onBreakMinutesChange/u);
+  assert.match(retrieval, /value=\{quizCount\}[\s\S]*?onChange=\{\(event\) => setQuizCount/u);
+  assert.match(retrieval, /aria-pressed=\{skipQuizReview\}[\s\S]*?setSkipQuizReview/u);
+  assert.doesNotMatch(retrieval, /prefetchEnabled|sourceConsent|generateQuiz|postGuestAi/u);
+  assert.doesNotMatch(app, /focusStudyTutorialControl|recordStudyTutorialRetrievalChoice/u);
 });
 
-test("retrieval tutorial asks for a local preference change rather than an acknowledgement", () => {
+test("retrieval tutorial renders a compact local count-and-skip control instead of acknowledgement", () => {
   let progress = studyOnboardingModel.createStudyOnboardingProgress({ goal: "Ôn tế bào" });
   progress = studyOnboardingModel.reduceStudyOnboardingProgress(progress, { type: "survey/next" });
   progress = studyOnboardingModel.reduceStudyOnboardingProgress(progress, { type: "survey/next" });
@@ -502,12 +517,19 @@ test("retrieval tutorial asks for a local preference change rather than an ackno
     progress,
     currentDuration: 25,
     currentDraft: { ...progress.survey },
+    retrievalControl: React.createElement("div", null,
+      React.createElement("label", { htmlFor: "quiz-count" }, "Số câu hỏi ôn tập",
+        React.createElement("input", { id: "quiz-count", type: "number", min: 1, max: 30, value: 3, onChange: () => {} })),
+      React.createElement("button", { type: "button", "aria-pressed": false }, "Bỏ qua ôn tập")),
     onProgressChange: () => {},
   }));
 
   assert.match(view, /Hướng dẫn không tự gửi yêu cầu/u);
   assert.match(view, /thao tác AI chỉ chạy khi bạn chủ động chọn/u);
-  assert.match(view, /Đi tới lựa chọn ôn tập/u);
+  assert.match(view, /Số câu hỏi ôn tập/u);
+  assert.match(view, /Bỏ qua ôn tập/u);
+  assert.match(view, /Tiếp tục sau khi chọn ôn tập/u);
+  assert.doesNotMatch(view, /Chuẩn bị câu hỏi trong lúc học|Cho phép gửi nội dung/u);
   assert.doesNotMatch(view, /Tôi đã biết bước tự kiểm tra/u);
 });
 

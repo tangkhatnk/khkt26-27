@@ -231,6 +231,18 @@ export function canSelectStudyPlanStep(storage: StudyPlanStorage, planId: string
   return index <= completedStudyPlanStepIds(storage, planId).length;
 }
 
+/** Confirm that the selected workspace identity is still the candidate used by Start. */
+export function canStartSelectedStudyPlanStep(storage: StudyPlanStorage, sessionId: string): boolean {
+  if (!isText(sessionId, 200, 1)) return false;
+  const planId = storage.draft.selectedPlanId;
+  if (planId === null)
+    return storage.draft.selectedStepId === null && storage.draft.candidateSessionId === sessionId;
+  const plan = storage.plans.find((item) => item.id === planId);
+  const step = plan?.steps.find((item) => item.id === storage.draft.selectedStepId);
+  if (!plan || !step || step.plannedSessionId !== sessionId) return false;
+  return plan.origin === "manual" || canSelectStudyPlanStep(storage, plan.id, step.id);
+}
+
 /** Bind a generated step to its exact local candidate before focus starts. */
 export function bindStudyPlanStepSession(
   storage: StudyPlanStorage,
