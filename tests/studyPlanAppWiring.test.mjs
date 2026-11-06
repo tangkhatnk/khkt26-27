@@ -424,6 +424,23 @@ test("tutorial state controls guide presentation, while explicit guest actions a
   assert.match(app, /current\.current\.active/u);
 });
 
+test("onboarding progress and station navigation wait for the local save", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function saveStudyOnboardingProgress(");
+  const end = app.indexOf("function reopenStudyOnboarding(", start);
+  const save = app.slice(start, end);
+  const commit = save.indexOf("const saved = commit({");
+  const failedSave = save.indexOf("if (!saved) return false;", commit);
+  const updateDraft = save.indexOf("updateQuickTripDraft(quickTripDraft, quickDraft)");
+  const stationNavigation = save.indexOf('go("station")');
+
+  assert.notEqual(commit, -1);
+  assert.ok(commit < failedSave);
+  assert.ok(failedSave < updateDraft);
+  assert.ok(failedSave < stationNavigation);
+  assert.match(save, /if \(onboardingProgress\.phase === "skipped"\) go\("station"\);\s*return true;/u);
+});
+
 test("starting focus durably advances the selected candidate while the active session keeps its original ID", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const start = app.indexOf("const beginFocus = (input:");

@@ -2946,15 +2946,17 @@ function AdventureWorkspace() {
       level: survey.level,
       confidence: survey.confidence,
     };
+    const saved = commit({
+      ...current.current,
+      studyPlanStorage: { ...storage, onboarding: onboardingProgress, draft },
+    });
+    if (!saved) return false;
     updateQuickTripDraft(quickTripDraft, quickDraft);
     setGoal(survey.goal);
     setTopic(survey.topicId);
     if (validMinutes) setMinutes(preferredMinutes);
-    commit({
-      ...current.current,
-      studyPlanStorage: { ...storage, onboarding: onboardingProgress, draft },
-    });
     if (onboardingProgress.phase === "skipped") go("station");
+    return true;
   }
   function reopenStudyOnboarding() {
     const storage = current.current.studyPlanStorage;
