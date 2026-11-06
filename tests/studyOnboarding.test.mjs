@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canShowStudyOnboarding,
+  canOpenStudyWorkspace,
   completeStudyOnboardingQuizCountChoice,
   completeStudyOnboardingRetrievalChoice,
   createStudyOnboardingProgress,
@@ -258,4 +259,87 @@ test("an active session has priority over first-use onboarding", () => {
   assert.equal(canShowStudyOnboarding(true, { id: "active-session" }, progress), false);
   assert.equal(canShowStudyOnboarding(true, null, progress), true);
   assert.equal(canShowStudyOnboarding(true, null, { ...progress, phase: "complete" }), false);
+});
+
+test("an explicitly skipped guide unlocks the workspace without claiming completion", () => {
+  const survey = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học" });
+  const tutorial = {
+    ...survey,
+    phase: "skipped",
+    pausedFrom: "tutorial",
+    tutorialStep: 2,
+    tutorial: { sourceChoice: "notes" },
+  };
+
+  assert.equal(isValidStudyOnboardingProgress(tutorial), true);
+  assert.equal(canShowStudyOnboarding(true, null, tutorial), false);
+  assert.equal(canOpenStudyWorkspace(tutorial), true);
+  assert.equal(tutorial.phase === "complete", false);
+  assert.equal(canShowStudyOnboarding(true, { id: "active-session" }, tutorial), false);
+});
+
+test("survey and tutorial remain visible while skipped progress returns to the workspace", () => {
+  const survey = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học" });
+  const tutorial = { ...survey, phase: "tutorial" };
+  const paused = { ...survey, phase: "paused", pausedFrom: "survey" };
+  const complete = { ...survey, phase: "complete" };
+  const skipped = { ...survey, phase: "skipped", pausedFrom: "survey" };
+
+  assert.equal(canShowStudyOnboarding(true, null, survey), true);
+  assert.equal(canShowStudyOnboarding(true, null, tutorial), true);
+  assert.equal(canShowStudyOnboarding(true, null, paused), true);
+  assert.equal(canShowStudyOnboarding(true, null, skipped), false);
+  assert.equal(canShowStudyOnboarding(true, null, complete), false);
+  assert.equal(canOpenStudyWorkspace(survey), false);
+  assert.equal(canOpenStudyWorkspace(tutorial), false);
+  assert.equal(canOpenStudyWorkspace(paused), false);
+  assert.equal(canOpenStudyWorkspace(skipped), true);
+  assert.equal(canOpenStudyWorkspace(complete), true);
+});
+
+test("leaving the survey preserves its current answers and resumes at the same survey step", () => {
+  let progress = createStudyOnboardingProgress({
+    goal: "Ôn phản ứng hóa học",
+    topicId: "chemistry",
+    topicLabel: "Hóa học",
+  });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, {
+    type: "survey/change",
+    changes: { preferredMinutes: 45, level: "Lớp 9", confidence: 2 },
+  });
+  const survey = structuredClone(progress.survey);
+
+  const exited = reduceStudyOnboardingProgress(progress, { type: "onboarding/skip" });
+  assert.equal(exited.phase, "skipped");
+  assert.equal(exited.pausedFrom, "survey");
+  assert.equal(exited.surveyStep, 1);
+  assert.deepEqual(exited.survey, survey);
+
+  const resumed = reduceStudyOnboardingProgress(exited, { type: "onboarding/resume" });
+  assert.equal(resumed.phase, "survey");
+  assert.equal(resumed.surveyStep, 1);
+  assert.deepEqual(resumed.survey, survey);
+});
+
+test("leaving any tutorial step preserves progress without counting the step as complete", () => {
+  for (const tutorialStep of [0, 1, 2, 3]) {
+    const progress = {
+      ...createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học", preferredMinutes: 45 }),
+      phase: "tutorial",
+      tutorialStep,
+      tutorial: { sourceChoice: tutorialStep >= 2 ? "files" : null },
+    };
+
+    const exited = reduceStudyOnboardingProgress(progress, { type: "onboarding/skip" });
+    assert.equal(exited.phase, "skipped", `step ${tutorialStep}`);
+    assert.equal(exited.pausedFrom, "tutorial", `step ${tutorialStep}`);
+    assert.equal(exited.tutorialStep, tutorialStep, `step ${tutorialStep}`);
+    assert.equal(exited.tutorial.sourceChoice, progress.tutorial.sourceChoice, `step ${tutorialStep}`);
+
+    const resumed = reduceStudyOnboardingProgress(exited, { type: "onboarding/resume" });
+    assert.equal(resumed.phase, "tutorial", `step ${tutorialStep}`);
+    assert.equal(resumed.tutorialStep, tutorialStep, `step ${tutorialStep}`);
+    assert.deepEqual(resumed.survey, progress.survey, `step ${tutorialStep}`);
+  }
 });

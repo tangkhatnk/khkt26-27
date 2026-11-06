@@ -13,7 +13,7 @@ import {
   studyWorkspaceSourceContentChanged,
   updateStudyPlanDraftFromQuickTrip,
 } from "../src/adventure/studyPlanStorage.ts";
-import { reopenStudyOnboardingFromDraft } from "../src/adventure/studyOnboardingModel.ts";
+import { reduceStudyOnboardingProgress, reopenStudyOnboardingFromDraft } from "../src/adventure/studyOnboardingModel.ts";
 
 function withLocalStorage(callback) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -116,6 +116,39 @@ test("an empty owner starts the survey with current manual-study defaults", () =
     assert.equal(restored.studyPlanStorage.draft.topicId, "biology");
     assert.equal(restored.studyPlanStorage.draft.topicLabel, "Sinh học");
     assert.equal(restored.studyPlanStorage.draft.preferredMinutes, 25);
+  });
+});
+
+test("a skipped walkthrough survives owner-local reload and resumes at its saved step", () => {
+  withLocalStorage(() => {
+    const storage = createStudyPlanStorage();
+    storage.onboarding = {
+      ...storage.onboarding,
+      phase: "tutorial",
+      tutorialStep: 2,
+      survey: {
+        ...storage.onboarding.survey,
+        goal: "Ôn phản ứng hóa học",
+        topicId: "chemistry",
+        topicLabel: "Hóa học",
+        preferredMinutes: 45,
+      },
+      tutorial: { sourceChoice: "files" },
+    };
+    storage.onboarding = reduceStudyOnboardingProgress(storage.onboarding, { type: "onboarding/skip" });
+    localStorage.setItem("train-adventure:v1:guest", JSON.stringify(legacySaved({ studyPlanStorage: storage })));
+
+    const restored = readSaved("guest");
+    assert.equal(restored.studyPlanStorage.onboarding.phase, "skipped");
+    assert.equal(restored.studyPlanStorage.onboarding.pausedFrom, "tutorial");
+    assert.equal(restored.studyPlanStorage.onboarding.tutorialStep, 2);
+    assert.equal(restored.studyPlanStorage.onboarding.survey.goal, "Ôn phản ứng hóa học");
+    assert.equal(restored.studyPlanStorage.onboarding.survey.preferredMinutes, 45);
+
+    const resumed = reduceStudyOnboardingProgress(restored.studyPlanStorage.onboarding, { type: "onboarding/resume" });
+    assert.equal(resumed.phase, "tutorial");
+    assert.equal(resumed.tutorialStep, 2);
+    assert.equal(resumed.tutorial.sourceChoice, "files");
   });
 });
 

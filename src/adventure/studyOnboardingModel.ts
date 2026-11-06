@@ -11,7 +11,7 @@ export type StudySurvey = {
   confidence: number | null;
 };
 
-export type StudyOnboardingPhase = "survey" | "tutorial" | "paused" | "complete";
+export type StudyOnboardingPhase = "survey" | "tutorial" | "paused" | "skipped" | "complete";
 export type StudyTutorialControl = "goal" | "source" | "duration" | "retrieval";
 export type StudySourceChoice = "notes" | "files" | "none";
 
@@ -32,6 +32,7 @@ export type StudyOnboardingAction =
   | { type: "tutorial/used"; control: StudyTutorialControl; choice?: StudySourceChoice }
   | { type: "tutorial/previous" }
   | { type: "onboarding/pause" }
+  | { type: "onboarding/skip" }
   | { type: "onboarding/resume" }
   | { type: "onboarding/reopen" }
   | { type: "onboarding/edit-survey" };
@@ -93,12 +94,12 @@ export function createStudyOnboardingProgress(survey: Partial<StudySurvey> = {})
 
 export function isValidStudyOnboardingProgress(value: unknown): value is StudyOnboardingProgress {
   if (!isRecord(value) || value.version !== STUDY_ONBOARDING_VERSION ||
-      typeof value.phase !== "string" || !["survey", "tutorial", "paused", "complete"].includes(value.phase) ||
+      typeof value.phase !== "string" || !["survey", "tutorial", "paused", "skipped", "complete"].includes(value.phase) ||
       (value.surveyStep !== 0 && value.surveyStep !== 1) ||
       !Number.isSafeInteger(value.tutorialStep) || ![0, 1, 2, 3].includes(Number(value.tutorialStep)) || !validSurvey(value.survey) ||
       !isRecord(value.tutorial) ||
       !(value.tutorial.sourceChoice === null || validSourceChoice(value.tutorial.sourceChoice))) return false;
-  if (value.phase === "paused")
+  if (value.phase === "paused" || value.phase === "skipped")
     return value.pausedFrom === "survey" || value.pausedFrom === "tutorial";
   return value.pausedFrom === undefined;
 }
@@ -153,8 +154,13 @@ export function reduceStudyOnboardingProgress(
     case "onboarding/pause":
       if (state.phase !== "survey" && state.phase !== "tutorial") return state;
       return { ...state, phase: "paused", pausedFrom: state.phase };
+    case "onboarding/skip": {
+      if (state.phase !== "survey" && state.phase !== "tutorial" && state.phase !== "paused") return state;
+      const pausedFrom = state.phase === "paused" ? state.pausedFrom : state.phase;
+      return pausedFrom ? { ...state, phase: "skipped", pausedFrom } : state;
+    }
     case "onboarding/resume":
-      if (state.phase !== "paused" || !state.pausedFrom) return state;
+      if ((state.phase !== "paused" && state.phase !== "skipped") || !state.pausedFrom) return state;
       return { ...state, phase: state.pausedFrom, pausedFrom: undefined };
     case "onboarding/reopen":
       return state.phase === "complete"
@@ -196,5 +202,11 @@ export function canShowStudyOnboarding(
   progress: unknown,
 ): boolean {
   if (!loaded || activeSession) return false;
-  return !isValidStudyOnboardingProgress(progress) || progress.phase !== "complete";
+  return !canOpenStudyWorkspace(progress);
+}
+
+/** A skipped guide stays resumable, but no longer blocks the personal workspace. */
+export function canOpenStudyWorkspace(progress: unknown): boolean {
+  return isValidStudyOnboardingProgress(progress) &&
+    (progress.phase === "skipped" || progress.phase === "complete");
 }

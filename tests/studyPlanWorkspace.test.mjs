@@ -462,10 +462,10 @@ test("AdventureApp wires the planner response fence and cancel action to its con
   assert.match(app, /setMinutes\(draft\.minutes\);[\s\S]*?if \(isValidStudyMinutes\(draft\.minutes\)\)/u);
   assert.match(app, /isGuestExerciseStartScopeCurrent\(\{[\s\S]*?view: viewRef\.current/u);
   assert.doesNotMatch(app, /workspaceLive\.current && viewRef\.current === "ticket" && draftTripIdRef/u);
-  assert.match(app, /!current\.current\.active && current\.current\.studyPlanStorage\?\.onboarding\.phase !== "complete"/u);
-  assert.match(app, /async function generateStudyGuide[\s\S]*?busy \|\| tutorialActive/u);
-  assert.match(app, /async function readHandwriting[\s\S]*?busy \|\| tutorialActive/u);
-  assert.match(app, /disabled=\{busy \|\| tutorialActive \|\| privateTripDraftLocked/u);
+  assert.doesNotMatch(app.slice(app.indexOf("function start(skipPendingExercises"), app.indexOf("const hasReadyPreparation", app.indexOf("function start(skipPendingExercises"))), /canOpenStudyWorkspace|tutorialActive|onboarding\.phase/u);
+  assert.doesNotMatch(app.slice(app.indexOf("async function generateStudyGuide("), app.indexOf("function acceptStudyGuide(", app.indexOf("async function generateStudyGuide("))), /tutorialActive/u);
+  assert.doesNotMatch(app.slice(app.indexOf("async function readHandwriting("), app.indexOf("async function generateStudyGuide(", app.indexOf("async function readHandwriting("))), /tutorialActive/u);
+  assert.doesNotMatch(app, /disabled=\{busy \|\| tutorialActive \|\| privateTripDraftLocked/u);
   assert.match(app, /const firstUseNeedsWorkspace = loaded && !saved\.active/u);
 });
 
@@ -501,7 +501,8 @@ test("retrieval tutorial asks for a local preference change rather than an ackno
     onProgressChange: () => {},
   }));
 
-  assert.match(view, /Khi bạn đổi một lựa chọn, hướng dẫn hoàn tất/u);
+  assert.match(view, /Hướng dẫn không tự gửi yêu cầu/u);
+  assert.match(view, /thao tác AI chỉ chạy khi bạn chủ động chọn/u);
   assert.match(view, /Đi tới lựa chọn ôn tập/u);
   assert.doesNotMatch(view, /Tôi đã biết bước tự kiểm tra/u);
 });

@@ -3,6 +3,7 @@ import test, { after, before } from "node:test";
 import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { createStudyOnboardingProgress, reduceStudyOnboardingProgress } from "../src/adventure/studyOnboardingModel.ts";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 let vite;
@@ -126,6 +127,39 @@ test("fresh guest request with skipped optional level reaches the guest plan rou
 
   assert.equal(request.path, "/study-plans");
   assert.equal("level" in request.input, false);
+});
+
+test("an explicit guest plan request remains available while the walkthrough is incomplete", async () => {
+  let progress = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  assert.equal(progress.phase, "tutorial");
+
+  const body = await api.buildStudyPlanRequest({
+    goal: progress.survey.goal,
+    topic: progress.survey.topicLabel,
+    preferredMinutes: progress.survey.preferredMinutes,
+  });
+  let called = false;
+  await api.generateStudyPlan(body, {
+    owner: "guest",
+    guestRequest: async (path) => {
+      called = true;
+      assert.equal(path, "/study-plans");
+      return {
+        title: "Ôn phản ứng hóa học",
+        steps: ["Nhận biết", "Giải thích", "Tự kiểm tra"].map((title) => ({
+          title,
+          action: "Đọc lại phần ghi chú phù hợp",
+          outcome: "Nêu được ý chính",
+          check: "Tự giải thích lại",
+        })),
+      };
+    },
+  });
+
+  assert.equal(called, true);
+  assert.equal(progress.phase, "tutorial");
 });
 
 test("account and GuestAI plan requests share a 100-second deadline for the planner fallback", () => {
