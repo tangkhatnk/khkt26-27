@@ -63,6 +63,7 @@ import {
   saveStudyWorkspaceDraft,
   selectedStudyWorkspaceIdentity,
   studyPlanStepForRecovery,
+  studyPlanRouteStates,
   studyWorkspaceSourceContentChanged,
   updateStudyPlanDraftFromQuickTrip,
   type StudyPlanStorage,
@@ -932,6 +933,20 @@ function AdventureWorkspace() {
   const studyPlanStorage = saved.studyPlanStorage ?? createStudyPlanStorage();
   const quizPrefetchSettings = studyPlanStorage.draft.quizPrefetch;
   const selectedStudyPlan = studyPlanStorage.plans.find((plan) => plan.id === studyPlanStorage.draft.selectedPlanId);
+  const studyPlanStepStates = selectedStudyPlan
+    ? studyPlanRouteStates(studyPlanStorage, selectedStudyPlan.id)
+    : [];
+  const requestedStudyPlanStep = selectedStudyPlan?.steps.find((step) => step.id === studyPlanStorage.draft.selectedStepId);
+  const selectedStudyPlanStep = selectedStudyPlan && requestedStudyPlanStep &&
+    canSelectStudyPlanStep(studyPlanStorage, selectedStudyPlan.id, requestedStudyPlanStep.id)
+    ? requestedStudyPlanStep
+    : selectedStudyPlan ? studyPlanStepForRecovery(studyPlanStorage, selectedStudyPlan.id) : null;
+  const canEditSelectedStudyPlanStep = Boolean(selectedStudyPlan && selectedStudyPlanStep &&
+    studyPlanStorage.draft.selectedPlanId === selectedStudyPlan.id &&
+    studyPlanStorage.draft.selectedStepId === selectedStudyPlanStep.id &&
+    studyPlanStorage.draft.candidateSessionId === selectedStudyPlanStep.plannedSessionId &&
+    canSelectStudyPlanStep(studyPlanStorage, selectedStudyPlan.id, selectedStudyPlanStep.id) &&
+    mode === "solo" && !saved.active && loaded && exclusive);
   const studyPlanStepStartAllowed = canStartSelectedStudyPlanStep(studyPlanStorage, draftTripId);
   const firstStartableStudyPlanStep = selectedStudyPlan
     ? studyPlanStepForRecovery(studyPlanStorage, selectedStudyPlan.id)
@@ -3214,8 +3229,14 @@ function AdventureWorkspace() {
       setError("Không thể lưu bước học trong phiên đang chạy hoặc chuyến nhóm.");
       return false;
     }
+    const selectedPlanId = storage.draft.selectedPlanId;
+    if (!selectedPlanId || storage.draft.selectedStepId !== stepId ||
+        !canSelectStudyPlanStep(storage, selectedPlanId, stepId)) {
+      setError("Bước này chưa mở hoặc không còn là bước đang chọn. Hãy chọn bước được phép học trước.");
+      return false;
+    }
     const identity = selectedStudyWorkspaceIdentity(storage);
-    if (identity.stepId !== stepId || identity.sessionId !== draftTripIdRef.current) {
+    if (identity.planId !== selectedPlanId || identity.stepId !== stepId || identity.sessionId !== draftTripIdRef.current) {
       setError("Bước học đã thay đổi. Hãy mở lại bước hiện tại rồi lưu lại.");
       return false;
     }
@@ -3448,7 +3469,11 @@ function AdventureWorkspace() {
       ...removedSessionIds,
     ]);
     const candidateUsed = usedSessionIds.has(selectedStep.plannedSessionId);
-    if (samePlan && plan.selectedStepId === stepId && !candidateUsed) return true;
+    const committedSelectionMatches = currentStorage.draft.selectedStepId === stepId &&
+      currentStorage.draft.candidateSessionId === selectedStep.plannedSessionId &&
+      canStartSelectedStudyPlanStep(currentStorage, selectedStep.plannedSessionId) &&
+      draftTripIdRef.current === selectedStep.plannedSessionId;
+    if (samePlan && plan.selectedStepId === stepId && committedSelectionMatches && !candidateUsed) return true;
     if (busy || materialRequest.current || studyGuideNeedsConfirmation) {
       setError("Hãy kết thúc thao tác nội dung đang mở trước khi đổi bước học.");
       return false;
@@ -3909,13 +3934,18 @@ function AdventureWorkspace() {
                     breakCount={breakCount}
                     breakMinutes={breakMinutes}
                     plan={selectedStudyPlan}
+                    stepStates={studyPlanStepStates}
+                    selectedStepId={selectedStudyPlanStep?.id ?? ""}
                     planStatus={studyPlanStatus}
                     planError={studyPlanError}
                     planActionReason={studyPlanAccessReason}
                     onGeneratePlan={requestStudyPlanFromWorkspace}
                     onCancelPlan={cancelStudyPlanRequest}
                     onSelectStep={selectStudyPlanStep}
-                    onSaveStep={saveStudyPlanStep}
+                    onSaveStep={canEditSelectedStudyPlanStep ? saveStudyPlanStep : undefined}
+                    onEnterFreeStudy={mode === "solo" && selectedStudyPlan ? enterFreeStudyWorkspace : undefined}
+                    freeStudyDisabled={busy || !!active || tripStartInFlight.current || !loaded || !exclusive ||
+                      !workspaceLive.current || Boolean(materialRequest.current) || studyGuideNeedsConfirmation}
                     sourceAvailable={hasStudyPlanSource}
                     sourceReviewed={Boolean(sourceForStudyPlan?.reviewed)}
                     includeSource={includeStudyPlanSource}
@@ -4128,12 +4158,6 @@ function AdventureWorkspace() {
                       >
                         Bắt đầu buổi học · {Number.isFinite(minutes) ? minutes : "…"} phút →
                       </button>
-                      {mode === "solo" && selectedStudyPlan && <button
-                        type="button"
-                        disabled={busy || !!active || tripStartInFlight.current || !loaded || !exclusive ||
-                          !workspaceLive.current || Boolean(materialRequest.current) || studyGuideNeedsConfirmation}
-                        onClick={() => enterFreeStudyWorkspace()}
-                      >Học tự do</button>}
                       {mode === "solo" && !selectedStudyPlan && studyPlanStorage.freeStudyReturn && <button
                         type="button"
                         disabled={busy || !!active || tripStartInFlight.current || !loaded || !exclusive ||

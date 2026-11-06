@@ -127,11 +127,12 @@ html[data-theme="dark"] .study-plan-workspace__route-status.is-locked { color: #
 .study-plan-workspace__field-error { margin: 0; color: #9e3930; font-size: 12px; }
 .study-plan-workspace__save-error { margin: 0; color: #9e3930; font-size: 13px; line-height: 1.45; }
 .study-plan-workspace__editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.study-plan-workspace__save,.study-plan-workspace__discard,.study-plan-workspace__edit { min-height: 40px; padding: 8px 13px; border: 1px solid var(--border, #dce3d9); border-radius: 8px; background: var(--surface, #fffefa); color: var(--ink, #263d34); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.study-plan-workspace__save,.study-plan-workspace__discard,.study-plan-workspace__edit,.study-plan-workspace__free-study { min-height: 40px; padding: 8px 13px; border: 1px solid var(--border, #dce3d9); border-radius: 8px; background: var(--surface, #fffefa); color: var(--ink, #263d34); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .study-plan-workspace__save { border-color: #47735a; background: #47735a; color: #fff; }
 .study-plan-workspace__save:disabled { cursor: not-allowed; opacity: .55; }
 .study-plan-workspace__edit:disabled { cursor: not-allowed; opacity: .55; }
-.study-plan-workspace__save:focus-visible,.study-plan-workspace__discard:focus-visible,.study-plan-workspace__edit:focus-visible { outline: 3px solid #db9b4a; outline-offset: 2px; }
+.study-plan-workspace__free-study { justify-self: start; min-height: 44px; }
+.study-plan-workspace__save:focus-visible,.study-plan-workspace__discard:focus-visible,.study-plan-workspace__edit:focus-visible,.study-plan-workspace__free-study:focus-visible { outline: 3px solid #db9b4a; outline-offset: 2px; }
 .study-plan-workspace__edit-notice { margin: 0; color: #815d22; font-size: 13px; line-height: 1.45; }
 .study-plan-workspace__empty-plan { margin: 0; color: var(--muted, #707a72); font-size: 14px; line-height: 1.55; }
 .study-plan-workspace__status,.study-plan-workspace__error { margin: 0; font-size: 13px; }

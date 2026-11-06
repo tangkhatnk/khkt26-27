@@ -54,6 +54,13 @@ export type StudyPlanStep = {
   sourceExcerpt?: string;
 };
 
+export type StudyPlanRouteState = "available" | "completed" | "locked";
+
+export type StudyPlanRouteStepState = {
+  stepId: string;
+  state: StudyPlanRouteState;
+};
+
 export type SavedStudyPlan = {
   id: string;
   origin: "ai" | "manual";
@@ -237,6 +244,19 @@ export function completedStudyPlanStepIds(storage: StudyPlanStorage, planId: str
     prefix.push(step.id);
   }
   return prefix;
+}
+
+/** Project persisted receipts and prefix eligibility into the route's display states. */
+export function studyPlanRouteStates(storage: StudyPlanStorage, planId: string): StudyPlanRouteStepState[] {
+  const plan = storage.plans.find((candidate) => candidate.id === planId);
+  if (!plan) return [];
+  const completed = new Set(completedStudyPlanStepIds(storage, planId));
+  return plan.steps.map((step) => ({
+    stepId: step.id,
+    state: completed.has(step.id)
+      ? "completed"
+      : canSelectStudyPlanStep(storage, planId, step.id) ? "available" : "locked",
+  }));
 }
 
 /** Completed steps remain revisitable; only steps after the prefix are locked. */

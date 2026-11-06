@@ -17,6 +17,7 @@ let isStudyPlanStepDraftDirty;
 let buildStudyPlanStepPatch;
 let commitStudyPlanStepDraft;
 let requestStudyPlanStepSelection;
+let requestFreeStudyExit;
 let StudyWorkspaceSettings;
 let StudyOnboarding;
 let studyPlanFlow;
@@ -42,6 +43,7 @@ before(async () => {
     buildStudyPlanStepPatch,
     commitStudyPlanStepDraft,
     requestStudyPlanStepSelection,
+    requestFreeStudyExit,
   } = await vite.ssrLoadModule("/src/adventure/StudyPlanWorkspace.tsx"));
   ({ StudyWorkspaceSettings } = await vite.ssrLoadModule("/src/adventure/StudyWorkspaceSettings.tsx"));
   ({ StudyOnboarding } = await vite.ssrLoadModule("/src/adventure/StudyOnboarding.tsx"));
@@ -359,6 +361,83 @@ test("dirty step changes block switching and generation until saved or cancelled
   });
   assert.equal(allowed, false);
   assert.deepEqual(calls, [["blocked"]]);
+});
+
+test("free-study exit preserves dirty step edits and only switches after a clean successful callback", async () => {
+  const events = [];
+  assert.equal(requestFreeStudyExit({
+    dirty: true,
+    onEnter: () => events.push("entered"),
+    onBlocked: () => events.push("blocked"),
+  }), false);
+  assert.deepEqual(events, ["blocked"]);
+
+  assert.equal(requestFreeStudyExit({
+    dirty: false,
+    onEnter: () => { events.push("failed-entry"); return false; },
+    onBlocked: () => events.push("unexpected-block"),
+  }), false);
+  assert.deepEqual(events, ["blocked", "failed-entry"]);
+
+  assert.equal(requestFreeStudyExit({
+    dirty: false,
+    onEnter: () => { events.push("entered"); return true; },
+    onBlocked: () => events.push("unexpected-block"),
+  }), true);
+  assert.deepEqual(events, ["blocked", "failed-entry", "entered"]);
+
+  const source = await readFile(resolve(projectRoot, "src/adventure/StudyPlanWorkspace.tsx"), "utf8");
+  const exitStart = source.indexOf("{onEnterFreeStudy && <button");
+  const exitEnd = source.indexOf("</button>}", exitStart);
+  const exit = source.slice(exitStart, exitEnd);
+  assert.match(exit, /disabled=\{freeStudyDisabled \|\| planStatus === "pending"\}/u);
+  assert.doesNotMatch(exit, /disabled=\{[^}]*stepDraftDirty/u);
+  assert.match(exit, /onBlocked: \(\) => setEditNotice\("Hãy lưu hoặc hủy thay đổi bước học trước khi chuyển sang học tự do\."\)/u);
+});
+
+test("tapping the displayed route fallback reaches App selection even when it already looks selected", async () => {
+  const displayedStepId = "step-two";
+  const selected = [];
+  assert.equal(requestStudyPlanStepSelection({
+    stepId: displayedStepId,
+    dirty: false,
+    onSelect: (stepId) => selected.push(stepId),
+    onBlocked: () => assert.fail("clean fallback selection must not be blocked"),
+  }), true);
+  assert.deepEqual(selected, [displayedStepId]);
+  const source = await readFile(resolve(projectRoot, "src/adventure/StudyPlanWorkspace.tsx"), "utf8");
+  const selectStart = source.indexOf("const selectPlanStep = (stepId: string) => {");
+  const selectEnd = source.indexOf("const startStepEditing", selectStart);
+  const selection = source.slice(selectStart, selectEnd);
+  assert.notEqual(selectStart, -1);
+  assert.match(selection, /requestStudyPlanStepSelection\(/u);
+  assert.doesNotMatch(selection, /if \(stepId === selectedStep\?\.id\) return/u);
+});
+
+test("the plan route offers free study inside the selected-step editing boundary", () => {
+  const view = render({
+    plan: {
+      id: "plan-free",
+      title: "Lộ trình cá nhân",
+      origin: "ai",
+      selectedStepId: "step-a",
+      steps: [{
+        id: "step-a", plannedSessionId: "candidate-a", title: "Bước hiện tại",
+        action: "Đọc ghi chú đã kiểm tra", outcome: "Nêu được ý chính",
+        check: "Tự giải thích lại", preferredMinutes: 25,
+      }],
+    },
+    stepStates: [{ stepId: "step-a", state: "available" }],
+    selectedStepId: "step-a",
+    onEnterFreeStudy: () => true,
+  });
+  const unavailable = render({
+    onEnterFreeStudy: () => true,
+    freeStudyDisabled: true,
+  });
+
+  assert.match(view, /<button class="study-plan-workspace__free-study" type="button">\s*Học tự do\s*<\/button>/u);
+  assert.match(unavailable, /class="study-plan-workspace__free-study" type="button" disabled=""/u);
 });
 
 test("step save callback receives only changed step fields after trimming valid drafts", () => {

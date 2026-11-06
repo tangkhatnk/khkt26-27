@@ -97,6 +97,22 @@ export function requestStudyPlanStepSelection({
   return true;
 }
 
+export function requestFreeStudyExit({
+  dirty,
+  onEnter,
+  onBlocked,
+}: {
+  dirty: boolean;
+  onEnter: () => boolean;
+  onBlocked: () => void;
+}): boolean {
+  if (dirty) {
+    onBlocked();
+    return false;
+  }
+  return onEnter() === true;
+}
+
 export function StudyPlanStepNavigation({
   steps,
   stepStates,
@@ -213,6 +229,8 @@ export function StudyPlanWorkspace({
   onCancelPlan,
   onSelectStep,
   onSaveStep,
+  onEnterFreeStudy,
+  freeStudyDisabled = false,
   sourceAvailable = false,
   sourceReviewed = false,
   includeSource = false,
@@ -237,6 +255,8 @@ export function StudyPlanWorkspace({
   onCancelPlan?: () => void;
   onSelectStep?: (stepId: string) => void;
   onSaveStep?: (stepId: string, patch: StudyPlanStepPatch) => boolean;
+  onEnterFreeStudy?: () => boolean;
+  freeStudyDisabled?: boolean;
   sourceAvailable?: boolean;
   sourceReviewed?: boolean;
   includeSource?: boolean;
@@ -265,7 +285,6 @@ export function StudyPlanWorkspace({
     setStepSaveError("");
   };
   const selectPlanStep = (stepId: string) => {
-    if (stepId === selectedStep?.id) return;
     requestStudyPlanStepSelection({
       stepId,
       dirty: stepDraftDirty,
@@ -384,6 +403,18 @@ export function StudyPlanWorkspace({
           onGeneratePlan();
         }}>
         {planStatus === "pending" ? "Đang chia mục tiêu…" : plan ? "Tạo lại bản nháp AI" : "Nhờ AI chia mục tiêu thành các bước"}
+      </button>}
+      {onEnterFreeStudy && <button className="study-plan-workspace__free-study" type="button"
+        disabled={freeStudyDisabled || planStatus === "pending"}
+        onClick={() => {
+          const entered = requestFreeStudyExit({
+            dirty: stepDraftDirty,
+            onEnter: onEnterFreeStudy,
+            onBlocked: () => setEditNotice("Hãy lưu hoặc hủy thay đổi bước học trước khi chuyển sang học tự do."),
+          });
+          if (entered && editingSelectedStep) clearStepDraft();
+        }}>
+        Học tự do
       </button>}
     </section>
 

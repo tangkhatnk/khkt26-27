@@ -112,7 +112,7 @@ test("step editor save returns the actual owner-local commit result", async () =
   assert.match(save, /commit\(\{ \.\.\.value, studyPlanStorage: nextStorage \}\)/u);
   assert.match(save, /if \(!commit\([\s\S]*?\)\) return false/u);
   assert.match(save, /return true;/u);
-  assert.match(app, /onSaveStep=\{saveStudyPlanStep\}/u);
+  assert.match(app, /onSaveStep=\{canEditSelectedStudyPlanStep \? saveStudyPlanStep : undefined\}/u);
 });
 
 test("selected-step source controls keep private summaries inside the workspace request scope", async () => {
@@ -325,9 +325,10 @@ test("restarting the selected plan step rotates completed and tombstoned candida
 
   assert.match(selectStep, /new Set\(\[[\s\S]*?historySessions\([\s\S]*?removedSessionIds[\s\S]*?\]\)/u);
   assert.match(selectStep, /const candidateUsed = usedSessionIds\.has\(selectedStep\.plannedSessionId\)/u);
-  assert.match(selectStep, /samePlan && plan\.selectedStepId === stepId && !candidateUsed/u);
+  assert.match(selectStep, /const committedSelectionMatches = currentStorage\.draft\.selectedStepId === stepId &&\s*currentStorage\.draft\.candidateSessionId === selectedStep\.plannedSessionId &&\s*canStartSelectedStudyPlanStep\(currentStorage, selectedStep\.plannedSessionId\) &&\s*draftTripIdRef\.current === selectedStep\.plannedSessionId/u);
+  assert.match(selectStep, /samePlan && plan\.selectedStepId === stepId && committedSelectionMatches && !candidateUsed/u);
   assert.match(selectStep, /candidateUsed\s*\? crypto\.randomUUID\(\)/u);
-  assert.ok(selectStep.indexOf("const candidateUsed") < selectStep.indexOf("samePlan && plan.selectedStepId"));
+  assert.ok(selectStep.indexOf("const committedSelectionMatches") < selectStep.indexOf("samePlan && plan.selectedStepId"));
 });
 
 test("starting a history review clears source consent with its new candidate", async () => {
@@ -530,9 +531,32 @@ test("disabled personal Start explains a missing goal or stale/locked step with 
   assert.match(startPanel, /document\.getElementById\("study-workspace-goal"\).*?\.focus\(\)/u);
   assert.match(startPanel, /Chọn bước đang mở/u);
   assert.match(startPanel, /selectStudyPlanStep\(firstStartableStudyPlanStep\.id, selectedStudyPlan\.id\)/u);
-  assert.match(startPanel, /Học tự do/u);
-  assert.match(startPanel, /onClick=\{\(\) => enterFreeStudyWorkspace\(\)\}/u);
+  assert.match(app, /onEnterFreeStudy=\{mode === "solo" && selectedStudyPlan \? enterFreeStudyWorkspace : undefined\}/u);
   assert.match(app, /studyPlanStepForRecovery\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+});
+
+test("App sends explicit route states and keeps stale locked step details read only", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const storageStart = app.indexOf("const studyPlanStorage = saved.studyPlanStorage");
+  const storageEnd = app.indexOf("const studyPlanStartBlockReason", storageStart);
+  const routeState = app.slice(storageStart, storageEnd);
+  const saveStart = app.indexOf("function saveStudyPlanStep(");
+  const saveEnd = app.indexOf("function persistStudyWorkspaceDraft", saveStart);
+  const save = app.slice(saveStart, saveEnd);
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace");
+  const workspaceEnd = app.indexOf("legacyDetails={<BoardingTicket", workspaceStart);
+  const workspace = app.slice(workspaceStart, workspaceEnd);
+
+  assert.match(routeState, /studyPlanRouteStates\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+  assert.match(routeState, /requestedStudyPlanStep[\s\S]*?canSelectStudyPlanStep\(studyPlanStorage, selectedStudyPlan\.id/u);
+  assert.match(routeState, /studyPlanStepForRecovery\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+  assert.match(routeState, /canEditSelectedStudyPlanStep[\s\S]*?draft\.candidateSessionId === selectedStudyPlanStep\.plannedSessionId/u);
+  assert.match(workspace, /stepStates=\{studyPlanStepStates\}/u);
+  assert.match(workspace, /selectedStepId=\{selectedStudyPlanStep\?\.id \?\? ""\}/u);
+  assert.match(workspace, /onSaveStep=\{canEditSelectedStudyPlanStep \? saveStudyPlanStep : undefined\}/u);
+  assert.match(workspace, /onEnterFreeStudy=\{mode === "solo" && selectedStudyPlan \? enterFreeStudyWorkspace : undefined\}/u);
+  assert.match(workspace, /freeStudyDisabled=\{busy \|\| !!active \|\| tripStartInFlight\.current/u);
+  assert.match(save, /!canSelectStudyPlanStep\(storage, selectedPlanId, stepId\)/u);
 });
 
 test("free study saves and restores exact owner-local workspace identities without crossing live starts", async () => {
@@ -542,8 +566,11 @@ test("free study saves and restores exact owner-local workspace identities witho
   const switchStart = app.indexOf("function selectStudyPlanStep(", returnStart);
   const enter = app.slice(enterStart, returnStart);
   const restore = app.slice(returnStart, switchStart);
-  const enterButtonAt = app.indexOf("Học tự do", app.indexOf("Bắt đầu buổi học ·"));
-  const returnButtonAt = app.indexOf("Quay lại lộ trình", enterButtonAt);
+  const actionRegionStart = app.indexOf("Bắt đầu buổi học ·");
+  const actionRegion = app.slice(actionRegionStart, app.indexOf("studyPlanStartBlockReason &&", actionRegionStart));
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace");
+  const workspaceEnd = app.indexOf("legacyDetails={<BoardingTicket", workspaceStart);
+  const workspace = app.slice(workspaceStart, workspaceEnd);
 
   assert.notEqual(enterStart, -1);
   assert.notEqual(returnStart, -1);
@@ -560,9 +587,9 @@ test("free study saves and restores exact owner-local workspace identities witho
   assert.match(restore, /returnFromFreeStudyWorkspace\(storage,[\s\S]*?currentSessionId: draftTripIdRef\.current,[\s\S]*?notes: documentText,[\s\S]*?sources,[\s\S]*?materials/u);
   assert.match(restore, /const usedSessionIds = new Set\([\s\S]*?historySessions[\s\S]*?guestExerciseSessions[\s\S]*?removedSessionIds/u);
   assert.ok(restore.indexOf("commit({") < restore.indexOf("setDraftTripId(identity.sessionId)"));
-  const actionControls = app.slice(enterButtonAt - 600, returnButtonAt + 500);
-  assert.match(actionControls, /onClick=\{\(\) => enterFreeStudyWorkspace\(\)\}[\s\S]*?>Học tự do/u);
-  assert.match(actionControls, /onClick=\{\(\) => returnToSavedStudyPlan\(\)\}[\s\S]*?>Quay lại lộ trình/u);
+  assert.match(workspace, /onEnterFreeStudy=\{mode === "solo" && selectedStudyPlan \? enterFreeStudyWorkspace : undefined\}/u);
+  assert.match(actionRegion, /Quay lại lộ trình/u);
+  assert.doesNotMatch(actionRegion, /Học tự do/u, "the path component owns the dirty-editor guard for this transition");
 });
 
 test("only a matching full solo focus receipt is committed with its completed session", async () => {

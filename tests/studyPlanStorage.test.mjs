@@ -21,6 +21,7 @@ import {
   saveStudyWorkspaceDraft,
   selectedStudyWorkspaceIdentity,
   studyPlanStepForRecovery,
+  studyPlanRouteStates,
   studyWorkspaceSourceContentChanged,
   updateStudyPlanDraftFromQuickTrip,
 } from "../src/adventure/studyPlanStorage.ts";
@@ -742,6 +743,39 @@ test("AI plan receipts bind exact candidates and unlock only a completed prefix"
   assert.equal(recordCompletedStudyPlanStep({ ...completed, activePlanBinding: binding }, binding, 62_000)?.completedStepReceipts.length, 1);
   assert.equal(clearStudyPlanActiveBinding(started, "other-session"), started);
   assert.equal(clearStudyPlanActiveBinding(started, binding.sessionId).activePlanBinding, null);
+});
+
+test("route states distinguish the completed prefix, next eligible step, and later locked steps", () => {
+  const plan = {
+    id: "plan-route-state",
+    origin: "ai",
+    title: "Ôn tập",
+    goal: "Giải thích nội dung",
+    topicId: "biology",
+    topicLabel: "Sinh học",
+    level: "",
+    preferredMinutes: 45,
+    selectedStepId: "step-two",
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    steps: [
+      { id: "step-one", plannedSessionId: "candidate-one", title: "Nền tảng", action: "Đọc ghi chú", outcome: "Nêu được ý chính", check: "Tự nhắc lại", preferredMinutes: 45 },
+      { id: "step-two", plannedSessionId: "candidate-two", title: "Liên hệ", action: "Mô tả ví dụ", outcome: "Giải thích được mối liên hệ", check: "Tự nêu ví dụ", preferredMinutes: 45 },
+      { id: "step-three", plannedSessionId: "candidate-three", title: "Tự kiểm tra", action: "Trả lời câu hỏi", outcome: "Phát hiện chỗ cần ôn", check: "Giải thích lại", preferredMinutes: 45 },
+    ],
+  };
+  const storage = {
+    ...createStudyPlanStorage(),
+    plans: [plan],
+    completedStepReceipts: [{ planId: plan.id, stepId: "step-one", sessionId: "finished-one", completedAt: 2_000 }],
+  };
+
+  assert.deepEqual(studyPlanRouteStates(storage, plan.id), [
+    { stepId: "step-one", state: "completed" },
+    { stepId: "step-two", state: "available" },
+    { stepId: "step-three", state: "locked" },
+  ]);
+  assert.deepEqual(studyPlanRouteStates(storage, "missing-plan"), []);
 });
 
 test("the receipt bound retains every step across the maximum stored plan catalog", () => {

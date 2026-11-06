@@ -29,7 +29,7 @@ test("dark history surfaces and ordinary rows stay on night colors", () => {
 });
 
 test("dark base button styling leaves selected duration and mode choices distinct", () => {
-  const base = rule('html[data-theme="dark"] .adventure button:not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"])');
+  const base = rule('html[data-theme="dark"] .adventure button:not(.primary):not(.nav):not(.account):not(.selected):not([aria-pressed="true"]):not(.study-plan-workspace__route-node)');
   assert.match(base, /background:\s*var\(--surface-raised\)/u);
   const selected = rule('html[data-theme="dark"] .adventure button.selected');
   assert.match(selected, /background:\s*#30483a/u);
