@@ -453,6 +453,16 @@ test("AI plan receipts bind exact candidates and unlock only a completed prefix"
   const started = bindStudyPlanStepSession(storage, binding);
   assert.deepEqual(started?.activePlanBinding, binding);
   assert.equal(bindStudyPlanStepSession(started, binding), started);
+  const sessionAlreadyReceipt = {
+    ...started,
+    completedStepReceipts: [{
+      planId: "another-plan",
+      stepId: "another-step",
+      sessionId: binding.sessionId,
+      completedAt: 59_000,
+    }],
+  };
+  assert.equal(recordCompletedStudyPlanStep(sessionAlreadyReceipt, binding, 60_000), null);
 
   const completed = recordCompletedStudyPlanStep(started, binding, 60_000);
   assert.deepEqual(completed?.completedStepReceipts, [{ ...binding, completedAt: 60_000 }]);

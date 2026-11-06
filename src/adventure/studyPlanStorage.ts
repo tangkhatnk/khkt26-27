@@ -262,6 +262,8 @@ export function recordCompletedStudyPlanStep(
   const plan = storage.plans.find((item) => item.id === binding.planId && item.origin === "ai");
   const stepIndex = plan?.steps.findIndex((step) => step.id === binding.stepId) ?? -1;
   if (!plan || stepIndex < 0) return null;
+  if (storage.completedStepReceipts.some((receipt) => receipt.sessionId === binding.sessionId &&
+      (receipt.planId !== binding.planId || receipt.stepId !== binding.stepId))) return null;
   const existing = storage.completedStepReceipts.find((receipt) =>
     receipt.planId === binding.planId && receipt.stepId === binding.stepId);
   if (existing) return { ...storage, activePlanBinding: null };
