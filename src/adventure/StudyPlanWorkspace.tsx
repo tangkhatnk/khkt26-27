@@ -7,6 +7,37 @@ export type StudyPlanWorkspaceStatus = "idle" | "pending" | "ready" | "error" | 
 export type StudyPlanStepDraft = Pick<StudyPlanStep, "action" | "outcome" | "check">;
 export type StudyPlanStepPatch = Partial<Pick<StudyPlanStep, "title" | "action" | "outcome" | "check">>;
 export type StudyPlanStepDraftErrors = Partial<Record<keyof StudyPlanStepDraft, string>>;
+export type StudyPlanStepRouteState = "available" | "completed" | "locked";
+export type StudyPlanStepState = { stepId: string; state: StudyPlanStepRouteState };
+
+const STUDY_PLAN_STEP_STATE_LABELS: Record<StudyPlanStepRouteState, string> = {
+  available: "Có thể học",
+  completed: "Đã hoàn thành",
+  locked: "Chưa mở",
+};
+
+function getStudyPlanStepState(stepId: string, stepStates?: readonly StudyPlanStepState[]): StudyPlanStepRouteState {
+  // The App owns eligibility. Missing state is deliberately closed until it supplies an explicit mapping.
+  return stepStates?.find((entry) => entry.stepId === stepId)?.state ?? "locked";
+}
+
+function studyPlanRouteRailPath(nodeCount: number): string {
+  if (!nodeCount) return "";
+  const routeX = [330, 670, 420, 580];
+  const point = (index: number) => ({
+    x: routeX[index % routeX.length],
+    y: ((index + 0.5) / nodeCount) * 1000,
+  });
+  const first = point(0);
+  const commands = [`M ${first.x} ${first.y}`];
+  for (let index = 1; index < nodeCount; index += 1) {
+    const previous = point(index - 1);
+    const next = point(index);
+    const middleY = (previous.y + next.y) / 2;
+    commands.push(`C ${previous.x} ${middleY} ${next.x} ${middleY} ${next.x} ${next.y}`);
+  }
+  return commands.join(" ");
+}
 
 const STUDY_PLAN_STEP_DRAFT_FIELDS = ["action", "outcome", "check"] as const;
 
@@ -66,27 +97,75 @@ export function requestStudyPlanStepSelection({
   return true;
 }
 
+export function requestFreeStudyExit({
+  dirty,
+  onEnter,
+  onBlocked,
+}: {
+  dirty: boolean;
+  onEnter: () => boolean;
+  onBlocked: () => void;
+}): boolean {
+  if (dirty) {
+    onBlocked();
+    return false;
+  }
+  return onEnter() === true;
+}
+
 export function StudyPlanStepNavigation({
   steps,
+  stepStates,
   selectedStepId,
   onSelectStep,
 }: {
-  steps: StudyPlanStep[];
+  steps: readonly StudyPlanStep[];
+  stepStates?: readonly StudyPlanStepState[];
   selectedStepId: string;
   onSelectStep?: (stepId: string) => void;
 }) {
-  return <ol className="study-plan-workspace__steps study-plan-workspace__step-nav" aria-label="Các bước trong lộ trình">
-    {steps.map((step, index) => <li key={step.id}>
-      <button type="button" className="study-plan-workspace__step-select"
-        aria-label={`Chọn bước ${index + 1}: ${step.title}`}
-        aria-current={step.id === selectedStepId ? "step" : undefined}
-        disabled={!onSelectStep}
-        onClick={() => onSelectStep?.(step.id)}>
-        <span className="study-plan-workspace__step-number">{index + 1}</span>
-        <strong>{step.title}</strong>
-      </button>
-    </li>)}
-  </ol>;
+  const resolvedStepStates = stepStates ?? [];
+  const availableStepId = steps.find((step) => getStudyPlanStepState(step.id, resolvedStepStates) === "available")?.id;
+  const hasLockedSteps = steps.some((step) => getStudyPlanStepState(step.id, resolvedStepStates) === "locked");
+  return <div className="study-plan-workspace__route-frame">
+    {hasLockedSteps && <p className="study-plan-workspace__route-note">Các bước màu xám hiện chưa thể chọn.</p>}
+    <div className="study-plan-workspace__route-canvas">
+      {steps.length > 1 && <svg className="study-plan-workspace__route-rail" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
+        <path className="study-plan-workspace__route-line" d={studyPlanRouteRailPath(steps.length)} />
+      </svg>}
+      <ol className={`study-plan-workspace__steps ${steps.length > 1 ? "has-rail" : "is-single"} study-plan-workspace__step-route study-plan-workspace__step-nav`} aria-label="Các bước trong lộ trình cá nhân">
+        {steps.map((step, index) => {
+          const state = getStudyPlanStepState(step.id, resolvedStepStates);
+          const stateLabel = STUDY_PLAN_STEP_STATE_LABELS[state];
+          const selected = step.id === selectedStepId;
+          const canSelect = state !== "locked" && Boolean(onSelectStep);
+          const isAvailableStep = step.id === availableStepId;
+          const sideClass = index % 2 === 0 ? "left" : "right";
+          const distanceClass = index % 4 < 2 ? "far" : "near";
+          const calloutLabel = index === 0 ? "Bắt đầu" : "Bước tiếp theo";
+          return <li className={`study-plan-workspace__route-row study-plan-workspace__route-row--${sideClass}`} key={step.id}>
+            <div className={`study-plan-workspace__route-node-wrap study-plan-workspace__route-node-wrap--${sideClass} study-plan-workspace__route-node-wrap--${distanceClass}`}>
+              <button type="button"
+                className={`study-plan-workspace__route-node is-${state}${selected ? " is-selected" : ""}`}
+              aria-label={`Bước ${index + 1}: ${step.title} · ${stateLabel}${isAvailableStep ? ` · ${calloutLabel}` : ""}`}
+                aria-current={selected ? "step" : undefined}
+                disabled={!canSelect}
+                onClick={() => { if (canSelect) onSelectStep?.(step.id); }}>
+                <span>{index + 1}</span>
+              </button>
+            </div>
+            <div className={`study-plan-workspace__route-copy study-plan-workspace__route-copy--${sideClass}`}>
+              {isAvailableStep && <span className="study-plan-workspace__route-callout" aria-hidden="true">{calloutLabel}</span>}
+              <div aria-hidden="true">
+                {state === "completed" && <span className="study-plan-workspace__route-status is-completed">{stateLabel}</span>}
+                <strong>{step.title}</strong>
+              </div>
+            </div>
+          </li>;
+        })}
+      </ol>
+    </div>
+  </div>;
 }
 
 export function StudyPlanStepEditor({
@@ -141,6 +220,8 @@ export function StudyPlanWorkspace({
   breakCount,
   breakMinutes,
   plan,
+  stepStates,
+  selectedStepId,
   planStatus = "idle",
   planError,
   planActionReason,
@@ -148,6 +229,8 @@ export function StudyPlanWorkspace({
   onCancelPlan,
   onSelectStep,
   onSaveStep,
+  onEnterFreeStudy,
+  freeStudyDisabled = false,
   sourceAvailable = false,
   sourceReviewed = false,
   includeSource = false,
@@ -161,6 +244,10 @@ export function StudyPlanWorkspace({
   breakCount: number;
   breakMinutes: number;
   plan?: SavedStudyPlan;
+  /** Explicit App-owned eligibility state for every route node; missing entries render locked. */
+  stepStates?: readonly StudyPlanStepState[];
+  /** The App-owned current selection, independent of whether that step is available or completed. */
+  selectedStepId?: string;
   planStatus?: StudyPlanWorkspaceStatus;
   planError?: string;
   planActionReason?: string;
@@ -168,6 +255,8 @@ export function StudyPlanWorkspace({
   onCancelPlan?: () => void;
   onSelectStep?: (stepId: string) => void;
   onSaveStep?: (stepId: string, patch: StudyPlanStepPatch) => boolean;
+  onEnterFreeStudy?: () => boolean;
+  freeStudyDisabled?: boolean;
   sourceAvailable?: boolean;
   sourceReviewed?: boolean;
   includeSource?: boolean;
@@ -180,7 +269,8 @@ export function StudyPlanWorkspace({
   const [stepDraft, setStepDraft] = useState<StudyPlanStepDraft | null>(null);
   const [editNotice, setEditNotice] = useState("");
   const [stepSaveError, setStepSaveError] = useState("");
-  const selectedStep = plan?.steps.find((step) => step.id === plan.selectedStepId) ?? plan?.steps[0];
+  const requestedStepId = selectedStepId ?? plan?.selectedStepId;
+  const selectedStep = plan?.steps.find((step) => step.id === requestedStepId) ?? plan?.steps[0];
   const selectedStepIndex = selectedStep && plan ? plan.steps.findIndex((step) => step.id === selectedStep.id) : -1;
   const editingSelectedStep = Boolean(plan && selectedStep && editingPlanId === plan.id && editingStepId === selectedStep.id && stepDraft);
   const draftErrors = stepDraft ? getStudyPlanStepDraftErrors(stepDraft) : {};
@@ -195,7 +285,6 @@ export function StudyPlanWorkspace({
     setStepSaveError("");
   };
   const selectPlanStep = (stepId: string) => {
-    if (stepId === selectedStep?.id) return;
     requestStudyPlanStepSelection({
       stepId,
       dirty: stepDraftDirty,
@@ -256,9 +345,7 @@ export function StudyPlanWorkspace({
         {plan?.origin === "ai" && <span className="study-plan-workspace__draft-label">Đề xuất AI · chưa xác minh</span>}
         {plan?.origin === "manual" && <span className="study-plan-workspace__draft-label">Kế hoạch của bạn</span>}
       </div>
-      {plan?.steps.length ? <>
-        <StudyPlanStepNavigation steps={plan.steps} selectedStepId={selectedStep?.id ?? plan.selectedStepId}
-          onSelectStep={onSelectStep ? selectPlanStep : undefined} />
+      {plan?.steps.length ? <div className="study-plan-workspace__plan-layout">
         {selectedStep && <section className="study-plan-workspace__selected-step" aria-labelledby="study-plan-workspace-selected-step-title">
           <div className="study-plan-workspace__selected-heading">
             <div>
@@ -289,7 +376,9 @@ export function StudyPlanWorkspace({
           </dl>}
           {editingSelectedStep && stepSaveError && <p role="alert" className="study-plan-workspace__save-error">{stepSaveError}</p>}
         </section>}
-      </> : <p className="study-plan-workspace__empty-plan">Bắt đầu với nội dung của bạn; có thể nhờ AI chia mục tiêu thành các bước rồi xem lại trước khi dùng.</p>}
+        <StudyPlanStepNavigation steps={plan.steps} stepStates={stepStates ?? []} selectedStepId={selectedStep?.id ?? requestedStepId ?? ""}
+          onSelectStep={onSelectStep ? selectPlanStep : undefined} />
+      </div> : <p className="study-plan-workspace__empty-plan">Bắt đầu với nội dung của bạn; có thể nhờ AI chia mục tiêu thành các bước rồi xem lại trước khi dùng.</p>}
       {(stepDraftDirty || editNotice) && <p role="status" className="study-plan-workspace__edit-notice">
         {editNotice || "Hãy lưu hoặc hủy thay đổi trước khi chuyển bước hoặc tạo lại lộ trình."}
       </p>}
@@ -314,6 +403,18 @@ export function StudyPlanWorkspace({
           onGeneratePlan();
         }}>
         {planStatus === "pending" ? "Đang chia mục tiêu…" : plan ? "Tạo lại bản nháp AI" : "Nhờ AI chia mục tiêu thành các bước"}
+      </button>}
+      {onEnterFreeStudy && <button className="study-plan-workspace__free-study" type="button"
+        disabled={freeStudyDisabled || planStatus === "pending"}
+        onClick={() => {
+          const entered = requestFreeStudyExit({
+            dirty: stepDraftDirty,
+            onEnter: onEnterFreeStudy,
+            onBlocked: () => setEditNotice("Hãy lưu hoặc hủy thay đổi bước học trước khi chuyển sang học tự do."),
+          });
+          if (entered && editingSelectedStep) clearStepDraft();
+        }}>
+        Học tự do
       </button>}
     </section>
 

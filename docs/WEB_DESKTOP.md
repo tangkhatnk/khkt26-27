@@ -1,12 +1,12 @@
 # Viễn Du — web và Windows
 
-Ứng dụng Vite trên trình duyệt là trải nghiệm chính; Electron đóng gói cùng bản web đã build trong `dist/`. Luồng học cá nhân bắt đầu từ mục tiêu, sau đó chuẩn bị kế hoạch và tài liệu nếu có, tập trung, truy hồi rồi đánh giá. Kế hoạch do AI gợi ý là tùy chọn và người học có thể xem lại, chỉnh sửa trước khi dùng.
+Ứng dụng Vite trên trình duyệt là trải nghiệm chính; Electron đóng gói cùng bản web đã build trong `dist/`. Luồng học cá nhân bắt đầu từ mục tiêu, sau đó chuẩn bị kế hoạch và tài liệu nếu có, tập trung, truy hồi rồi đánh giá. Kế hoạch do AI gợi ý là tùy chọn; người học có thể xem lại và chỉnh sửa bước đang mở hoặc đã hoàn thành trước khi dùng.
 
 Ghi chú, kế hoạch, văn bản trích xuất, thông tin tệp, trạng thái xem lại và nhật ký học tập thuộc workspace của chủ sở hữu hiện tại trên thiết bị; chúng không được đưa vào lịch sử công khai. Tệp được đọc cục bộ trước. Tệp gốc chỉ nằm trong bộ nhớ trình duyệt và cần nhập lại sau khi tải lại ứng dụng nếu muốn dùng tệp đó cho tác vụ AI.
 
-Lần đầu sử dụng có một khảo sát ngắn về mục tiêu, môn học, thời lượng và một số thông tin tùy chọn, sau đó là hướng dẫn bốn bước cho các thao tác thật trong workspace. Tiến độ được lưu cục bộ; người học có thể tạm dừng, tiếp tục hoặc mở lại hướng dẫn. Hướng dẫn dùng được ngoại tuyến, không tự gửi yêu cầu AI, và không xuất hiện để chiếm chỗ phiên tập trung đang hoạt động hay làm thay đổi đồng hồ.
+Lần đầu sử dụng có một khảo sát ngắn về mục tiêu, môn học, thời lượng và một số thông tin tùy chọn, sau đó là hướng dẫn bốn bước cho các thao tác thật trong workspace. Mỗi màn chỉ tập trung vào một việc và hiển thị điều khiển tương ứng; người học có thể bỏ qua hoặc rời hướng dẫn rồi quay lại, khi đó hướng dẫn tiếp tục từ bước đã lưu. Tiến độ được lưu cục bộ. Khảo sát và hướng dẫn không phải điều kiện để bắt đầu phiên thủ công hay dùng tác vụ AI khách vốn đã đủ điều kiện; các yêu cầu thông thường về mạng, đồng ý gửi nội dung và hạn mức vẫn áp dụng. Hướng dẫn dùng được ngoại tuyến, không tự gửi yêu cầu AI, và không xuất hiện để chiếm chỗ phiên tập trung đang hoạt động hay làm thay đổi đồng hồ.
 
-Phiên tập trung thủ công dùng được khi không có tài khoản, mạng hoặc kế hoạch AI. Thời lượng từ 1 đến 240 phút. Focus ưu tiên sự yên tĩnh quanh bước đang học và đồng hồ, đồng thời tôn trọng tùy chọn giảm chuyển động. Tài khoản vẫn dùng cho các chức năng đồng bộ hiện có; màn hình quản lý nhóm mới đã ngừng.
+Phiên tập trung thủ công dùng được khi không có tài khoản, mạng hoặc kế hoạch AI. Thời lượng từ 1 đến 240 phút. Focus ưu tiên sự yên tĩnh quanh bước đang học; đồng hồ lớn hơn và co giãn theo vùng hiển thị để MM:SS, kể cả 240:00, dễ đọc trên desktop, tablet và điện thoại mà không phóng to tiêu đề hay điều khiển. Chuyển động vẫn tôn trọng tùy chọn giảm chuyển động. Tài khoản vẫn dùng cho các chức năng đồng bộ hiện có; màn hình quản lý nhóm mới đã ngừng.
 
 ### AI khách không cần tài khoản
 
@@ -98,7 +98,8 @@ Electron dùng origin `viendu://app`, renderer sandbox, context isolation và CS
 
 ## Luồng học cá nhân và tương thích dữ liệu
 
-- Việc học bắt đầu từ mục tiêu của người học. Nguồn ôn tập là tùy chọn. Kế hoạch AI là tùy chọn; người học có thể xem lại và chỉnh từng bước trước khi dùng. Kế hoạch, ghi chú, văn bản trích xuất, thông tin tệp, trạng thái xem lại và đánh giá riêng được giữ trong workspace cục bộ theo chủ sở hữu.
+- Việc học bắt đầu từ mục tiêu của người học. Nguồn ôn tập là tùy chọn. Kế hoạch AI là tùy chọn; người học có thể xem lại và chỉnh sửa bước đang mở hoặc đã hoàn thành trước khi dùng. Kế hoạch, ghi chú, văn bản trích xuất, thông tin tệp, trạng thái xem lại và đánh giá riêng được giữ trong workspace cục bộ theo chủ sở hữu.
+- Với kế hoạch AI, bước tiếp theo trong kế hoạch của chủ sở hữu chỉ mở sau khi phiên gắn đúng bước đã chạy đủ toàn bộ thời lượng học theo lịch (không tính giờ giải lao), có ghi nhận thời gian tập trung lớn hơn 0 và được lưu thành công. Bước đã hoàn thành có thể mở lại; người học cũng có thể chuyển sang học tự do mà không cần hoàn tất kế hoạch.
 - Thư viện ôn tập tách ghi chú khỏi tệp gốc và giữ văn bản trích xuất, thông tin tệp cùng trạng thái xem lại trên thiết bị. Tệp gốc chỉ nằm trong bộ nhớ trình duyệt; cần nhập lại sau khi tải lại ứng dụng nếu muốn gửi chính tệp đó để đọc bằng AI. OCR/đọc tệp chạy cục bộ trước; nội dung chưa đọc được hoặc chưa được xác nhận không được coi là nguồn đã duyệt. Chỉ yêu cầu AI do người học chủ động chọn mới gửi nội dung lên backend.
 - Tệp nhập tối đa 32 MiB, 10 tệp trong một workspace, 50.000 ký tự nguồn và 20 megapixel mỗi ảnh. PDF có tối đa 20 trang, với ngân sách OCR cục bộ 120 giây/tệp. Worker PDF/OCR, WASM và dữ liệu tiếng Việt/Anh được đóng gói cùng origin; không tải từ CDN.
 - Phiên tập trung thủ công từ 1 đến 240 phút, không cần tài khoản, mạng hoặc kế hoạch AI. Focus giữ bước đang học và đồng hồ làm trọng tâm, tôn trọng reduced motion. Thời gian chạy liên tục theo mốc bắt đầu; thời gian vắng được ghi nhận theo quy tắc hiện có. Giải lao theo lịch là phần riêng, được cộng vào thời gian tường nhưng không tính vào thời gian học hợp lệ.
@@ -115,4 +116,4 @@ Backend giữ nguyên aggregate JSONB có row lock để hoàn tất và quyết
 
 Ghi chú, văn bản trích xuất, thông tin tệp và trạng thái xem lại được lưu trong workspace cục bộ theo chủ sở hữu. Tệp gốc chỉ giữ trong bộ nhớ trình duyệt và phải nhập lại sau khi tải lại ứng dụng để dùng cho tác vụ AI. Thay đổi ghi chú không ghi đè nguồn đã trích xuất. Nguồn chưa đọc được hoặc chưa xác nhận không được coi là tài liệu đã duyệt để tạo câu hỏi.
 
-Kế hoạch học do AI gợi ý và bản ôn tập do AI soạn đều là tùy chọn. Người học xem lại và chỉnh sửa trước khi dùng; nội dung chưa xác nhận không được tự động biến thành nguồn đã duyệt. Đọc ảnh/PDF bằng AI có thể đề xuất phục dựng chỗ mờ theo ngữ cảnh; phần suy luận cần giữ nhãn rõ ràng và phải được người học kiểm tra.
+Kế hoạch học do AI gợi ý và bản ôn tập do AI soạn đều là tùy chọn. Người học có thể xem lại và chỉnh sửa bước kế hoạch đang mở hoặc đã hoàn thành; nội dung chưa xác nhận không được tự động biến thành nguồn đã duyệt. Đọc ảnh/PDF bằng AI có thể đề xuất phục dựng chỗ mờ theo ngữ cảnh; phần suy luận cần giữ nhãn rõ ràng và phải được người học kiểm tra.

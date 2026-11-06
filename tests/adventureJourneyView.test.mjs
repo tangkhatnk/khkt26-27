@@ -1,5 +1,6 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { tmpdir } from "node:os";
@@ -193,6 +194,17 @@ test("quiz generation exposes a distinct primary action", () => {
   }));
 
   assert.match(markup, /<button class="primary quiz-panel__generate"[^>]*>Tạo câu hỏi bằng AI<\/button>/u);
+});
+
+test("QuizPanel sends an explicit generation through manual eligibility, not prefetch consent", async () => {
+  const source = await readFile(resolve(projectRoot, "src/adventure/QuizPanel.tsx"), "utf8");
+  const generateStart = source.indexOf("async function generate()");
+  const generateEnd = source.indexOf("function choose(", generateStart);
+  const generate = source.slice(generateStart, generateEnd);
+
+  assert.match(generate, /canManuallyGenerateQuiz\(/u);
+  assert.match(generate, /const result = await onGenerate\(count\)/u);
+  assert.doesNotMatch(generate, /shouldPrefetchQuizReview/u);
 });
 
 test("a saved private quiz grade remains visible when the guest credential is gone", () => {

@@ -69,7 +69,7 @@ test("source fingerprint covers the exact text and request identity covers owner
     assert.equal(summaryHelpers.isCurrentMaterialSummaryScope(request, { ...request, [key]: "changed" }), false, key);
 });
 
-test("workspace material summaries require an eligible current owner, reviewed source, and completed guide", () => {
+test("workspace material summaries require an eligible owner and reviewed source, independent of onboarding", () => {
   const base = {
     view: "station",
     ownerReady: true,
@@ -78,13 +78,12 @@ test("workspace material summaries require an eligible current owner, reviewed s
     loaded: true,
     exclusive: true,
     workspaceLive: true,
-    onboardingComplete: true,
     activeSession: false,
     source: source(),
   };
   assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, targetView: "station" }), true);
   assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, targetView: "summary" }), false);
-  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, onboardingComplete: false }), false);
+  assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, targetView: "station", activeSession: false }), true);
   assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, activeSession: true }), false);
   assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, ownerReady: false }), false);
   assert.equal(summaryHelpers.canRequestMaterialSummary({ ...base, online: false }), false);
@@ -128,14 +127,14 @@ test("an offline summary failure can settle for the same owner and source instea
   };
   const availability = {
     targetView: "station", view: "station", ownerReady: true, online: true, authOffline: false,
-    loaded: true, exclusive: true, workspaceLive: true, onboardingComplete: true,
+    loaded: true, exclusive: true, workspaceLive: true,
     activeSession: false, source: source(),
   };
   assert.equal(summaryHelpers.canRequestMaterialSummary({ ...availability, online: false }), false);
   const responseContext = {
     expected: scope, current: scope, ownerMatches: true, workspaceLive: true,
     sessionValid: true, source: source(), sourceText: source().text,
-    onboardingComplete: true, activeSession: false,
+    activeSession: false,
   };
   assert.equal(summaryHelpers.canApplyMaterialSummaryResponse(responseContext), true);
   for (const change of [
@@ -144,7 +143,6 @@ test("an offline summary failure can settle for the same owner and source instea
     { sessionValid: false },
     { source: source({ reviewed: false }) },
     { sourceText: "different source text" },
-    { onboardingComplete: false },
     { activeSession: true },
     { current: { ...scope, stepId: "step-b" } },
   ])

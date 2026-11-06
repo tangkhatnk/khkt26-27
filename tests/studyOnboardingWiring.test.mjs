@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
+import { readFile } from "node:fs/promises";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
@@ -61,7 +62,7 @@ test("first-use survey exposes required goal/topic, 1–240 duration, and option
   assert.doesNotMatch(durationAndOptional, /type="file"/u);
 });
 
-test("tutorial renders the real selected controls, explicit no-material path, and retrieval step without starting focus", () => {
+test("tutorial renders real controls and explicit choices without triggering focus or AI", () => {
   let progress = createStudyOnboardingProgress({
     goal: "Ôn phản ứng hóa học",
     topicId: "chemistry",
@@ -78,7 +79,8 @@ test("tutorial renders the real selected controls, explicit no-material path, an
   progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "duration" });
   const retrieval = markup(progress);
   assert.match(retrieval, /Tự kiểm tra sau khi tập trung/u);
-  assert.match(retrieval, /Khi bạn đổi một lựa chọn, hướng dẫn hoàn tất/u);
+  assert.match(retrieval, /Hướng dẫn không tự gửi yêu cầu/u);
+  assert.match(retrieval, /thao tác AI chỉ chạy khi bạn chủ động chọn/u);
   assert.doesNotMatch(retrieval, /Tôi đã biết bước tự kiểm tra/u);
   assert.doesNotMatch(retrieval, /Bắt đầu phiên|Tạo bản ôn tập bằng AI/u);
   progress = reduceStudyOnboardingProgress(progress, { type: "tutorial/used", control: "retrieval" });
@@ -99,6 +101,32 @@ test("paused tutorial can be reopened to the preserved step, while completion ex
   progress = reduceStudyOnboardingProgress(progress, { type: "onboarding/resume" });
   assert.equal(progress.tutorialStep, 1);
   assert.equal(progress.survey.goal, "Ôn phản ứng hóa học");
+});
+
+test("survey and every tutorial step have a direct exit to the editable workspace", () => {
+  const survey = markup(createStudyOnboardingProgress());
+  assert.match(survey, /Bỏ qua khảo sát, học ngay/u);
+
+  let progress = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học", preferredMinutes: 45 });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  for (const tutorialStep of [0, 1, 2, 3]) {
+    const tutorial = { ...progress, tutorialStep };
+    assert.match(markup(tutorial, { currentDraft: tutorial.survey, currentDuration: 45 }), /Bỏ qua hướng dẫn, học ngay/u);
+  }
+});
+
+test("the guide itself never starts an AI request and copy permits explicit AI actions", async () => {
+  const component = await readFile(resolve(projectRoot, "src/adventure/StudyOnboarding.tsx"), "utf8");
+  let progress = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+
+  assert.equal(progress.phase, "tutorial");
+  const tutorial = markup(progress, { currentDraft: progress.survey, currentDuration: 25 });
+  assert.match(tutorial, /Hướng dẫn không tự gửi yêu cầu AI/u);
+  assert.match(tutorial, /Bạn vẫn có thể chủ động dùng tính năng AI/u);
+  assert.doesNotMatch(component, /postGuestAi|generateStudyPlan|await request\(/u);
 });
 
 test("reopened tutorial uses the live valid draft goal when its legacy survey goal is empty", () => {

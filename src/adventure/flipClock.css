@@ -17,7 +17,7 @@
   width: 100%;
   margin: 0 auto;
   justify-content: center;
-  font-size: clamp(3rem, 14vw, 9rem);
+  container-type: inline-size;
 }
 
 .flip-clock-readout {
@@ -27,6 +27,7 @@
   align-items: center;
   justify-content: center;
   gap: clamp(0.45rem, 2.5vw, 1.25rem);
+  font-size: clamp(2rem, min(23vw, 42vh, 24cqi), 27rem);
 }
 
 .flip-clock-panel {
@@ -202,10 +203,6 @@ html[data-theme="dark"] .adventure .focus-card .flip-clock-separator {
 }
 
 @media (max-width: 420px) {
-  .timer.flip-clock {
-    font-size: clamp(2.75rem, 13.5vw, 3.5rem);
-  }
-
   .flip-clock-readout {
     gap: 0.4rem;
   }
@@ -223,6 +220,19 @@ html[data-theme="dark"] .adventure .focus-card .flip-clock-separator {
   .flip-clock-unit {
     font-size: 0.62rem;
     letter-spacing: 0.1em;
+  }
+}
+
+.adventure.adventure--quiet-focus .quiet-focus-canvas__clock {
+  width: min(calc(100vw - 2rem), 112.5rem);
+  max-width: none;
+  grid-template-columns: minmax(0, 1fr);
+  justify-self: center;
+}
+
+@media (max-width: 920px) {
+  .flip-clock-readout {
+    font-size: clamp(2rem, min(23vw, 42vh, 23cqi), 27rem);
   }
 }
 

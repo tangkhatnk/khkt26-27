@@ -17,6 +17,7 @@ let isStudyPlanStepDraftDirty;
 let buildStudyPlanStepPatch;
 let commitStudyPlanStepDraft;
 let requestStudyPlanStepSelection;
+let requestFreeStudyExit;
 let StudyWorkspaceSettings;
 let StudyOnboarding;
 let studyPlanFlow;
@@ -42,6 +43,7 @@ before(async () => {
     buildStudyPlanStepPatch,
     commitStudyPlanStepDraft,
     requestStudyPlanStepSelection,
+    requestFreeStudyExit,
   } = await vite.ssrLoadModule("/src/adventure/StudyPlanWorkspace.tsx"));
   ({ StudyWorkspaceSettings } = await vite.ssrLoadModule("/src/adventure/StudyWorkspaceSettings.tsx"));
   ({ StudyOnboarding } = await vite.ssrLoadModule("/src/adventure/StudyOnboarding.tsx"));
@@ -252,6 +254,10 @@ test("plan navigation stays compact while the selected step owns the detail pane
       { id: "step-b", title: "Tự kiểm tra" },
     ],
     selectedStepId: "step-a",
+    stepStates: [
+      { stepId: "step-a", state: "available" },
+      { stepId: "step-b", state: "available" },
+    ],
     onSelectStep: (id) => selected.push(id),
   });
   const navButtons = collectElements(navigation).filter((node) => node.type === "button");
@@ -355,6 +361,83 @@ test("dirty step changes block switching and generation until saved or cancelled
   });
   assert.equal(allowed, false);
   assert.deepEqual(calls, [["blocked"]]);
+});
+
+test("free-study exit preserves dirty step edits and only switches after a clean successful callback", async () => {
+  const events = [];
+  assert.equal(requestFreeStudyExit({
+    dirty: true,
+    onEnter: () => events.push("entered"),
+    onBlocked: () => events.push("blocked"),
+  }), false);
+  assert.deepEqual(events, ["blocked"]);
+
+  assert.equal(requestFreeStudyExit({
+    dirty: false,
+    onEnter: () => { events.push("failed-entry"); return false; },
+    onBlocked: () => events.push("unexpected-block"),
+  }), false);
+  assert.deepEqual(events, ["blocked", "failed-entry"]);
+
+  assert.equal(requestFreeStudyExit({
+    dirty: false,
+    onEnter: () => { events.push("entered"); return true; },
+    onBlocked: () => events.push("unexpected-block"),
+  }), true);
+  assert.deepEqual(events, ["blocked", "failed-entry", "entered"]);
+
+  const source = await readFile(resolve(projectRoot, "src/adventure/StudyPlanWorkspace.tsx"), "utf8");
+  const exitStart = source.indexOf("{onEnterFreeStudy && <button");
+  const exitEnd = source.indexOf("</button>}", exitStart);
+  const exit = source.slice(exitStart, exitEnd);
+  assert.match(exit, /disabled=\{freeStudyDisabled \|\| planStatus === "pending"\}/u);
+  assert.doesNotMatch(exit, /disabled=\{[^}]*stepDraftDirty/u);
+  assert.match(exit, /onBlocked: \(\) => setEditNotice\("Hãy lưu hoặc hủy thay đổi bước học trước khi chuyển sang học tự do\."\)/u);
+});
+
+test("tapping the displayed route fallback reaches App selection even when it already looks selected", async () => {
+  const displayedStepId = "step-two";
+  const selected = [];
+  assert.equal(requestStudyPlanStepSelection({
+    stepId: displayedStepId,
+    dirty: false,
+    onSelect: (stepId) => selected.push(stepId),
+    onBlocked: () => assert.fail("clean fallback selection must not be blocked"),
+  }), true);
+  assert.deepEqual(selected, [displayedStepId]);
+  const source = await readFile(resolve(projectRoot, "src/adventure/StudyPlanWorkspace.tsx"), "utf8");
+  const selectStart = source.indexOf("const selectPlanStep = (stepId: string) => {");
+  const selectEnd = source.indexOf("const startStepEditing", selectStart);
+  const selection = source.slice(selectStart, selectEnd);
+  assert.notEqual(selectStart, -1);
+  assert.match(selection, /requestStudyPlanStepSelection\(/u);
+  assert.doesNotMatch(selection, /if \(stepId === selectedStep\?\.id\) return/u);
+});
+
+test("the plan route offers free study inside the selected-step editing boundary", () => {
+  const view = render({
+    plan: {
+      id: "plan-free",
+      title: "Lộ trình cá nhân",
+      origin: "ai",
+      selectedStepId: "step-a",
+      steps: [{
+        id: "step-a", plannedSessionId: "candidate-a", title: "Bước hiện tại",
+        action: "Đọc ghi chú đã kiểm tra", outcome: "Nêu được ý chính",
+        check: "Tự giải thích lại", preferredMinutes: 25,
+      }],
+    },
+    stepStates: [{ stepId: "step-a", state: "available" }],
+    selectedStepId: "step-a",
+    onEnterFreeStudy: () => true,
+  });
+  const unavailable = render({
+    onEnterFreeStudy: () => true,
+    freeStudyDisabled: true,
+  });
+
+  assert.match(view, /<button class="study-plan-workspace__free-study" type="button">\s*Học tự do\s*<\/button>/u);
+  assert.match(unavailable, /class="study-plan-workspace__free-study" type="button" disabled=""/u);
 });
 
 test("step save callback receives only changed step fields after trimming valid drafts", () => {
@@ -462,32 +545,47 @@ test("AdventureApp wires the planner response fence and cancel action to its con
   assert.match(app, /setMinutes\(draft\.minutes\);[\s\S]*?if \(isValidStudyMinutes\(draft\.minutes\)\)/u);
   assert.match(app, /isGuestExerciseStartScopeCurrent\(\{[\s\S]*?view: viewRef\.current/u);
   assert.doesNotMatch(app, /workspaceLive\.current && viewRef\.current === "ticket" && draftTripIdRef/u);
-  assert.match(app, /!current\.current\.active && current\.current\.studyPlanStorage\?\.onboarding\.phase !== "complete"/u);
-  assert.match(app, /async function generateStudyGuide[\s\S]*?busy \|\| tutorialActive/u);
-  assert.match(app, /async function readHandwriting[\s\S]*?busy \|\| tutorialActive/u);
-  assert.match(app, /disabled=\{busy \|\| tutorialActive \|\| privateTripDraftLocked/u);
+  assert.doesNotMatch(app.slice(app.indexOf("function start(skipPendingExercises"), app.indexOf("const hasReadyPreparation", app.indexOf("function start(skipPendingExercises"))), /canOpenStudyWorkspace|tutorialActive|onboarding\.phase/u);
+  assert.doesNotMatch(app.slice(app.indexOf("async function generateStudyGuide("), app.indexOf("function acceptStudyGuide(", app.indexOf("async function generateStudyGuide("))), /tutorialActive/u);
+  assert.doesNotMatch(app.slice(app.indexOf("async function readHandwriting("), app.indexOf("async function generateStudyGuide(", app.indexOf("async function readHandwriting("))), /tutorialActive/u);
+  assert.doesNotMatch(app, /disabled=\{busy \|\| tutorialActive \|\| privateTripDraftLocked/u);
   assert.match(app, /const firstUseNeedsWorkspace = loaded && !saved\.active/u);
 });
 
-test("the station goal and duration controls stay visible and match tutorial targets", async () => {
+test("the focused tutorial uses the same owner-local goal, duration, and retrieval values", async () => {
   const app = (await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8")).replace(/\r\n?/gu, "\n");
   const settingsStart = app.indexOf('<section className="panel form departure-settings">');
   const settingsEnd = app.indexOf("</section>", settingsStart);
   const settings = app.slice(settingsStart, settingsEnd);
+  const guideStart = app.indexOf("canShowStudyOnboarding(loaded, saved.active, saved.studyPlanStorage?.onboarding) ? (");
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace", guideStart);
+  const guide = app.slice(guideStart, workspaceStart);
+  const goalStart = app.indexOf("const studyTutorialGoalControl =");
+  const durationStart = app.indexOf("const studyTutorialDurationControl =", goalStart);
+  const goal = app.slice(goalStart, durationStart);
+  const retrievalStart = app.indexOf("const studyTutorialRetrievalControl =", durationStart);
+  const retrievalEnd = app.indexOf(";\n  return (", retrievalStart);
+  const duration = app.slice(durationStart, retrievalStart);
+  const retrieval = app.slice(retrievalStart, retrievalEnd);
 
   assert.notEqual(settingsStart, -1);
   assert.notEqual(settingsEnd, -1);
-  assert.doesNotMatch(settings, /<TicketEditor/u);
-  assert.doesNotMatch(settings, /<TicketEditor/u);
   assert.match(settings, /<StudyWorkspaceSettings[\s\S]*?legacyDisclosure=\{view === "ticket"\}/u);
   assert.match(settings, /<QuizReviewPreference[\s\S]*?disabled=\{busy \|\| privateTripDraftLocked\}/u);
-  assert.match(app, /function focusStudyTutorialControl[\s\S]*?target\.getClientRects\(\)\.length === 0\) return false/u);
-  assert.match(app, /function recordStudyTutorialRetrievalChoice[\s\S]*?completeStudyOnboardingRetrievalChoice/u);
-  assert.match(app, /onCountChange=\{\(value\) => \{\s*setQuizCount\(value\);\s*recordStudyTutorialRetrievalChoice\(value\);\s*\}\}/u);
-  assert.match(app, /quiz-review-preference input:not\(:disabled\), \.quiz-review-preference button:not\(:disabled\)/u);
+  assert.match(guide, /goalControl=\{studyTutorialGoalControl\}/u);
+  assert.match(guide, /durationControl=\{studyTutorialDurationControl\}/u);
+  assert.match(guide, /retrievalControl=\{studyTutorialRetrievalControl\}/u);
+  assert.match(goal, /id="study-workspace-goal" value=\{goal\}/u);
+  assert.match(goal, /onChange=\{\(event\) => persistQuickTripStudyDraft\(\{ goal: event\.currentTarget\.value \}\)\}/u);
+  assert.match(duration, /value=\{minutes\}[\s\S]*?onChange=\{\(value\) => persistQuickTripStudyDraft\(\{ minutes: value \}\)\}/u);
+  assert.doesNotMatch(duration, /onBreakCountChange|onBreakMinutesChange/u);
+  assert.match(retrieval, /value=\{quizCount\}[\s\S]*?onChange=\{\(event\) => setQuizCount/u);
+  assert.match(retrieval, /aria-pressed=\{skipQuizReview\}[\s\S]*?setSkipQuizReview/u);
+  assert.doesNotMatch(retrieval, /prefetchEnabled|sourceConsent|generateQuiz|postGuestAi/u);
+  assert.doesNotMatch(app, /focusStudyTutorialControl|recordStudyTutorialRetrievalChoice/u);
 });
 
-test("retrieval tutorial asks for a local preference change rather than an acknowledgement", () => {
+test("retrieval tutorial renders a compact local count-and-skip control instead of acknowledgement", () => {
   let progress = studyOnboardingModel.createStudyOnboardingProgress({ goal: "Ôn tế bào" });
   progress = studyOnboardingModel.reduceStudyOnboardingProgress(progress, { type: "survey/next" });
   progress = studyOnboardingModel.reduceStudyOnboardingProgress(progress, { type: "survey/next" });
@@ -498,11 +596,19 @@ test("retrieval tutorial asks for a local preference change rather than an ackno
     progress,
     currentDuration: 25,
     currentDraft: { ...progress.survey },
+    retrievalControl: React.createElement("div", null,
+      React.createElement("label", { htmlFor: "quiz-count" }, "Số câu hỏi ôn tập",
+        React.createElement("input", { id: "quiz-count", type: "number", min: 1, max: 30, value: 3, onChange: () => {} })),
+      React.createElement("button", { type: "button", "aria-pressed": false }, "Bỏ qua ôn tập")),
     onProgressChange: () => {},
   }));
 
-  assert.match(view, /Khi bạn đổi một lựa chọn, hướng dẫn hoàn tất/u);
-  assert.match(view, /Đi tới lựa chọn ôn tập/u);
+  assert.match(view, /Hướng dẫn không tự gửi yêu cầu/u);
+  assert.match(view, /thao tác AI chỉ chạy khi bạn chủ động chọn/u);
+  assert.match(view, /Số câu hỏi ôn tập/u);
+  assert.match(view, /Bỏ qua ôn tập/u);
+  assert.match(view, /Tiếp tục sau khi chọn ôn tập/u);
+  assert.doesNotMatch(view, /Chuẩn bị câu hỏi trong lúc học|Cho phép gửi nội dung/u);
   assert.doesNotMatch(view, /Tôi đã biết bước tự kiểm tra/u);
 });
 

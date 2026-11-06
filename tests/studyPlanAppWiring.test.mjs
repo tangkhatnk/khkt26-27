@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStudyPlanStorage, updateStudyPlanDraftFromQuickTrip } from "../src/adventure/studyPlanStorage.ts";
-import { createQuickTripDraft, updateQuickTripDraft } from "../src/adventure/quickTripDraft.ts";
+import { createQuickTripDraft, isValidPersonalStudyStartDuration, updateQuickTripDraft } from "../src/adventure/quickTripDraft.ts";
+import { createStudyOnboardingProgress, reduceStudyOnboardingProgress } from "../src/adventure/studyOnboardingModel.ts";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -111,7 +112,7 @@ test("step editor save returns the actual owner-local commit result", async () =
   assert.match(save, /commit\(\{ \.\.\.value, studyPlanStorage: nextStorage \}\)/u);
   assert.match(save, /if \(!commit\([\s\S]*?\)\) return false/u);
   assert.match(save, /return true;/u);
-  assert.match(app, /onSaveStep=\{saveStudyPlanStep\}/u);
+  assert.match(app, /onSaveStep=\{canEditSelectedStudyPlanStep \? saveStudyPlanStep : undefined\}/u);
 });
 
 test("selected-step source controls keep private summaries inside the workspace request scope", async () => {
@@ -136,7 +137,7 @@ test("selected-step source controls keep private summaries inside the workspace 
   assert.match(request, /selectedPlanId === active\.planId/u);
   assert.match(request, /selectedStepId === active\.stepId/u);
   assert.match(request, /canRequestMaterialSummary\(/u);
-  assert.match(request, /onboarding\.phase === "complete"/u);
+  assert.doesNotMatch(request, /canOpenStudyWorkspace|onboarding|tutorial/u);
   assert.match(responseGuard, /canApplyMaterialSummaryResponse\(/u);
   assert.doesNotMatch(responseGuard, /hasEligibleAccess\(/u);
 });
@@ -324,9 +325,10 @@ test("restarting the selected plan step rotates completed and tombstoned candida
 
   assert.match(selectStep, /new Set\(\[[\s\S]*?historySessions\([\s\S]*?removedSessionIds[\s\S]*?\]\)/u);
   assert.match(selectStep, /const candidateUsed = usedSessionIds\.has\(selectedStep\.plannedSessionId\)/u);
-  assert.match(selectStep, /samePlan && plan\.selectedStepId === stepId && !candidateUsed/u);
+  assert.match(selectStep, /const committedSelectionMatches = currentStorage\.draft\.selectedStepId === stepId &&\s*currentStorage\.draft\.candidateSessionId === selectedStep\.plannedSessionId &&\s*canStartSelectedStudyPlanStep\(currentStorage, selectedStep\.plannedSessionId\) &&\s*draftTripIdRef\.current === selectedStep\.plannedSessionId/u);
+  assert.match(selectStep, /samePlan && plan\.selectedStepId === stepId && committedSelectionMatches && !candidateUsed/u);
   assert.match(selectStep, /candidateUsed\s*\? crypto\.randomUUID\(\)/u);
-  assert.ok(selectStep.indexOf("const candidateUsed") < selectStep.indexOf("samePlan && plan.selectedStepId"));
+  assert.ok(selectStep.indexOf("const committedSelectionMatches") < selectStep.indexOf("samePlan && plan.selectedStepId"));
 });
 
 test("starting a history review clears source consent with its new candidate", async () => {
@@ -345,20 +347,99 @@ test("starting a history review clears source consent with its new candidate", a
   assert.doesNotMatch(review, /revokeQuizPrefetchSourceConsent\(/u);
 });
 
-test("first-use tutorial blocks new starts but not a validated authenticated bound-session recovery", async () => {
+test("manual start eligibility uses session and input guards, not tutorial completion", async () => {
+  let onboarding = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học", preferredMinutes: 25 });
+  onboarding = reduceStudyOnboardingProgress(onboarding, { type: "survey/next" });
+  onboarding = reduceStudyOnboardingProgress(onboarding, { type: "survey/next" });
+  assert.equal(onboarding.phase, "tutorial");
+  assert.equal(isValidPersonalStudyStartDuration(onboarding.survey.preferredMinutes, 25 * 60), true);
+
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const start = app.indexOf("function start(skipPendingExercises");
   const startEnd = app.indexOf("const hasReadyPreparation", start);
   const body = app.slice(start, startEnd);
 
-  assert.match(app, /canResumeBoundSynchronizedTrip/u);
-  assert.match(body, /authenticatedMember: owner !== "guest" && Boolean\(user\) && !needsLogin && !authOffline && online/u);
-  assert.match(body, /ownSessionId: synchronizedTrip\?\.ownSessionId/u);
-  assert.match(body, /draftSessionId: draftTripId/u);
-  assert.match(body, /const localBoundDraftReady = Boolean\(synchronizedTrip && group && synchronizedTripDraftForSession/u);
-  assert.match(body, /localDraftReady: localBoundDraftReady/u);
-  assert.match(body, /activeSessionId: current\.current\.active\?\.id \?\? null/u);
-  assert.match(body, /onboarding\.phase !== "complete" && !canResumeBoundSession/u);
+  assert.doesNotMatch(body, /canOpenStudyWorkspace|tutorialActive|onboarding\.phase/u);
+  assert.match(body, /busy \|\| materialRequest\.current/u);
+  assert.match(body, /!loaded/u);
+  assert.match(body, /!exclusive/u);
+  assert.match(body, /current\.current\.active/u);
+  assert.match(body, /!personalDurationValid/u);
+  assert.match(body, /startGoal\.trim\(\)\.length < 3/u);
+  assert.match(body, /!startBreaksValid/u);
+  assert.match(body, /!canStartSessionWithQuizReview\(quizCount, skipQuizReview\)/u);
+  assert.match(body, /if \(synchronizedTrip && synchronizedTrip\.status === "departed" && ownTripStatus !== "bound"\)/u);
+  assert.match(body, /if \(synchronizedTrip && \(!synchronizedTrip\.ownSessionId \|\| draftTripId !== synchronizedTrip\.ownSessionId\)\)/u);
+  assert.match(body, /!synchronizedTripDraftForSession\(current\.current\.readyTripDrafts, synchronizedTrip\.ownSessionId, group\.id\)/u);
+});
+
+test("tutorial state controls guide presentation, while explicit guest actions and manual start stay eligible", async () => {
+  let progress = createStudyOnboardingProgress({ goal: "Ôn phản ứng hóa học" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  progress = reduceStudyOnboardingProgress(progress, { type: "survey/next" });
+  assert.equal(progress.phase, "tutorial");
+
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.slice(app.indexOf("function start(skipPendingExercises"), app.indexOf("const hasReadyPreparation", app.indexOf("function start(skipPendingExercises")));
+  const planner = app.slice(app.indexOf("async function requestStudyPlanFromWorkspace()"), app.indexOf("function startReviewTrip(", app.indexOf("async function requestStudyPlanFromWorkspace()")));
+  const summary = app.slice(app.indexOf("function canGeneratePrivateMaterialSummary("), app.indexOf("function privateMaterialSummaryUnavailableReason(", app.indexOf("function canGeneratePrivateMaterialSummary(")));
+  const handwriting = app.slice(app.indexOf("async function readHandwriting("), app.indexOf("async function generateStudyGuide(", app.indexOf("async function readHandwriting(")));
+  const guide = app.slice(app.indexOf("async function generateStudyGuide("), app.indexOf("function acceptStudyGuide(", app.indexOf("async function generateStudyGuide(")));
+  const saveOnboarding = app.slice(app.indexOf("function saveStudyOnboardingProgress("), app.indexOf("function cancelStudyPlanRequest(", app.indexOf("function saveStudyOnboardingProgress(")));
+  const resumeOnboarding = app.slice(app.indexOf("function reopenStudyOnboarding("), app.indexOf("function cancelStudyPlanRequest(", app.indexOf("function reopenStudyOnboarding(")));
+  const exerciseEditorStart = app.indexOf("<StudyExercisePreparationEditor");
+  const exerciseEditorEnd = app.indexOf("/>", exerciseEditorStart);
+  const exerciseEditor = app.slice(exerciseEditorStart, exerciseEditorEnd);
+  const prefetchEffect = app.slice(app.indexOf("  useEffect(() => {\n    const trip = current.current.active;"), app.indexOf("const minutesTotal", app.indexOf("  useEffect(() => {\n    const trip = current.current.active;")));
+
+  assert.match(app, /canOpenStudyWorkspace/u);
+  assert.match(app, /const firstUseNeedsWorkspace = loaded && !saved\.active &&\s*!canOpenStudyWorkspace\(saved\.studyPlanStorage\?\.onboarding\)/u);
+  assert.doesNotMatch(start, /canOpenStudyWorkspace|tutorialActive|onboarding\.phase/u);
+  assert.match(start, /!personalDurationValid/u);
+  assert.match(start, /current\.current\.active/u);
+  assert.match(planner, /if \(studyPlanAccessReason\) return/u);
+  const accessReasonStart = app.indexOf("const studyPlanAccessReason =");
+  const accessReasonEnd = app.indexOf("const ticketTopicName", accessReasonStart);
+  const accessReason = app.slice(accessReasonStart, accessReasonEnd);
+  const summaryReason = app.slice(app.indexOf("function privateMaterialSummaryUnavailableReason("), app.indexOf("async function generateMaterialSummary(", app.indexOf("function privateMaterialSummaryUnavailableReason(")));
+  assert.doesNotMatch(accessReason, /onboarding|tutorial/u);
+  assert.doesNotMatch(summary, /canOpenStudyWorkspace|onboarding|tutorial/u);
+  assert.doesNotMatch(summaryReason, /onboarding|tutorial/u);
+  assert.doesNotMatch(handwriting, /tutorialActive/u);
+  assert.match(handwriting, /ownerRef\.current === "guest"[\s\S]*?postGuestAi/u);
+  assert.doesNotMatch(guide, /tutorialActive/u);
+  assert.match(guide, /ownerRef\.current === "guest"[\s\S]*?postGuestAi/u);
+  assert.doesNotMatch(exerciseEditor, /tutorialActive/u);
+  assert.match(prefetchEffect, /if \(!trip \|\| trip\.id !== activeTripId\)/u);
+  assert.match(prefetchEffect, /if \(guestNeedsExplicitOptIn \|\| !shouldPrefetchQuizReview\(existingDraft\)\)/u);
+  const startButtonStart = app.indexOf("<button\n                        className=\"primary\"", app.indexOf("<StudyWorkspaceSettings"));
+  const startButtonEnd = app.indexOf("onClick={() => start()}", startButtonStart);
+  assert.doesNotMatch(app.slice(startButtonStart, startButtonEnd), /tutorialActive|canOpenStudyWorkspace/u);
+  assert.match(app.slice(startButtonStart, startButtonEnd), /!isValidStudyMinutes\(minutes\)/u);
+  assert.match(saveOnboarding, /if \(onboardingProgress\.phase === "skipped"\) go\("station"\)/u);
+  assert.match(saveOnboarding, /\.\.\.survey,[\s\S]*?preferredMinutes,[\s\S]*?studyPlanStorage: \{ \.\.\.storage, onboarding: onboardingProgress, draft \}/u);
+  assert.match(resumeOnboarding, /storage\.onboarding\.phase === "skipped"[\s\S]*?type: "onboarding\/resume"/u);
+  assert.match(resumeOnboarding, /reopenStudyOnboardingFromDraft/u);
+  assert.match(app, /!online \|\| authOffline/u);
+  assert.match(app, /owner !== "guest" && \(!user \|\| needsLogin\)/u);
+  assert.match(app, /current\.current\.active/u);
+});
+
+test("onboarding progress and station navigation wait for the local save", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function saveStudyOnboardingProgress(");
+  const end = app.indexOf("function reopenStudyOnboarding(", start);
+  const save = app.slice(start, end);
+  const commit = save.indexOf("const saved = commit({");
+  const failedSave = save.indexOf("if (!saved) return false;", commit);
+  const updateDraft = save.indexOf("updateQuickTripDraft(quickTripDraft, quickDraft)");
+  const stationNavigation = save.indexOf('go("station")');
+
+  assert.notEqual(commit, -1);
+  assert.ok(commit < failedSave);
+  assert.ok(failedSave < updateDraft);
+  assert.ok(failedSave < stationNavigation);
+  assert.match(save, /if \(onboardingProgress\.phase === "skipped"\) go\("station"\);\s*return true;/u);
 });
 
 test("starting focus durably advances the selected candidate while the active session keeps its original ID", async () => {
@@ -378,6 +459,204 @@ test("starting focus durably advances the selected candidate while the active se
   assert.ok(beginFocus.indexOf("advanceStudyPlanCandidateAfterStart") < beginFocus.indexOf("commit({"));
   assert.ok(beginFocus.indexOf("if (commit({") < beginFocus.indexOf("draftSessionIdsRef.current.solo = nextDraftTripId"));
   assert.ok(beginFocus.indexOf("if (commit({") < beginFocus.indexOf("setDraftTripId(nextDraftTripId)"));
+});
+
+test("AI plan selection and Start recheck the current unlocked candidate before binding it", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const startAt = app.indexOf("function start(skipPendingExercises");
+  const startEnd = app.indexOf("const hasReadyPreparation", startAt);
+  const start = app.slice(startAt, startEnd);
+  const selectAt = app.indexOf("function selectStudyPlanStep(");
+  const selectEnd = app.indexOf("function persistQuickTripStudyDraft", selectAt);
+  const select = app.slice(selectAt, selectEnd);
+  const beginAt = app.indexOf("const beginFocus = (input:");
+  const beginEnd = app.indexOf('if (owner === "guest" && withExercises)', beginAt);
+  const begin = app.slice(beginAt, beginEnd);
+  const buttonStart = app.indexOf("<button\n                        className=\"primary\"", app.indexOf("<StudyWorkspaceSettings"));
+  const buttonEnd = app.indexOf("onClick={() => start()}", buttonStart);
+  const startButton = app.slice(buttonStart, buttonEnd);
+
+  assert.match(start, /currentStudyStorage && !canStartSelectedStudyPlanStep\(currentStudyStorage, draftTripId\)/u);
+  assert.match(select, /canSelectStudyPlanStep\(currentStorage, plan\.id, stepId\)/u);
+  assert.match(startButton, /!studyPlanStepStartAllowed/u);
+  assert.match(begin, /current\.current\.active/u);
+  assert.match(begin, /clearStudyPlanActiveBinding/u);
+  assert.match(begin, /bindStudyPlanStepSession/u);
+  assert.ok(begin.indexOf("bindStudyPlanStepSession") < begin.indexOf("advanceStudyPlanCandidateAfterStart"));
+  assert.match(begin, /studyPlanStorage:[\s\S]*?active: trip/u);
+});
+
+test("focus start rechecks every solo candidate after asynchronous preparation returns", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const beginAt = app.indexOf("const beginFocus = (input:");
+  const guestAt = app.indexOf('if (owner === "guest" && withExercises)', beginAt);
+  const guestEnd = app.indexOf("if (sharedTrip && group)", guestAt);
+  const begin = app.slice(beginAt, guestAt);
+  const guest = app.slice(guestAt, guestEnd);
+  const validation = begin.indexOf("if (!canStartSelectedStudyPlanStep(startStorage, trip.id))");
+  const selectedPlan = begin.indexOf("const selectedPlan = startStorage.plans.find");
+  const binding = begin.indexOf("bindStudyPlanStepSession(startStorage, binding)");
+  const anchor = guest.indexOf("const started = await startGuestAiSession");
+  const lateScopeGuard = guest.indexOf("if (!isCurrent()) return;", anchor);
+
+  assert.notEqual(validation, -1);
+  assert.notEqual(selectedPlan, -1);
+  assert.notEqual(binding, -1);
+  assert.notEqual(anchor, -1);
+  assert.notEqual(lateScopeGuard, -1);
+  assert.ok(validation < selectedPlan);
+  assert.ok(validation < binding);
+  assert.ok(lateScopeGuard > anchor);
+  assert.ok(lateScopeGuard < guest.indexOf("beginFocus({", anchor));
+  assert.match(begin.slice(validation, selectedPlan), /setError[\s\S]*?return false/u);
+  assert.match(guest, /captureStudyPlanStartScope\([\s\S]*?studyPlanWorkspaceTransition\.current/u);
+  assert.match(guest, /isStudyPlanStartScopeCurrent\([\s\S]*?current\.current\.studyPlanStorage/u);
+  assert.ok(guest.indexOf("if (!isCurrent()) return;", guest.indexOf("await bindStudyExercises")) < guest.indexOf("await startGuestAiSession"));
+  assert.match(app, /if \(draftTripIdRef\.current !== id\) studyPlanWorkspaceTransition\.current \+= 1/u);
+  assert.match(app, /studyPlanWorkspaceTransition\.current \+= 1;[\s\S]*?updateQuickTripDraft/u);
+});
+
+test("disabled personal Start explains a missing goal or stale/locked step with a recovery action", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const startAt = app.indexOf("Bắt đầu buổi học ·");
+  const startEnd = app.indexOf("studyExerciseStartPrompt", startAt);
+  const startPanel = app.slice(app.lastIndexOf("<button", startAt), startEnd);
+
+  assert.match(app, /const studyPlanStartBlockReason = goal\.trim\(\)\.length < 3[\s\S]*?studyPlanStepStartAllowed/u);
+  assert.match(startPanel, /aria-describedby=\{studyPlanStartBlockReason \? "study-plan-start-block-reason" : undefined\}/u);
+  assert.match(startPanel, /id="study-plan-start-block-reason"[\s\S]*?role="status"/u);
+  assert.match(startPanel, /<p className="material-hint" id="study-plan-start-block-reason" role="status">\{studyPlanStartBlockReason\}<\/p>/u);
+  assert.match(app, /"Nhập mục tiêu học ít nhất 3 ký tự để bật nút bắt đầu\."/u);
+  assert.match(app, /"Bước đang chọn chưa mở hoặc bản nháp đã cũ/u);
+  assert.match(startPanel, /document\.getElementById\("study-workspace-goal"\).*?\.focus\(\)/u);
+  assert.match(startPanel, /Chọn bước đang mở/u);
+  assert.match(startPanel, /selectStudyPlanStep\(firstStartableStudyPlanStep\.id, selectedStudyPlan\.id\)/u);
+  assert.match(app, /onEnterFreeStudy=\{mode === "solo" && selectedStudyPlan \? enterFreeStudyWorkspace : undefined\}/u);
+  assert.match(app, /studyPlanStepForRecovery\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+});
+
+test("App sends explicit route states and keeps stale locked step details read only", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const storageStart = app.indexOf("const studyPlanStorage = saved.studyPlanStorage");
+  const storageEnd = app.indexOf("const studyPlanStartBlockReason", storageStart);
+  const routeState = app.slice(storageStart, storageEnd);
+  const saveStart = app.indexOf("function saveStudyPlanStep(");
+  const saveEnd = app.indexOf("function persistStudyWorkspaceDraft", saveStart);
+  const save = app.slice(saveStart, saveEnd);
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace");
+  const workspaceEnd = app.indexOf("legacyDetails={<BoardingTicket", workspaceStart);
+  const workspace = app.slice(workspaceStart, workspaceEnd);
+
+  assert.match(routeState, /studyPlanRouteStates\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+  assert.match(routeState, /requestedStudyPlanStep[\s\S]*?canSelectStudyPlanStep\(studyPlanStorage, selectedStudyPlan\.id/u);
+  assert.match(routeState, /studyPlanStepForRecovery\(studyPlanStorage, selectedStudyPlan\.id\)/u);
+  assert.match(routeState, /canEditSelectedStudyPlanStep[\s\S]*?draft\.candidateSessionId === selectedStudyPlanStep\.plannedSessionId/u);
+  assert.match(workspace, /stepStates=\{studyPlanStepStates\}/u);
+  assert.match(workspace, /selectedStepId=\{selectedStudyPlanStep\?\.id \?\? ""\}/u);
+  assert.match(workspace, /onSaveStep=\{canEditSelectedStudyPlanStep \? saveStudyPlanStep : undefined\}/u);
+  assert.match(workspace, /onEnterFreeStudy=\{mode === "solo" && selectedStudyPlan \? enterFreeStudyWorkspace : undefined\}/u);
+  assert.match(workspace, /freeStudyDisabled=\{busy \|\| !!active \|\| tripStartInFlight\.current/u);
+  assert.match(save, /!canSelectStudyPlanStep\(storage, selectedPlanId, stepId\)/u);
+});
+
+test("free study saves and restores exact owner-local workspace identities without crossing live starts", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const enterStart = app.indexOf("function enterFreeStudyWorkspace()");
+  const returnStart = app.indexOf("function returnToSavedStudyPlan()");
+  const switchStart = app.indexOf("function selectStudyPlanStep(", returnStart);
+  const enter = app.slice(enterStart, returnStart);
+  const restore = app.slice(returnStart, switchStart);
+  const actionRegionStart = app.indexOf("Bắt đầu buổi học ·");
+  const actionRegion = app.slice(actionRegionStart, app.indexOf("studyPlanStartBlockReason &&", actionRegionStart));
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace");
+  const workspaceEnd = app.indexOf("legacyDetails={<BoardingTicket", workspaceStart);
+  const workspace = app.slice(workspaceStart, workspaceEnd);
+
+  assert.notEqual(enterStart, -1);
+  assert.notEqual(returnStart, -1);
+  assert.notEqual(switchStart, -1);
+  assert.match(enter, /value\.active \|\| tripStartInFlight\.current/u);
+  assert.match(enter, /mode !== "solo"/u);
+  assert.match(enter, /enterFreeStudyWorkspaceStorage\(storage,[\s\S]*?notes: documentText,[\s\S]*?sources,[\s\S]*?materials/u);
+  assert.ok(enter.indexOf("commit({") < enter.indexOf("setDraftTripId(freeSessionId)"));
+  assert.match(enter, /updateQuickTripDraft\(quickTripDraft,[\s\S]*?selectedPlanId: null,[\s\S]*?selectedStepId: null/u);
+  assert.ok(enter.indexOf("commit({") < enter.indexOf("updateQuickTripDraft(quickTripDraft"));
+  assert.ok(enter.indexOf("updateQuickTripDraft(quickTripDraft") < enter.indexOf("setDraftTripId(freeSessionId)"));
+  assert.ok(enter.indexOf("setDraftTripId(freeSessionId)") < enter.indexOf("setDocumentText(\"\")"));
+  assert.match(restore, /value\.active \|\| tripStartInFlight\.current/u);
+  assert.match(restore, /returnFromFreeStudyWorkspace\(storage,[\s\S]*?currentSessionId: draftTripIdRef\.current,[\s\S]*?notes: documentText,[\s\S]*?sources,[\s\S]*?materials/u);
+  assert.match(restore, /const usedSessionIds = new Set\([\s\S]*?historySessions[\s\S]*?guestExerciseSessions[\s\S]*?removedSessionIds/u);
+  assert.ok(restore.indexOf("commit({") < restore.indexOf("setDraftTripId(identity.sessionId)"));
+  assert.match(workspace, /onEnterFreeStudy=\{mode === "solo" && selectedStudyPlan \? enterFreeStudyWorkspace : undefined\}/u);
+  assert.match(actionRegion, /Quay lại lộ trình/u);
+  assert.doesNotMatch(actionRegion, /Học tự do/u, "the path component owns the dirty-editor guard for this transition");
+});
+
+test("only a matching full solo focus receipt is committed with its completed session", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const start = app.indexOf("function finish() {");
+  const end = app.indexOf("useEffect(() => {\n    finishRef.current = finish;", start);
+  const finish = app.slice(start, end);
+  const proof = finish.indexOf("qualifiesStudyPlanStepCompletion");
+  const record = finish.indexOf("recordCompletedStudyPlanStep", proof);
+  const commit = finish.indexOf("if (commit(value))", record);
+
+  assert.notEqual(proof, -1);
+  assert.notEqual(record, -1);
+  assert.notEqual(commit, -1);
+  assert.match(finish.slice(proof, record), /sessionId: s\.id[\s\S]*?activeSessionId: trip\.id[\s\S]*?tripOwner: trip\.owner[\s\S]*?currentOwner: ownerRef\.current[\s\S]*?groupId: trip\.groupId[\s\S]*?focusedSeconds: s\.seconds/u);
+  assert.match(finish.slice(record, commit), /clearStudyPlanActiveBinding|activePlanBinding/u);
+  assert.match(finish.slice(record, commit), /recordCompletedStudyPlanStep\(value\.studyPlanStorage, activePlanBinding, s\.ended\)/u);
+  assert.ok(record < commit);
+});
+
+test("exercise focus-start notification happens once and only after the active session commits", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const beginAt = app.indexOf("const beginFocus = (input:");
+  const beginEnd = app.indexOf('if (owner === "guest" && withExercises)', beginAt);
+  const begin = app.slice(beginAt, beginEnd);
+  const callers = app.slice(beginEnd, app.indexOf("const autoResumePrepared", beginEnd));
+  const commitStart = begin.indexOf("if (commit({");
+  const notification = begin.indexOf("onStudyExerciseFocusStarted(trip.id)", commitStart);
+
+  assert.notEqual(commitStart, -1);
+  assert.notEqual(notification, -1);
+  assert.ok(commitStart < notification);
+  assert.match(begin, /if \(withExercises\) onStudyExerciseFocusStarted\(trip\.id\)/u);
+  assert.doesNotMatch(callers, /onStudyExerciseFocusStarted\(/u);
+  assert.equal((app.match(/onStudyExerciseFocusStarted\(/gu) ?? []).length, 1);
+});
+
+test("onboarding tutorial renders only the live owner-local control and ordinary edits do not advance it", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const onboardingStart = app.indexOf("canShowStudyOnboarding(loaded, saved.active, saved.studyPlanStorage?.onboarding) ? (");
+  const workspaceStart = app.indexOf("<StudyPlanWorkspace", onboardingStart);
+  const tutorial = app.slice(onboardingStart, workspaceStart);
+  const retrievalStart = app.indexOf("<QuizReviewPreference", workspaceStart);
+  const retrievalEnd = app.indexOf("/>", retrievalStart);
+  const workspaceRetrieval = app.slice(retrievalStart, retrievalEnd);
+  const sourceStart = app.indexOf("function validateStudyTutorialControl(");
+  const sourceEnd = app.indexOf("return (\n    <div", sourceStart);
+  const guideHandlers = app.slice(sourceStart, sourceEnd);
+  const sourceModeEffectStart = app.indexOf("useEffect(() => {\n    if (onboardingPhase !== \"complete\" && onboardingPhase !== \"skipped\") return;");
+  const sourceModeEffectEnd = app.indexOf("const tutorialControlDisabled", sourceModeEffectStart);
+  const sourceModeEffect = app.slice(sourceModeEffectStart, sourceModeEffectEnd);
+
+  assert.notEqual(onboardingStart, -1);
+  assert.match(tutorial, /goalControl=/u);
+  assert.match(tutorial, /durationControl=/u);
+  assert.match(tutorial, /retrievalControl=/u);
+  assert.match(tutorial, /onGuideControl=\{validateStudyTutorialControl\}/u);
+  assert.match(tutorial, /onProgressChange=\{saveStudyOnboardingProgress\}/u);
+  assert.doesNotMatch(tutorial, /<StudyPlanWorkspace/u);
+  assert.doesNotMatch(guideHandlers, /querySelector|scrollIntoView|requestAnimationFrame/u);
+  assert.match(guideHandlers, /if \(control === "retrieval"\) return canStartSessionWithQuizReview\(quizCount, skipQuizReview\)/u);
+  assert.match(sourceModeEffect, /onboardingPhase !== "complete" && onboardingPhase !== "skipped"/u);
+  assert.match(sourceModeEffect, /onboardingSourceChoice === "notes"\) setStudyInput\("notes"\)/u);
+  assert.match(sourceModeEffect, /onboardingSourceChoice === "files"\) setStudyInput\("files"\)/u);
+  assert.doesNotMatch(sourceModeEffect, /studyInput|quizPrefetch|sourceConsent/u);
+  assert.doesNotMatch(workspaceRetrieval, /recordStudyTutorialRetrievalChoice/u);
+  assert.doesNotMatch(app, /recordStudyTutorialRetrievalChoice/u);
 });
 
 test("legacy group replay suppresses personal automatic quiz prefetch while summary keeps manual retrieval", async () => {
@@ -523,7 +802,7 @@ test("goal-first workspace shares one desktop editing surface and quiet focus ce
   assert.match(themeCss, /html\[data-theme="dark"\] \.adventure \.main-area[\s\S]*?background:\s*var\(--page-bg\)/u);
 });
 
-test("mandatory onboarding disables navigation that cannot be opened and gives a blocked-state label", async () => {
+test("mandatory onboarding disables unavailable navigation while the guide remains skippable", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const navStart = app.indexOf("{nav.map((n) => {");
   const navEnd = app.indexOf("})}", navStart);
@@ -532,43 +811,39 @@ test("mandatory onboarding disables navigation that cannot be opened and gives a
   assert.match(nav, /if \(firstUseNeedsWorkspace && n\.id !== "station"\) return null/u);
   assert.match(nav, /disabled=\{firstUseNeedsWorkspace\}/u);
   assert.match(app, /disabled=\{firstUseNeedsWorkspace\}[\s\S]*?go\("account"\)/u);
-  assert.match(app, /firstUseNeedsWorkspace\s*\?\s*"Hoàn tất hướng dẫn để bắt đầu"\s*:\s*online/u);
+  assert.match(app, /firstUseNeedsWorkspace\s*\?\s*"Hướng dẫn có thể bỏ qua"\s*:\s*online/u);
+  assert.doesNotMatch(app, /Hoàn tất hướng dẫn để bắt đầu/u);
   assert.match(app, /online && !authOffline && !needsLogin\s*\?\s*"Trực tuyến"/u);
 });
 
-test("source tutorial shows a return route to the next guide step after jumping into notes or files", async () => {
+test("source tutorial changes only the local input mode and does not query a hidden workspace control", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
-  const notesPanelStart = app.indexOf("data-revision-note-id=");
-  const notesPanelEnd = app.indexOf("</div>", notesPanelStart);
-  const notesPanel = app.slice(notesPanelStart, notesPanelEnd);
-  const filesPanelStart = app.indexOf("hidden={studyInput !== \"files\"}");
-  const filesPanelEnd = app.indexOf("</div>", filesPanelStart);
-  const filesPanel = app.slice(filesPanelStart, filesPanelEnd);
+  const start = app.indexOf("function chooseStudyTutorialSource(");
+  const end = app.indexOf("const tutorialControlDisabled", start);
+  const chooseSource = app.slice(start, end);
 
-  assert.match(app, /function focusStudyTutorialHeading\(\)/u);
-  assert.match(notesPanel, /study-tutorial-return-cue/u);
-  assert.match(filesPanel, /study-tutorial-return-cue/u);
-  assert.match(app, /study-tutorial-return-cue">\s*<span role="status">Bước tiếp theo: điều chỉnh thời lượng\.<\/span>\s*<button/u);
-  assert.doesNotMatch(app, /study-tutorial-return-cue" role="status"/u);
-  assert.match(app, /Quay lại hướng dẫn · Bước 3: thời lượng/u);
-  assert.match(app, /getElementById\("study-onboarding-step-heading"\)/u);
-  const onboarding = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/StudyOnboarding.tsx"), "utf8"));
-  assert.match(onboarding, /const jumpedToSource = previous\.phase === "tutorial" && previous\.step === 1[\s\S]*?progress\.tutorial\.sourceChoice !== "none"/u);
-  assert.match(onboarding, /if \(!moved \|\| progress\.phase !== "tutorial" \|\| jumpedToSource\) return/u);
+  assert.match(chooseSource, /const mode = choice === "files" \? "files" : "notes"/u);
+  assert.match(chooseSource, /setStudyInput\(mode\)/u);
+  assert.doesNotMatch(chooseSource, /querySelector|scrollIntoView|requestAnimationFrame|postGuestAi|request\(/u);
+  assert.doesNotMatch(app, /study-tutorial-return-cue/u);
 });
 
-test("retrieval guide count edits require a valid count, while deliberate toggles can finish the guide", async () => {
+test("retrieval tutorial slot keeps local preferences separate from explicit Continue validation", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
-  const countStart = app.indexOf("onCountChange={(value) => {");
-  const countEnd = app.indexOf("onToggleSkip=", countStart);
-  const countChange = app.slice(countStart, countEnd);
-  const skipStart = app.indexOf("onToggleSkip=", countEnd);
-  const skipEnd = app.indexOf("onPrefetchChange=", skipStart);
-  const skipChange = app.slice(skipStart, skipEnd);
+  const slotStart = app.indexOf("const studyTutorialRetrievalControl =");
+  const slotEnd = app.indexOf(";\n  return (", slotStart);
+  const slot = app.slice(slotStart, slotEnd);
+  const validationStart = app.indexOf("function validateStudyTutorialControl(");
+  const validationEnd = app.indexOf("function chooseStudyTutorialSource(", validationStart);
+  const validation = app.slice(validationStart, validationEnd);
 
-  assert.match(countChange, /setQuizCount\(value\);[\s\S]*?recordStudyTutorialRetrievalChoice\(value\)/u);
-  assert.doesNotMatch(countChange, /recordStudyTutorialRetrievalChoice\(\)/u);
-  assert.match(skipChange, /recordStudyTutorialRetrievalChoice\(\)/u);
+  assert.match(slot, /value=\{quizCount\}/u);
+  assert.match(slot, /onChange=\{\(event\) => setQuizCount/u);
+  assert.match(slot, /aria-pressed=\{skipQuizReview\}/u);
+  assert.match(slot, /onClick=\{\(\) => setSkipQuizReview/u);
+  assert.doesNotMatch(slot, /prefetchEnabled|sourceConsent|recordStudyTutorialRetrievalChoice|generateQuiz|postGuestAi|startGuestAiSession/u);
+  assert.match(validation, /return canStartSessionWithQuizReview\(quizCount, skipQuizReview\)/u);
+  assert.doesNotMatch(validation, /recordStudyTutorialRetrievalChoice|saveStudyOnboardingProgress/u);
 });
 
 test("mobile workspace header keeps the full connection label and separates the breadcrumb from controls", async () => {
