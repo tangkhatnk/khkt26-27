@@ -485,6 +485,53 @@ test("AI plan selection and Start recheck the current unlocked candidate before 
   assert.match(begin, /studyPlanStorage:[\s\S]*?active: trip/u);
 });
 
+test("focus start rechecks every solo candidate after asynchronous preparation returns", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const beginAt = app.indexOf("const beginFocus = (input:");
+  const guestAt = app.indexOf('if (owner === "guest" && withExercises)', beginAt);
+  const guestEnd = app.indexOf("if (sharedTrip && group)", guestAt);
+  const begin = app.slice(beginAt, guestAt);
+  const guest = app.slice(guestAt, guestEnd);
+  const validation = begin.indexOf("if (!canStartSelectedStudyPlanStep(startStorage, trip.id))");
+  const selectedPlan = begin.indexOf("const selectedPlan = startStorage.plans.find");
+  const binding = begin.indexOf("bindStudyPlanStepSession(startStorage, binding)");
+  const anchor = guest.indexOf("const started = await startGuestAiSession");
+  const lateScopeGuard = guest.indexOf("if (!isCurrent()) return;", anchor);
+
+  assert.notEqual(validation, -1);
+  assert.notEqual(selectedPlan, -1);
+  assert.notEqual(binding, -1);
+  assert.notEqual(anchor, -1);
+  assert.notEqual(lateScopeGuard, -1);
+  assert.ok(validation < selectedPlan);
+  assert.ok(validation < binding);
+  assert.ok(lateScopeGuard > anchor);
+  assert.ok(lateScopeGuard < guest.indexOf("beginFocus({", anchor));
+  assert.match(begin.slice(validation, selectedPlan), /setError[\s\S]*?return false/u);
+  assert.match(guest, /captureStudyPlanStartScope\([\s\S]*?studyPlanWorkspaceTransition\.current/u);
+  assert.match(guest, /isStudyPlanStartScopeCurrent\([\s\S]*?current\.current\.studyPlanStorage/u);
+  assert.ok(guest.indexOf("if (!isCurrent()) return;", guest.indexOf("await bindStudyExercises")) < guest.indexOf("await startGuestAiSession"));
+  assert.match(app, /if \(draftTripIdRef\.current !== id\) studyPlanWorkspaceTransition\.current \+= 1/u);
+  assert.match(app, /studyPlanWorkspaceTransition\.current \+= 1;[\s\S]*?updateQuickTripDraft/u);
+});
+
+test("disabled personal Start explains a missing goal or stale/locked step with a recovery action", async () => {
+  const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
+  const startAt = app.indexOf("Bắt đầu buổi học ·");
+  const startEnd = app.indexOf("studyExerciseStartPrompt", startAt);
+  const startPanel = app.slice(app.lastIndexOf("<button", startAt), startEnd);
+
+  assert.match(app, /const studyPlanStartBlockReason = goal\.trim\(\)\.length < 3[\s\S]*?studyPlanStepStartAllowed/u);
+  assert.match(startPanel, /aria-describedby=\{studyPlanStartBlockReason \? "study-plan-start-block-reason" : undefined\}/u);
+  assert.match(startPanel, /id="study-plan-start-block-reason"[\s\S]*?role="status"/u);
+  assert.match(startPanel, /<p className="material-hint" id="study-plan-start-block-reason" role="status">\{studyPlanStartBlockReason\}<\/p>/u);
+  assert.match(app, /"Nhập mục tiêu học ít nhất 3 ký tự để bật nút bắt đầu\."/u);
+  assert.match(app, /"Bước đang chọn chưa mở hoặc bản nháp đã cũ/u);
+  assert.match(startPanel, /document\.getElementById\("study-workspace-goal"\).*?\.focus\(\)/u);
+  assert.match(startPanel, /Chọn bước đang mở/u);
+  assert.match(startPanel, /selectStudyPlanStep\(firstStartableStudyPlanStep\.id, selectedStudyPlan\.id\)/u);
+});
+
 test("only a matching full solo focus receipt is committed with its completed session", async () => {
   const app = normalizedApp(await readFile(resolve(projectRoot, "src/adventure/AdventureApp.tsx"), "utf8"));
   const start = app.indexOf("function finish() {");

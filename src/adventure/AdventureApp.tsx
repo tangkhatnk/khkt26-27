@@ -64,7 +64,11 @@ import {
   updateStudyPlanDraftFromQuickTrip,
   type StudyPlanStorage,
 } from "./studyPlanStorage.ts";
-import { qualifiesStudyPlanStepCompletion } from "./studyPlanProgress.ts";
+import {
+  captureStudyPlanStartScope,
+  isStudyPlanStartScopeCurrent,
+  qualifiesStudyPlanStepCompletion,
+} from "./studyPlanProgress.ts";
 import { StudyPlanWorkspace, type StudyPlanStepPatch } from "./StudyPlanWorkspace";
 import { buildStudyPlanRequest, generateStudyPlan } from "@/services/studyPlanApi";
 import { isCurrentStudyPlanRequest } from "./studyPlanFlow";
@@ -362,7 +366,9 @@ function AdventureWorkspace() {
   const [draftTripId, setDraftTripIdState] = useState<string>(() => crypto.randomUUID());
   const draftTripIdRef = useRef(draftTripId);
   const draftSessionIdsRef = useRef<TripDraftSessionIds>({ solo: draftTripId, groups: new Map() });
+  const studyPlanWorkspaceTransition = useRef(0);
   function setDraftTripId(id: string) {
+    if (draftTripIdRef.current !== id) studyPlanWorkspaceTransition.current += 1;
     draftTripIdRef.current = id;
     setDraftTripIdState(id);
   }
@@ -924,6 +930,13 @@ function AdventureWorkspace() {
   const quizPrefetchSettings = studyPlanStorage.draft.quizPrefetch;
   const selectedStudyPlan = studyPlanStorage.plans.find((plan) => plan.id === studyPlanStorage.draft.selectedPlanId);
   const studyPlanStepStartAllowed = canStartSelectedStudyPlanStep(studyPlanStorage, draftTripId);
+  const firstStartableStudyPlanStep = selectedStudyPlan?.steps.find((step) =>
+    canSelectStudyPlanStep(studyPlanStorage, selectedStudyPlan.id, step.id));
+  const studyPlanStartBlockReason = goal.trim().length < 3
+    ? "Nhập mục tiêu học ít nhất 3 ký tự để bật nút bắt đầu."
+    : mode !== "group" && selectedStudyPlan && !studyPlanStepStartAllowed
+      ? "Bước đang chọn chưa mở hoặc bản nháp đã cũ. Hãy chọn bước đang mở trong lộ trình phía trên."
+      : "";
   const sourceForStudyPlan = useMemo(() => {
     try {
       const text = quizSourceText(documentText, sources, materials);
@@ -2085,11 +2098,15 @@ function AdventureWorkspace() {
             // Never clear it while any active trip is still present.
             startStorage = clearStudyPlanActiveBinding(startStorage, startStorage.activePlanBinding.sessionId);
           }
+          if (!canStartSelectedStudyPlanStep(startStorage, trip.id)) {
+            setError("Bản nháp đã đổi trước khi bắt đầu. Hãy mở lại bước hoặc buổi học tự do rồi thử lại.");
+            return false;
+          }
           const selectedPlan = startStorage.plans.find((plan) => plan.id === startStorage.draft.selectedPlanId);
           if (selectedPlan?.origin === "ai") {
             const stepId = startStorage.draft.selectedStepId;
             const binding = stepId ? { sessionId: trip.id, planId: selectedPlan.id, stepId } : null;
-            if (!binding || !canStartSelectedStudyPlanStep(startStorage, trip.id)) {
+            if (!binding) {
               setError("Bước được chọn đã thay đổi hoặc còn khóa. Hãy chọn bước đang mở rồi thử lại.");
               return false;
             }
@@ -2140,6 +2157,10 @@ function AdventureWorkspace() {
           const ownerId = ownerRef.current;
           const authGeneration = getAuthGeneration();
           const workspaceGeneration = materialSummaryWorkspaceGeneration.current;
+          const studyPlanScope = captureStudyPlanStartScope(
+            current.current.studyPlanStorage,
+            studyPlanWorkspaceTransition.current,
+          );
           const isCurrent = () => isGuestExerciseStartScopeCurrent({
             ownerId,
             expectedOwnerId: ownerId,
@@ -2152,7 +2173,13 @@ function AdventureWorkspace() {
             workspaceLive: workspaceLive.current,
             hasActiveSession: Boolean(current.current.active),
             preparationReady: isStudyExercisePreparationReadyForSession(sessionId),
-          });
+          }) && isStudyPlanStartScopeCurrent(
+            studyPlanScope,
+            captureStudyPlanStartScope(
+              current.current.studyPlanStorage,
+              studyPlanWorkspaceTransition.current,
+            ),
+          );
           if (tripStartInFlight.current) return;
           tripStartInFlight.current = true;
           void run(async () => {
@@ -2955,6 +2982,7 @@ function AdventureWorkspace() {
       return;
     }
     if (!commit({ ...current.current, studyPlanStorage: savedStorage })) return;
+    studyPlanWorkspaceTransition.current += 1;
     draftSessionIdsRef.current.solo = reviewSessionId;
     updateQuickTripDraft(quickTripDraft, reviewDraft);
     setGoal(plan.goal);
@@ -3152,6 +3180,7 @@ function AdventureWorkspace() {
         studyPlanResetSuppression.current = false;
         throw new Error("Không lưu được bản nháp lộ trình trên thiết bị này.");
       }
+      studyPlanWorkspaceTransition.current += 1;
       updateQuickTripDraft(quickTripDraft, {
         goal: requestBody.goal,
         topic: scope.topic,
@@ -3328,6 +3357,7 @@ function AdventureWorkspace() {
       ...current.current,
       studyPlanStorage: nextStorage,
     })) return false;
+    studyPlanWorkspaceTransition.current += 1;
     updateQuickTripDraft(quickTripDraft, {
       goal: nextGoal,
       topic: nextTopicId,
@@ -3942,6 +3972,7 @@ function AdventureWorkspace() {
                       <p className="material-hint">Mục tiêu có thể xuất hiện trong lịch sử phiên học. Tránh ghi thông tin riêng tư vào mục tiêu.</p>
                       <button
                         className="primary"
+                        aria-describedby={studyPlanStartBlockReason ? "study-plan-start-block-reason" : undefined}
                         disabled={
                           busy || studyGuideNeedsConfirmation || !!active || goal.trim().length < 3 ||
                           !isValidStudyMinutes(minutes) || !validBreaks ||
@@ -3952,6 +3983,16 @@ function AdventureWorkspace() {
                       >
                         Bắt đầu buổi học · {Number.isFinite(minutes) ? minutes : "…"} phút →
                       </button>
+                      {studyPlanStartBlockReason && <>
+                        <p className="material-hint" id="study-plan-start-block-reason" role="status">{studyPlanStartBlockReason}</p>
+                        {goal.trim().length < 3 && <button type="button" onClick={() => {
+                          document.getElementById("study-workspace-goal")?.focus();
+                        }}>Nhập mục tiêu</button>}
+                        {selectedStudyPlan && !studyPlanStepStartAllowed && firstStartableStudyPlanStep && <button
+                          type="button"
+                          onClick={() => selectStudyPlanStep(firstStartableStudyPlanStep.id, selectedStudyPlan.id)}
+                        >Chọn bước đang mở</button>}
+                      </>}
                       {studyExerciseStartPrompt && pendingStudyExercise?.ownerId === owner &&
                         pendingStudyExercise.plannedSessionId === draftTripId && <div className="info-box study-exercise-start-prompt" role="group" aria-label="Bài tập đang được tạo">
                           <p>AI vẫn đang tạo đề. Bạn có thể hủy lần bắt đầu này để chờ, hoặc bỏ qua bài tập và bắt đầu phiên học ngay.</p>

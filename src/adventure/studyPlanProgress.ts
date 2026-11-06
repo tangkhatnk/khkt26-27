@@ -3,7 +3,37 @@ import {
   studyElapsedSeconds,
   type BreakPlan,
 } from "../../backend/src/adventure/domain.ts";
-import type { StudyPlanSessionBinding } from "./studyPlanStorage.ts";
+import type { StudyPlanSessionBinding, StudyPlanStorage } from "./studyPlanStorage.ts";
+
+export type StudyPlanStartScope = {
+  transition: number;
+  candidateSessionId: string | null;
+  selectedPlanId: string | null;
+  selectedStepId: string | null;
+};
+
+/** Capture the owner-local selection that an asynchronous start is allowed to commit. */
+export function captureStudyPlanStartScope(
+  storage: Pick<StudyPlanStorage, "draft"> | null | undefined,
+  transition: number,
+): StudyPlanStartScope {
+  return {
+    transition,
+    candidateSessionId: storage?.draft.candidateSessionId ?? null,
+    selectedPlanId: storage?.draft.selectedPlanId ?? null,
+    selectedStepId: storage?.draft.selectedStepId ?? null,
+  };
+}
+
+export function isStudyPlanStartScopeCurrent(
+  expected: StudyPlanStartScope,
+  current: StudyPlanStartScope,
+): boolean {
+  return expected.transition === current.transition &&
+    expected.candidateSessionId === current.candidateSessionId &&
+    expected.selectedPlanId === current.selectedPlanId &&
+    expected.selectedStepId === current.selectedStepId;
+}
 
 export type StudyPlanStepCompletionEvidence = {
   binding: StudyPlanSessionBinding | null;
